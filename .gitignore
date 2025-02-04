@@ -39,7 +39,7 @@ Thirdparty/CompiledLibs/
 FSLAM/Thirdparty/CompiledLibs/
 FSLAM/Thirdparty/
 
-Thirdparty/opencv-3.4.6/
+Thirdparty/opencv*/
 
 *.avi
 

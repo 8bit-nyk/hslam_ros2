@@ -1,10 +1,15 @@
 SET(PROJECT_NAME HSLAM)
+CMAKE_MINIMUM_REQUIRED(VERSION 2.9)
+
+set(OpenCV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/share/OpenCV)
+set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake)
+#set(G2O_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake/g2o)
+Set(G2O_INCLUDE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/include/g2o)
+# Ensure these paths are set correctly before calling project()
+message ("OPENCV Directory: ${OpenCV_DIR}")
+message("The CMAKE prefix path is: ${CMAKE_PREFIX_PATH}")
 
 PROJECT(${PROJECT_NAME})
-CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
-#set(CMAKE_VERBOSE_MAKEFILE ON)
-set(HARDCODED_PROJECT_DIR /home/pavanjay/lab) # Hardcoded path (replace with your path) [pavan]
-
 #set(BUILD_TYPE Release)
 set(BUILD_TYPE RelWithDebInfo)
 
@@ -15,18 +20,13 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(OpenCV_DIR /colcon_ws/src/FSLAM/Thirdparty/CompiledLibs/lib/cmake/opencv4)
-message ("OPENCV Directory: ${OpenCV_DIR}")
-message("OpenCV_LIBS=${OpenCV_LIBS}")
-set(CMAKE_PREFIX_PATH /colcon_ws/src/FSLAM/Thirdparty/CompiledLibs/lib/cmake)
-message ("The CMAKE prefix path is: ${CMAKE_PREFIX_PATH}")
 
 # required libraries
 find_package(SuiteParse REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Boost COMPONENTS system thread) 
-#find_package(OpenCV 4.9.0 REQUIRED)
-find_package(OpenCV 4.9.0 REQUIRED PATHS ${HARDCODED_PROJECT_DIR}/colcon_ws/src/FSLAM/Thirdparty/CompiledLibs NO_DEFAULT_PATH)
+find_package(OpenCV 4.9.0 REQUIRED)
+# find_package(OpenCV 4.9.0 REQUIRED PATHS ${HARDCODED_PROJECT_DIR}/colcon_ws/src/FSLAM/Thirdparty/CompiledLibs NO_DEFAULT_PATH)
 find_package(G2O REQUIRED)
 find_package(DBoW3 REQUIRED) #PATHS ~/colcon_ws/src/FSLAM/Thirdparty/CompiledLibs)
 
