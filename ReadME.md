@@ -1,85 +1,87 @@
-# Project Title
-
-FSLAM (Fusion Simultaneous Localization and Mapping) Project.
-
-A containerized "ready-to-use" SLAM application that leverages both direct and indirect methods.
-
-### Related Publications:
-[HSLAM]Younes, G. (2021). A Unified Hybrid Formulation for Visual SLAM (Doctoral dissertation).
-**[PDF] (https://scholarworks.aub.edu.lb/bitstream/handle/10938/22253/YounesGeorges_2021.pdf?sequence=5)**
-
-Please cite the paper if used in an academic context.
-
-## Table of Contents
-
-- [Project Description](#project-description)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Features](#features)
-- [Contributing](#contributing)
-- [License](#license)
+# HSLAM: Hybrid Direct-Indirect Monocular Visual SLAM
 
 ## Project Description
 
-The FSLAM project is an implementation of a visual simultaneous localization and mapping algorithm. 
-It utilizes the ROS (Robot Operating System) Noetic and is designed for Ubuntu 20.04.
+The HSLAM project is a C++ implementation of a monocular visual simultaneous localization and mapping algorithm that combines the strengths of both direct and indirect methods for improved performance in visual SLAM tasks.
+
+In this repository we introduce an update ROS 2 version for better reproducibility. This documentation is tested using ROS2 humble on Ubuntu 22.04.
+
+This is the current up to date development branch for the HSLAM project, legacy imlplementations can be found in the [legacy branch](#related-legacy-projects).
+
+
+
+
+### Related Publications:
+### Related Legacy projects:
+
+Please cite the paper if used in an academic context.
+
+
 
 
 
 ## Installation
+### Prepare project and colcon workspace
+To build the HSLAM project, follow these steps:
 
-To use this Dockerfile and build the FSLAM project, follow these steps:
-
-1. Install Docker on your machine.
-2. Create a new directory and navigate to it in the terminal.
-3. Clone this repository into the previously created directory.
-4. Open a terminal and navigate to the directory containing the Dockerfile and project files.
+1. Create the ros2 workspace directory. For example"
 ```bash
-    cd ~/<YOUR_PATH>/fslam_ros_docker
+mkdir hslam_ws
 ```
-6. Run the following command to build the Docker image:
-
+2. Clone this repository inside the ros2 workspace you just created.
 ```bash
-    docker build -t fslam .
+git clone 
 ```
-The build will start using the Dockerfile structure, which is divided into multiple stages. 
-In the first stage, it sets up the base image with Ubuntu 20.04 and ROS Noetic using OSRF official noetic image. It also installs the necessary dependencies for catkin tools.
-In the second stage, it installs additional dependencies and the Realsense SDK. These dependencies include various libraries and tools required for camera support, graphics, system functionality, and GUI elements. Additionally, it downloads and extracts third-party libraries, including Ceres Solver and OpenCV with OpenCV Contrib.
-The project files are then copied into the container, and the Thirdparty libraries are built using the provided `build.sh` script. After that, the FSLAM project is built using CMake, and the `fslam_ros` wrapper is copied and built using catkin.
-Finally, the container's entry point is specified, and calibration files are copied into the project directory.
+3. rename to *src* , required later for the colcon build .
+
+### Building *Thridparty* libraries 
+
+1. In a terminal. Navigate to Thirdparty directory, For example:
+```bash
+    cd ~/hslam_ws/src/HSLAM/Thirdparty
+
+```
+2. Build Thirparty libraries using the provided shell script.
+```bash
+    sudo chmod +x build.sh && ./build.sh
+```
+### Building the main HSLAM application:
+
+1. Navigate to the HSLAM directory.
+```bash
+    cd /hslam_ws/src/FSLAM
+```
+2. Build FSLAM.
+```bash
+    mkdir -p build && cd build && cmake .. && make -j 10
+```
+5. Navigate to the workspace directory.
+```bash
+    cd /hslam_ws
+```
+6. Build the workspace.
+```bash
+    colcon build --packages-select hslam_ros2
+```
 
 ## Usage
 
-To run the FSLAM project you will need to run two containers of the same image.
-One to to publish images from the camera and the other to run the FSLAM main application.
-
-0. Allow access to containers:
+To run the HSLAM run:
+1. In the first terminal run the following command to open a camera stream through ROS and publish the camera's images unto a ROS topic:
 ``` bash
-    xhost +
+    ros2 launch realsense2_camera rs_launch.py
 ```
 
-1. Open two terminals and execute the following command in each:
+2. In the second terminal, execute this command to run the FSLAM algorithm on the image stream.
 ``` bash
-    docker run -it --net=host --privileged -e DISPLAY=unix$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix:rw --device /dev/video0:/dev/video0  fslam /bin/bash
-```
-This command starts the container and provides an interactive terminal within it.
-
-2. In the first terminal run the following command to open a camera stream through ROS and publish the camera's images unto a ROS topic:
-``` bash
-    roslaunch usb_cam usb_cam-test.launch
-```
-A display window will pop with the camera's stream.
-
-3. In the second terminal, execute this command to run the FSLAM algorithm on the image stream.
-``` bash
-    rosrun fslam_ros fslam_live image:=/usb_cam/image_raw calib=/catkin_ws/src/res/camera.txt gamma=/catkin_ws/src/res/pcalib.txt vignette=/catkin_ws/src/res/vignette.png
+    ros2 launch hslam_ros2 hslam.launch.py
 ```
 Start moving the camera/computer around and perform SLAM.
 
 ## Features
 
 - Utilizes the FSLAM algorithm for simultaneous localization and mapping.
-- Integrates with ROS Noetic and utilizes various ROS functionalities.
+- Integrates with ROS Foxy and utilizes various ROS functionalities.
 - Supports camera integration, including Realsense cameras.
 - Provides a wrapper for ROS integration and additional functionality.
 
