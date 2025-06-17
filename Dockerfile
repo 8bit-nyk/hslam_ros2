@@ -53,9 +53,9 @@ RUN apt-get install -y \
     unzip
 
 # Set the working directory
-WORKDIR /colcon_ws/src/FSLAM/Thirdparty
+WORKDIR /colcon_ws/src/HSLAM/Thirdparty
 # Copy Thirdparty folder to the container
-COPY Thirdparty /colcon_ws/src/FSLAM/Thirdparty
+COPY Thirdparty /colcon_ws/src/HSLAM/Thirdparty
 #Download additional thirdparty libraries
 ARG cvVersion=4.9.0
 ARG DL_opencv="https://github.com/opencv/opencv/archive/${cvVersion}.zip"
@@ -72,21 +72,21 @@ RUN wget ceres-solver.org/ceres-solver-1.14.0.tar.gz \
 #build Thirparty libraries using script(cmake)
 RUN chmod +x build.sh && ./build.sh
 #Copy project files
-WORKDIR /colcon_ws/src/FSLAM
-COPY FSLAM /colcon_ws/src/FSLAM
-#build FSLAM project using cmake
+WORKDIR /colcon_ws/src/HSLAM
+COPY HSLAM /colcon_ws/src/HSLAM
+#build HSLAM project using cmake
 RUN mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=RelwithDebInfo && make -j 10
-#copy fslam_ros wrapper and build using colcon
-COPY fslam_ros /colcon_ws/src/fslam_ros
+#copy hslam_ros wrapper and build using colcon
+COPY hslam_ros /colcon_ws/src/hslam_ros
 WORKDIR /colcon_ws/
-RUN colcon build --packages-select fslam_ros
+RUN colcon build --packages-select hslam_ros
 
 #Source colcon and specify the entry point of the container    
 RUN sed --in-place --expression \
       '$isource "/colcon_ws/install/setup.bash"' \
       /ros_entrypoint.sh
 #Copy calibration files
-WORKDIR /colcon_ws/src/FSLAM
+WORKDIR /colcon_ws/src/HSLAM
 COPY res /colcon_ws/src/res
 WORKDIR /colcon_ws
 CMD ["bash"]

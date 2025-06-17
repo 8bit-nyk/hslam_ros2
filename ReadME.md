@@ -49,9 +49,9 @@ git clone
 
 1. Navigate to the HSLAM directory.
 ```bash
-    cd /hslam_ws/src/FSLAM
+    cd /hslam_ws/src/HSLAM
 ```
-2. Build FSLAM.
+2. Build HSLAM.
 ```bash
     mkdir -p build && cd build && cmake .. && make -j 10
 ```
@@ -72,7 +72,7 @@ To run the HSLAM run:
     ros2 launch realsense2_camera rs_launch.py
 ```
 
-2. In the second terminal, execute this command to run the FSLAM algorithm on the image stream.
+2. In the second terminal, execute this command to run the HSLAM algorithm on the image stream.
 ``` bash
     ros2 launch hslam_ros2 hslam.launch.py
 ```
@@ -80,14 +80,14 @@ Start moving the camera/computer around and perform SLAM.
 
 ## Features
 
-- Utilizes the FSLAM algorithm for simultaneous localization and mapping.
+- Utilizes the HSLAM algorithm for simultaneous localization and mapping.
 - Integrates with ROS Foxy and utilizes various ROS functionalities.
 - Supports camera integration, including Realsense cameras.
 - Provides a wrapper for ROS integration and additional functionality.
 
 ## Contributing
 
-Contributions to the FSLAM project are welcome. If you would like to contribute, please follow these steps:
+Contributions to the HSLAM project are welcome. If you would like to contribute, please follow these steps:
 
 1. Fork the repository.
 2. Create a new branch for your feature or bug fix.

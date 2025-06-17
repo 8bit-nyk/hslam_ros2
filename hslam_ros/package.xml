@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>fslam_ros</name>
+  <name>hslam_ros</name>
   <version>1.0.0</version>
-  <description>ROS Wrapper FSLAM.</description>
+  <description>ROS Wrapper HSLAM.</description>
 
   <author email="engelj-@in-dot-tum-dot.de">Jakob Engel</author>
   <maintainer email="engelj-@in-dot-tum-dot.de">Jakob Engel</maintainer>

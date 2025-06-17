@@ -4,5 +4,5 @@ ros2 run image_publisher image_publisher_node --ros-args \
     -p publish_rate:=20.0
 
 
-ros2 run fslam_ros fslam_live image:=/camera/image calib=/home/aub/datasets/boreas/boreas-2021-01-26-10-59/calib/camera_cropped.txt mode=2
+ros2 run hslam_ros fslam_live image:=/camera/image calib=/home/aub/datasets/boreas/boreas-2021-01-26-10-59/calib/camera_cropped.txt mode=2
 

@@ -126,7 +126,7 @@ void parseArgument(char* arg)
 		if(option==1)
 		{
 			LoopClosure = true;
-			printf("fslam_ros :LOOP CLOSURE IS TURNED ON!\n");
+			printf("hslam_ros :LOOP CLOSURE IS TURNED ON!\n");
 		}
 		return;
 	}
@@ -134,7 +134,7 @@ void parseArgument(char* arg)
 	if(1==sscanf(arg,"vocabPath=%s",buf))
 	{
 		vocabPath = buf;
-		printf("fslam_ros : loading Vocabulary from %s!\n", vocabPath.c_str());
+		printf("hslam_ros : loading Vocabulary from %s!\n", vocabPath.c_str());
 		return;
 	}
 
@@ -281,7 +281,7 @@ void vidCb(const sensor_msgs::msg::Image::ConstSharedPtr img)
 		delete rimg; delete gimg; delete bimg; delete img;
 	}
 
-    undistImg->timestamp = img->header.stamp.sec + img->header.stamp.nanosec * 1e-9; // (UNSURE pavan) relay the timestamp to FSLAM
+    undistImg->timestamp = img->header.stamp.sec + img->header.stamp.nanosec * 1e-9; // (UNSURE pavan) relay the timestamp to HSLAM
 	fullSystem->addActiveFrame(undistImg, frameID);
 	frameID++;
 	delete undistImg;
@@ -414,7 +414,7 @@ int main( int argc, char** argv )
 	}
 	fullSystem->blockUntilMappingIsFinished();
 
-    printf("fslam_ros main cpp has been interrupted.\n");
+    printf("hslam_ros main cpp has been interrupted.\n");
     rclcpp::shutdown();
 	fullSystem->BAatExit();
 			

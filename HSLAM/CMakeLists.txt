@@ -26,13 +26,13 @@ find_package(SuiteParse REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Boost COMPONENTS system thread) 
 find_package(OpenCV 4.9.0 REQUIRED)
-# find_package(OpenCV 4.9.0 REQUIRED PATHS ${HARDCODED_PROJECT_DIR}/colcon_ws/src/FSLAM/Thirdparty/CompiledLibs NO_DEFAULT_PATH)
+# find_package(OpenCV 4.9.0 REQUIRED PATHS ${HARDCODED_PROJECT_DIR}/colcon_ws/src/HSLAM/Thirdparty/CompiledLibs NO_DEFAULT_PATH)
 find_package(G2O REQUIRED)
-find_package(DBoW3 REQUIRED) #PATHS ~/colcon_ws/src/FSLAM/Thirdparty/CompiledLibs)
+find_package(DBoW3 REQUIRED) #PATHS ~/colcon_ws/src/HSLAM/Thirdparty/CompiledLibs)
 
 # optional libraries
 find_package(LibZip QUIET)
-find_package(Pangolin 0.2 QUIET)# PATHS ~/colcon_ws/src/FSLAM/Thirdparty/CompiledLibs)
+find_package(Pangolin 0.2 QUIET)# PATHS ~/colcon_ws/src/HSLAM/Thirdparty/CompiledLibs)
 
 
 # flags

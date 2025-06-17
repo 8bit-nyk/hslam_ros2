@@ -36,11 +36,12 @@ build/
 result.txt
 
 Thirdparty/CompiledLibs/
-FSLAM/Thirdparty/CompiledLibs/
-FSLAM/Thirdparty/
+HSLAM/Thirdparty/CompiledLibs/
+
+HSLAM/Thirdparty/
 
 Thirdparty/opencv*/
-FSLAM/logs
+HSLAM/logs
 *.avi
 
 analytics
