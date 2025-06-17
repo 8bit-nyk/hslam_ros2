@@ -40,7 +40,7 @@ FSLAM/Thirdparty/CompiledLibs/
 FSLAM/Thirdparty/
 
 Thirdparty/opencv*/
-
+FSLAM/logs
 *.avi
 
 analytics

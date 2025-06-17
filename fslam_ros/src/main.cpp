@@ -25,6 +25,7 @@ Based on and inspired by DSO project by Jakob Engel
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include "cv_bridge/cv_bridge.h"
+#include <rclcpp/qos.hpp>
 
 using namespace HSLAM;
 
@@ -38,6 +39,7 @@ bool useColour = false;
 int mode = 1;
 int preset= 1;
 
+// rclcpp::QoS qos_profile = rclcpp::QoS(rclcpp::QoSInitialization::from_rmw(rmw_qos_profile_sensor_data));
 
 void parseArgument(char* arg)
 {
