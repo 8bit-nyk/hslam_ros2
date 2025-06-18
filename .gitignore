@@ -39,9 +39,11 @@ Thirdparty/CompiledLibs/
 HSLAM/Thirdparty/CompiledLibs/
 
 HSLAM/Thirdparty/
-
+run_scripts/
+Results/
 Thirdparty/opencv*/
 HSLAM/logs
 *.avi
 
 analytics
+cursor_agent/live_dso_camera.md

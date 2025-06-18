@@ -1,5 +1,5 @@
 # HSLAM: Hybrid Direct-Indirect Monocular Visual SLAM
-
+### This is the most up to date version of the HSLAM project, for legacy versions please refer to the [legacy branch](#related-legacy-projects). 
 ## Project Description
 
 The HSLAM project is a C++ implementation of a monocular visual simultaneous localization and mapping algorithm that combines the strengths of both direct and indirect methods for improved performance in visual SLAM tasks.
@@ -12,13 +12,42 @@ This is the current up to date development branch for the HSLAM project, legacy 
 
 
 ### Related Publications:
-### Related Legacy projects:
-
 Please cite the paper if used in an academic context.
 
+[H-SLAM: Hybrid direct--indirect visual SLAM](https://doi.org/10.1016/j.robot.2024.104729)
+
+    ```bibtex
+    @article{younes2024h,
+    title={H-SLAM: Hybrid direct--indirect visual SLAM},
+    author={Younes, Georges and Khalil, Douaa and Zelek, John and Asmar, Daniel},
+    journal={Robotics and Autonomous Systems},
+    volume={179},
+    pages={104729},
+    year={2024},
+    publisher={Elsevier}
+    }
+    ```
+
+[Inline Photometrically Calibrated Hybrid Visual SLAM](https://doi.org/10.1109/IROS58592.2024.10802153)
 
 
+```bibtex
+@inproceedings{abboud2024inline,
+  title={Inline Photometrically Calibrated Hybrid Visual SLAM},
+  author={Abboud, Nicolas and Sayour, Malak and Elhajj, Imad H and Zelek, John and Asmar, Daniel},
+  booktitle={2024 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},
+  pages={10089--10096},
+  year={2024},
+  organization={IEEE}
+}
+```
 
+
+### Related Legacy projects:
+
+[HSLAM C++ original implementation](https://https://github.com/8bit-nyk/HSLAM)  
+[ROS1 Wrapper for HSLAM](https://github.com/8bit-nyk/hslam_ros)  
+[Dockerized version of HSLAM](https://github.com/8bit-nyk/hslam_ros_docker)
 
 ## Installation
 ### Prepare project and colcon workspace
