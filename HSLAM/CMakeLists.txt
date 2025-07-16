@@ -95,6 +95,7 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/src
   ${PROJECT_SOURCE_DIR}/Thirdparty/Sophus
   ${PROJECT_SOURCE_DIR}/Thirdparty/sse2neon
+  ${PROJECT_SOURCE_DIR}/Thirdparty/tum_benchmark
   ${EIGEN3_INCLUDE_DIR}
   ${G2O_INCLUDE_DIR}
 ) 

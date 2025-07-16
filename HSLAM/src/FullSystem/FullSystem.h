@@ -18,6 +18,7 @@
 #include "FullSystem/PixelSelector2.h"
 
 #include <math.h>
+#include <opencv2/opencv.hpp>
 
 
 namespace HSLAM
@@ -140,6 +141,9 @@ public:
 	// adds a new frame, and creates point & residual structs.
 	void addActiveFrame(ImageAndExposure* image, int id);
 
+	// RGB-D tracking method - for now, calls TrackMonocular
+	void TrackRGBD(const cv::Mat& rgb_img, const cv::Mat& depth_img, const double timestamp);
+
 	// marginalizes a frame. drops / marginalizes points & residuals.
 	void marginalizeFrame(FrameHessian* frame);
 	void blockUntilMappingIsFinished();
@@ -163,6 +167,8 @@ public:
 	bool initialized;
 	bool linearizeOperation;
 
+	// RGB-D depth integration support
+	cv::Mat currentDepthImage;  // Current depth image for depth integration
 
 	void setGammaFunction(float* BInv);
 	void setOriginalCalib(const VecXf &originalCalib, int originalW, int originalH);

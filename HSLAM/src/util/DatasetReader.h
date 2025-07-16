@@ -530,9 +530,46 @@ private:
 
 		if((int)getNumImages() != (int)timestamps.size())
 		{
-			printf("set timestamps and exposures to zero!\n");
+			printf("times.txt not found or incomplete, attempting to extract timestamps from filenames...\n");
 			exposures.clear();
 			timestamps.clear();
+			
+			// Try to extract timestamps from filenames (TUM RGB-D format: timestamp.png)
+			for(int i = 0; i < (int)getNumImages(); i++)
+			{
+				std::string filename = files[i];
+				
+				// Get just the filename part (remove directory path)
+				size_t slash_pos = filename.find_last_of('/');
+				if (slash_pos != std::string::npos) {
+					filename = filename.substr(slash_pos + 1);
+				}
+				
+				// Extract timestamp from filename
+				size_t dot_pos = filename.find_last_of('.');
+				if (dot_pos != std::string::npos) {
+					std::string timestamp_str = filename.substr(0, dot_pos);
+					try {
+						double timestamp = std::stod(timestamp_str);
+						timestamps.push_back(timestamp);
+						printf("Extracted timestamp from filename %s: %.6f\n", filename.c_str(), timestamp);
+					} catch (const std::exception& e) {
+						printf("Failed to extract timestamp from filename %s, using fallback\n", filename.c_str());
+						timestamps.clear();
+						break;
+					}
+				} else {
+					printf("No extension found in filename %s, using fallback\n", filename.c_str());
+					timestamps.clear();
+					break;
+				}
+			}
+			
+			if(timestamps.size() != getNumImages())
+			{
+				printf("Filename timestamp extraction failed, using default timestamps\n");
+				timestamps.clear();
+			}
 		}
 
 		if((int)getNumImages() != (int)exposures.size() || !exposuresGood)

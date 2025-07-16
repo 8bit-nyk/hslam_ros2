@@ -34,6 +34,8 @@
 build/
 
 result.txt
+
+
 HSLAM/Thirdparty
 HSLAM/run_scripts/
 HSLAM/results/
@@ -44,8 +46,14 @@ HSLAM/docs/papers
 HSLAM/docs/prompts
 .cursorrules
 
+HSLAM/mats
+HSLAM/docs/papers
+HSLAM/docs/prompts
+.cursorrules
+
 *.avi
 
 analytics
 cursor_agent/live_dso_camera.md
+.vscode/settings.json
 .vscode/settings.json

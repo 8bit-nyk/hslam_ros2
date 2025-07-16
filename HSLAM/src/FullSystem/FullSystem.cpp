@@ -1076,6 +1076,60 @@ void FullSystem::flagPointsForRemoval()
  * @param imuData 
  * @param gtData 
  */
+/**
+ * @brief RGB-D tracking method - establishes the pipeline for future depth integration
+ * 
+ * For now, this method simply calls the existing monocular tracking pipeline.
+ * The depth image is loaded and validated but not yet used in the tracking process.
+ * This establishes the interface for future depth integration in Milestone 2.2.
+ * 
+ * @param rgb_img RGB image as CV_32FC1
+ * @param depth_img Depth image as CV_32FC1 in meters
+ * @param timestamp Frame timestamp
+ */
+void FullSystem::TrackRGBD(const cv::Mat& rgb_img, const cv::Mat& depth_img, const double timestamp)
+{
+    if(isLost) return;
+    
+    // Validate input images
+    if(rgb_img.empty() || depth_img.empty()) {
+        printf("ERROR: Empty RGB or depth image in TrackRGBD\n");
+        return;
+    }
+    
+    if(rgb_img.type() != CV_32FC1) {
+        printf("ERROR: RGB image must be CV_32FC1\n");
+        return;
+    }
+    
+    if(depth_img.type() != CV_32FC1) {
+        printf("ERROR: Depth image must be CV_32FC1\n");
+        return;
+    }
+    
+    if(rgb_img.size() != depth_img.size()) {
+        printf("ERROR: RGB and depth images must have the same dimensions\n");
+        return;
+    }
+    
+    // Log RGB-D data loading for verification
+    printf("TrackRGBD: Processing frame with timestamp %.6f, RGB %dx%d, Depth %dx%d\n", 
+           timestamp, rgb_img.cols, rgb_img.rows, depth_img.cols, depth_img.rows);
+    
+    // Store depth image for use in makeNewTraces
+    currentDepthImage = depth_img.clone();
+    
+    // Create ImageAndExposure from RGB for compatibility with existing pipeline
+    ImageAndExposure* img = new ImageAndExposure(rgb_img.cols, rgb_img.rows, timestamp);
+    memcpy(img->image, rgb_img.data, rgb_img.cols * rgb_img.rows * sizeof(float));
+    
+    
+    static int frame_id = 0;
+    addActiveFrame(img, frame_id++);
+    
+    delete img;
+}
+
 void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 {
 
@@ -1583,7 +1637,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 	// =========================== add new Immature points & new residuals =========================
-	makeNewTraces(fh, 0);
+	float* depthData = (!currentDepthImage.empty()) ? (float*)currentDepthImage.data : nullptr;
+	makeNewTraces(fh, depthData);
 
 
 
@@ -1786,6 +1841,31 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 			
 			ImmaturePoint *impt = new ImmaturePoint(x, y, newFrame, selectionMap[i], &Hcalib);
 			
+			// RGB-D Depth Integration: Use ground truth depth if available
+			if (gtDepth != nullptr)
+			{
+				float depth = gtDepth[i];  // Access depth at pixel (x, y)
+				
+				// Validate depth value (TUM RGB-D depth is scaled by 1/5000.0, values in meters)
+				if (depth > 0.1f && depth < 10.0f && std::isfinite(depth))
+				{
+					float idepth = 1.0f / depth;
+					float uncertainty = 0.01f * idepth;  // Small uncertainty for ground truth depth
+					
+					impt->idepth_min = std::max(0.0f, idepth - uncertainty);
+					impt->idepth_max = idepth + uncertainty;
+					
+					// Log first few depth-integrated points for verification
+					static int depthPointCount = 0;
+					if (depthPointCount < 10)
+					{
+						printf("Depth-integrated point %d: (u=%d, v=%d) depth=%.3fm, idepth=%.3f, range=[%.3f, %.3f]\n", 
+							   depthPointCount, x, y, depth, idepth, impt->idepth_min, impt->idepth_max);
+						depthPointCount++;
+					}
+				}
+			}
+			
 			// indirect!: Indirect point handling
 			if (selectionMap[i] > 4) //getPriors
 			{
@@ -1820,7 +1900,20 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 
 	}
 
-	//printf("MADE %d IMMATURE POINTS!\n", (int)newFrame->immaturePoints.size());
+	int depthIntegratedCount = 0;
+	if (gtDepth != nullptr)
+	{
+		for (const auto& impt : newFrame->immaturePoints)
+		{
+			if (impt->idepth_max != NAN && impt->idepth_max > impt->idepth_min)
+			{
+				depthIntegratedCount++;
+			}
+		}
+	}
+	
+	printf("MADE %d IMMATURE POINTS (%d with depth integration)!\n", 
+		   (int)newFrame->immaturePoints.size(), depthIntegratedCount);
 }
 
 

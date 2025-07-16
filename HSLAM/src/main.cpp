@@ -16,13 +16,27 @@
 #include "util/NumType.h"
 #include "FullSystem/FullSystem.h"
 
-
 #include "IOWrapper/Pangolin/PangolinDSOViewer.h"
 #include "IOWrapper/OutputWrapper/SampleOutputWrapper.h"
 
-
 #include <cxxopts.hpp>
 
+// RGB-D pipeline includes
+#include "tum_benchmark/tum_benchmark.hpp"
+#include <opencv2/opencv.hpp>
+
+// Custom structure for parsing associations.txt
+struct RGBDAssociation {
+    double rgb_timestamp;
+    std::string rgb_file;
+    double depth_timestamp;
+    std::string depth_file;
+};
+
+// Stream operator for parsing associations.txt
+inline std::istream& operator>>(std::istream& is, RGBDAssociation& assoc) {
+    return is >> assoc.rgb_timestamp >> assoc.rgb_file >> assoc.depth_timestamp >> assoc.depth_file;
+}
 
 using namespace HSLAM;
 
@@ -55,6 +69,7 @@ int main(int argc, char **argv)
 	std::string vocabPath = "";
 	std::string vignette = "";
 	std::string gammaCalib = "";
+	std::string associations = "";
 
 	options.add_options()
         ("f,files", "Input images path - mandatory input", cxxopts::value(source))
@@ -62,6 +77,7 @@ int main(int argc, char **argv)
 		("v,vocab", "Path to Vocabulary file - required for loop closure", cxxopts::value(vocabPath))
 		("n,vignette", "Path to photmetric calibration Vignette model", cxxopts::value(vignette))
 		("g,gamma", "Path to photmetric calibration gamma response Model", cxxopts::value(gammaCalib))
+		("a,associations", "Path to associations.txt file for RGB-D data", cxxopts::value(associations))
 		("l,loopclosure", "Enable-Disable loop closure", cxxopts::value<bool>()->default_value("false"))
 		("r,reverse", "Play a sequence in reverse", cxxopts::value<bool>()->default_value("false"))
 		("preload", "Preload all images into memory", cxxopts::value<bool>()->default_value("false"))
@@ -246,130 +262,248 @@ int main(int argc, char **argv)
         fullSystem->outputWrapper.push_back(new IOWrap::SampleOutputWrapper());
 
 
-	// to make MacOS happy: run this in dedicated thread -- and use this one to run the GUI.
+	// RGB-D pipeline: Use associations file if provided, otherwise fallback to monocular
     std::thread runthread([&]() {
-        std::vector<int> idsToPlay;
-        std::vector<double> timesToPlayAt;
-        for(int i=lstart;i>= 0 && i< reader->getNumImages() && linc*i < linc*lend;i+=linc)
-        {
-            idsToPlay.push_back(i);
-            if(timesToPlayAt.size() == 0)
-            {
-                timesToPlayAt.push_back((double)0);
-            }
-            else
-            {
-                double tsThis = reader->getTimestamp(idsToPlay[idsToPlay.size()-1]);
-                double tsPrev = reader->getTimestamp(idsToPlay[idsToPlay.size()-2]);
-                timesToPlayAt.push_back(timesToPlayAt.back() +  fabs(tsThis-tsPrev)/playbackSpeed);
-            }
-        }
-
-
-        std::vector<ImageAndExposure*> preloadedImages;
-        if(preload)
-        {
-            printf("LOADING ALL IMAGES!\n");
-            for(int ii=0;ii<(int)idsToPlay.size(); ii++)
-            {
-                int i = idsToPlay[ii];
-                preloadedImages.push_back(reader->getImage(i));
-            }
-        }
-
         struct timeval tv_start;
         gettimeofday(&tv_start, NULL);
         clock_t started = clock();
         double sInitializerOffset=0;
+        int processedFrames = 0;  // Declare at function scope
+        std::vector<int> idsToPlay;  // Declare at function scope for statistics
 
-
-        for(int ii=0;ii<(int)idsToPlay.size(); ii++)
-        {
-			while (Pause)
-			{
-				usleep(5000);
-			}
-				
-				
-            if(!fullSystem->initialized)	// if not initialized: reset start time.
+        if (!associations.empty()) {
+            // RGB-D pipeline using associations.txt
+            printf("Using RGB-D pipeline with associations file: %s\n", associations.c_str());
+            
+            // Load associations using tum_benchmark
+            typedef tum_benchmark::FileReader<RGBDAssociation> FileReader;
+            FileReader reader_assoc(associations);
+            
+            int frameCount = 0;
+            
+            for (auto it = reader_assoc.begin(); it != reader_assoc.end(); ++it, ++frameCount) {
+                if (frameCount < startIndex) continue;
+                if (frameCount >= endIndex) break;
+                
+                while (Pause) {
+                    usleep(5000);
+                }
+                
+                if(!fullSystem->initialized) {
+                    gettimeofday(&tv_start, NULL);
+                    started = clock();
+                    sInitializerOffset = 0;
+                }
+                
+                // Parse association entry
+                auto& entry = *it;
+                std::string rgb_path = source + "/" + entry.rgb_file;
+                std::string depth_path = source + "/" + entry.depth_file;
+                
+                // Extract timestamp from filename if available, fallback to associations.txt
+                double timestamp;
+                
+                // Try to extract timestamp from RGB filename (TUM RGB-D format: path/timestamp.png)
+                std::string rgb_filename = entry.rgb_file;
+                
+                // Get just the filename part (remove directory path)
+                size_t slash_pos = rgb_filename.find_last_of('/');
+                if (slash_pos != std::string::npos) {
+                    rgb_filename = rgb_filename.substr(slash_pos + 1);
+                }
+                
+                // Extract timestamp from filename
+                size_t dot_pos = rgb_filename.find_last_of('.');
+                if (dot_pos != std::string::npos) {
+                    std::string timestamp_str = rgb_filename.substr(0, dot_pos);
+                    try {
+                        timestamp = std::stod(timestamp_str);
+                        printf("Extracted timestamp from filename: %.6f\n", timestamp);
+                    } catch (const std::exception& e) {
+                        // Fallback to associations.txt timestamp
+                        timestamp = entry.rgb_timestamp;
+                        printf("Using associations.txt timestamp: %.6f (filename extraction failed)\n", timestamp);
+                    }
+                } else {
+                    // Fallback to associations.txt timestamp
+                    timestamp = entry.rgb_timestamp;
+                    printf("Using associations.txt timestamp: %.6f (no extension found)\n", timestamp);
+                }
+                
+                // Load RGB image
+                cv::Mat rgb_img_raw = cv::imread(rgb_path, cv::IMREAD_GRAYSCALE);
+                if (rgb_img_raw.empty()) {
+                    printf("ERROR: Could not load RGB image: %s\n", rgb_path.c_str());
+                    continue;
+                }
+                
+                // Convert RGB to float
+                cv::Mat rgb_img;
+                rgb_img_raw.convertTo(rgb_img, CV_32FC1);
+                
+                // Load depth image (16-bit PNG -> CV_32FC1, scaled by 1/5000.0)
+                cv::Mat depth_img_raw = cv::imread(depth_path, cv::IMREAD_UNCHANGED);
+                if (depth_img_raw.empty()) {
+                    printf("ERROR: Could not load depth image: %s\n", depth_path.c_str());
+                    continue;
+                }
+                
+                cv::Mat depth_img;
+                depth_img_raw.convertTo(depth_img, CV_32FC1, 1.0/5000.0);
+                
+                printf("Frame %d: RGB %dx%d, Depth %dx%d, timestamp=%.6f\n", 
+                       processedFrames, rgb_img.cols, rgb_img.rows, 
+                       depth_img.cols, depth_img.rows, timestamp);
+                
+                // Call new TrackRGBD method
+                fullSystem->TrackRGBD(rgb_img, depth_img, timestamp);
+                
+                processedFrames++;
+                
+                if(viewer!=0 && viewer->isDead) break;
+                
+                if(fullSystem->initFailed || setting_fullResetRequested) {
+                    if(processedFrames < 250 || setting_fullResetRequested) {
+                        printf("RESETTING!\n");
+                        std::vector<IOWrap::Output3DWrapper*> wraps = fullSystem->outputWrapper;
+                        for(IOWrap::Output3DWrapper* ow : wraps) ow->reset();
+                        usleep(20000);
+                        if(fullSystem) {
+                            delete fullSystem;
+                            fullSystem = nullptr;
+                        }
+                        
+                        fullSystem = new FullSystem();
+                        fullSystem->setGammaFunction(reader->getPhotometricGamma());
+                        fullSystem->linearizeOperation = (playbackSpeed == 0);
+                        
+                        if(LoopClosure) {
+                            fullSystem->setVocab(Vocabpnt);
+                            printf("Vocabulary Set\n");
+                        }
+                        
+                        fullSystem->outputWrapper = wraps;
+                        setting_fullResetRequested=false;
+                    }
+                }
+                
+                if(fullSystem->isLost) {
+                    printf("LOST!!\n");
+                    break;
+                }
+            }
+        } else {
+            // Fallback to original monocular pipeline
+            printf("Using monocular pipeline (no associations file provided)\n");
+            
+            std::vector<double> timesToPlayAt;
+            for(int i=lstart;i>= 0 && i< reader->getNumImages() && linc*i < linc*lend;i+=linc)
             {
-                gettimeofday(&tv_start, NULL);
-                started = clock();
-                sInitializerOffset = timesToPlayAt[ii];
+                idsToPlay.push_back(i);
+                if(timesToPlayAt.size() == 0)
+                {
+                    timesToPlayAt.push_back((double)0);
+                }
+                else
+                {
+                    double tsThis = reader->getTimestamp(idsToPlay[idsToPlay.size()-1]);
+                    double tsPrev = reader->getTimestamp(idsToPlay[idsToPlay.size()-2]);
+                    timesToPlayAt.push_back(timesToPlayAt.back() +  fabs(tsThis-tsPrev)/playbackSpeed);
+                }
             }
 
-            int i = idsToPlay[ii];
-
-
-            ImageAndExposure* img;
+            std::vector<ImageAndExposure*> preloadedImages;
             if(preload)
-                img = preloadedImages[ii];
-            else
-                img = reader->getImage(i);
-
-
-
-            bool skipFrame=false;
-            if(playbackSpeed!=0)
             {
-                struct timeval tv_now; gettimeofday(&tv_now, NULL);
-                double sSinceStart = sInitializerOffset + ((tv_now.tv_sec-tv_start.tv_sec) + (tv_now.tv_usec-tv_start.tv_usec)/(1000.0f*1000.0f));
-
-                if(sSinceStart < timesToPlayAt[ii])
-                    usleep((int)((timesToPlayAt[ii]-sSinceStart)*1000*1000));
-                else if(sSinceStart > timesToPlayAt[ii]+0.5+0.1*(ii%2))
+                printf("LOADING ALL IMAGES!\n");
+                for(int ii=0;ii<(int)idsToPlay.size(); ii++)
                 {
-                    printf("SKIPFRAME %d (play at %f, now it is %f)!\n", ii, timesToPlayAt[ii], sSinceStart);
-                    skipFrame=true;
+                    int i = idsToPlay[ii];
+                    preloadedImages.push_back(reader->getImage(i));
                 }
             }
 
-			
-			if (!skipFrame) fullSystem->addActiveFrame(img, i);
-			
-
-			delete img;
-	
-			if(viewer!=0)
-				if(viewer->isDead)
-					break;
-
-	        if(fullSystem->initFailed || setting_fullResetRequested)
+            for(int ii=0;ii<(int)idsToPlay.size(); ii++)
             {
-                if(ii < 250 || setting_fullResetRequested)
+                while (Pause)
                 {
-                    printf("RESETTING!\n");
-                    std::vector<IOWrap::Output3DWrapper*> wraps = fullSystem->outputWrapper;
-                    for(IOWrap::Output3DWrapper* ow : wraps) ow->reset();
-					usleep(20000); //hack - wait for display wrapper to clean up.
-					if(fullSystem)
-					{
-						delete fullSystem;
-						fullSystem = nullptr;
-					}
-						
-					fullSystem = new FullSystem();
-					fullSystem->setGammaFunction(reader->getPhotometricGamma());
-					fullSystem->linearizeOperation = (playbackSpeed == 0);
+                    usleep(5000);
+                }
+                    
+                if(!fullSystem->initialized)
+                {
+                    gettimeofday(&tv_start, NULL);
+                    started = clock();
+                    sInitializerOffset = timesToPlayAt[ii];
+                }
 
-					if(LoopClosure)
-					{
-						fullSystem->setVocab(Vocabpnt);
-						printf("Vocabulary Set\n");
-					}
+                int i = idsToPlay[ii];
 
-					fullSystem->outputWrapper = wraps;
+                ImageAndExposure* img;
+                if(preload)
+                    img = preloadedImages[ii];
+                else
+                    img = reader->getImage(i);
 
-                    setting_fullResetRequested=false;
+                bool skipFrame=false;
+                if(playbackSpeed!=0)
+                {
+                    struct timeval tv_now; gettimeofday(&tv_now, NULL);
+                    double sSinceStart = sInitializerOffset + ((tv_now.tv_sec-tv_start.tv_sec) + (tv_now.tv_usec-tv_start.tv_usec)/(1000.0f*1000.0f));
+
+                    if(sSinceStart < timesToPlayAt[ii])
+                        usleep((int)((timesToPlayAt[ii]-sSinceStart)*1000*1000));
+                    else if(sSinceStart > timesToPlayAt[ii]+0.5+0.1*(ii%2))
+                    {
+                        printf("SKIPFRAME %d (play at %f, now it is %f)!\n", ii, timesToPlayAt[ii], sSinceStart);
+                        skipFrame=true;
+                    }
+                }
+
+                if (!skipFrame) fullSystem->addActiveFrame(img, i);
+
+                delete img;
+        
+                if(viewer!=0)
+                    if(viewer->isDead)
+                        break;
+
+                if(fullSystem->initFailed || setting_fullResetRequested)
+                {
+                    if(ii < 250 || setting_fullResetRequested)
+                    {
+                        printf("RESETTING!\n");
+                        std::vector<IOWrap::Output3DWrapper*> wraps = fullSystem->outputWrapper;
+                        for(IOWrap::Output3DWrapper* ow : wraps) ow->reset();
+                        usleep(20000);
+                        if(fullSystem)
+                        {
+                            delete fullSystem;
+                            fullSystem = nullptr;
+                        }
+                            
+                        fullSystem = new FullSystem();
+                        fullSystem->setGammaFunction(reader->getPhotometricGamma());
+                        fullSystem->linearizeOperation = (playbackSpeed == 0);
+
+                        if(LoopClosure)
+                        {
+                            fullSystem->setVocab(Vocabpnt);
+                            printf("Vocabulary Set\n");
+                        }
+
+                        fullSystem->outputWrapper = wraps;
+                        setting_fullResetRequested=false;
+                    }
+                }
+
+                if(fullSystem->isLost)
+                {
+                    printf("LOST!!\n");
+                    break;
                 }
             }
-
-            if(fullSystem->isLost)
-            {
-                printf("LOST!!\n");
-                break;
-            }
-
+            processedFrames = idsToPlay.size();  // Set for statistics
         }
 		// fullSystem->BAatExit();
 		fullSystem->blockUntilMappingIsFinished();
@@ -377,34 +511,49 @@ int main(int argc, char **argv)
         struct timeval tv_end;
         gettimeofday(&tv_end, NULL);
 
-
         fullSystem->printResult("result.txt");
 		if (outputPC) fullSystem->printPC("PC.PCD");
-
-
-        int numFramesProcessed = abs(idsToPlay[0]-idsToPlay.back());
-        double numSecondsProcessed = fabs(reader->getTimestamp(idsToPlay[0])-reader->getTimestamp(idsToPlay.back()));
+        
         double MilliSecondsTakenSingle = 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC);
         double MilliSecondsTakenMT = sInitializerOffset + ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f);
-        printf("\n======================"
-                "\n%d Frames (%.1f fps)"
-                "\n%.2fms per frame (single core); "
-                "\n%.2fms per frame (multi core); "
-                "\n%.3fx (single core); "
-                "\n%.3fx (multi core); "
-                "\n======================\n\n",
-                numFramesProcessed, numFramesProcessed/numSecondsProcessed,
-                MilliSecondsTakenSingle/numFramesProcessed,
-                MilliSecondsTakenMT / (float)numFramesProcessed,
-                1000 / (MilliSecondsTakenSingle/numSecondsProcessed),
-                1000 / (MilliSecondsTakenMT / numSecondsProcessed));
+        
+        if (!associations.empty()) {
+            // RGB-D pipeline statistics
+            printf("\n======================\n");
+            printf("RGB-D Pipeline Results\n");
+            printf("Processed frames: %d\n", processedFrames);
+            printf("%.2fms per frame (single core)\n", MilliSecondsTakenSingle/processedFrames);
+            printf("%.2fms per frame (multi core)\n", MilliSecondsTakenMT / (float)processedFrames);
+            printf("======================\n\n");
+        } else {
+            // Monocular pipeline statistics
+            int numFramesProcessed = abs(idsToPlay[0]-idsToPlay.back());
+            double numSecondsProcessed = fabs(reader->getTimestamp(idsToPlay[0])-reader->getTimestamp(idsToPlay.back()));
+            printf("\n======================"
+                    "\n%d Frames (%.1f fps)"
+                    "\n%.2fms per frame (single core); "
+                    "\n%.2fms per frame (multi core); "
+                    "\n%.3fx (single core); "
+                    "\n%.3fx (multi core); "
+                    "\n======================\n\n",
+                    numFramesProcessed, numFramesProcessed/numSecondsProcessed,
+                    MilliSecondsTakenSingle/numFramesProcessed,
+                    MilliSecondsTakenMT / (float)numFramesProcessed,
+                    1000 / (MilliSecondsTakenSingle/numSecondsProcessed),
+                    1000 / (MilliSecondsTakenMT / numSecondsProcessed));
+        }
+        
         //fullSystem->printFrameLifetimes();
         if(setting_logStuff)
         {
             std::ofstream tmlog;
             tmlog.open("logs/time.txt", std::ios::trunc | std::ios::out);
-            tmlog << 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC*reader->getNumImages()) << " "
-                  << ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f) / (float)reader->getNumImages() << "\n";
+            if (!associations.empty()) {
+                tmlog << MilliSecondsTakenSingle/processedFrames << " " << MilliSecondsTakenMT / (float)processedFrames << "\n";
+            } else {
+                tmlog << 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC*reader->getNumImages()) << " "
+                      << ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f) / (float)reader->getNumImages() << "\n";
+            }
             tmlog.flush();
             tmlog.close();
         }

@@ -278,7 +278,7 @@ void PhotometricUndistorter::processFrame(float* image_in, ImageAndExposure* out
 		}
 		if (setMeta){
 			output->exposure_time = exposure_time;
-			output->timestamp = 0;
+			// Preserve the timestamp that was already set during ImageAndExposure construction
 		}
 	}
 	else
@@ -301,7 +301,7 @@ void PhotometricUndistorter::processFrame(float* image_in, ImageAndExposure* out
 
 		if (setMeta){
 			output->exposure_time = exposure_time;
-			output->timestamp = 0;
+			// Preserve the timestamp that was already set during ImageAndExposure construction
 		}
 	}
 
