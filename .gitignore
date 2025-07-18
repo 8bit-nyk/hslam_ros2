@@ -34,16 +34,18 @@
 build/
 
 result.txt
-
-Thirdparty/CompiledLibs/
-HSLAM/Thirdparty/CompiledLibs/
-
-HSLAM/Thirdparty/
-run_scripts/
-Results/
-Thirdparty/opencv*/
+HSLAM/Thirdparty
+HSLAM/run_scripts/
+HSLAM/results/
+HSLAM/models/
 HSLAM/logs
+HSLAM/mats
+HSLAM/docs/papers
+HSLAM/docs/prompts
+.cursorrules
+
 *.avi
 
 analytics
 cursor_agent/live_dso_camera.md
+.vscode/settings.json

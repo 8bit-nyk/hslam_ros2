@@ -125,4 +125,9 @@ Contributions to the HSLAM project are welcome. If you would like to contribute,
 5. Submit a pull request detailing the changes you have made.
 
 ## License
-This project is licensed under the [MIT License](LICENSE).
+This repository is licensed under the GNU General Public License version 3 GPLv3.
+
+This work is a joint collaborative effort between the:
+
+    Vision and Robotics Lab at the American University of Beirut (AUB)
+    Vision and Image Processing Group at the University of Waterloo (UW)
