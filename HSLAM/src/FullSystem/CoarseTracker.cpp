@@ -104,6 +104,10 @@ CoarseTracker::CoarseTracker(int ww, int hh) : lastRef_aff_g2l(0,0)
 	debugPlot = debugPrint = true;
 	w[0]=h[0]=0;
 	refFrameID=-1;
+	
+	// Initialize depth integration infrastructure
+	has_external_depth = false;
+	last_stats = DepthIntegrationStats();
 }
 /**
  * @brief Destroy the Coarse Tracker:: Coarse Tracker object
@@ -157,11 +161,28 @@ void CoarseTracker::makeK(CalibHessian* HCalib)
 
 
 /**
- * @brief Create a depth and weight map for the points in frames
+ * @brief Create a depth and weight map for the points in frames (with fallback)
+ * 
+ * Uses enhanced version if external depth is available, otherwise falls back to original.
  * 
  * @param frameHessians 
  */
 void CoarseTracker::makeCoarseDepthL0(std::vector<FrameHessian*> frameHessians)
+{
+    // Use enhanced version if external depth is available, otherwise fallback to original
+    if(hasExternalDepth()) {
+        makeCoarseDepthL0Enhanced(frameHessians);
+    } else {
+        makeCoarseDepthL0Original(frameHessians);
+    }
+}
+
+/**
+ * @brief Create a depth and weight map for the points in frames (original implementation)
+ * 
+ * @param frameHessians 
+ */
+void CoarseTracker::makeCoarseDepthL0Original(std::vector<FrameHessian*> frameHessians)
 {
 	// Make coarse tracking templates for latstRef.
 	memset(idepth[0], 0, sizeof(float)*w[0]*h[0]);
@@ -674,13 +695,13 @@ bool CoarseTracker::trackNewestCoarse(
 
 	bool haveRepeated = false;
 
-
+	// ===Multi-Scale (Pyramid) Optimization Loop===
 	Mat88 H; Vec8 b;
 	for(int lvl=coarsestLvl; lvl>=0; lvl--)
 	{
 		// Do initial calculation
 		float levelCutoffRepeat=1;
-		// Calulate residual of transformation estimate
+		// Calulate photometric residual of transformation estimate
 		Vec6 resOld = calcRes(lvl, refToNew_current, aff_g2l_current, setting_coarseCutoffTH*levelCutoffRepeat);
 		while(resOld[5] > 0.6 && (levelCutoffRepeat < 50 || resOld[5] > 0.99) ) // If too many high energy points
 		{
@@ -693,9 +714,9 @@ bool CoarseTracker::trackNewestCoarse(
 		}
 
 		// Calculate H and b for Gauss Newton Optimization
-		calcGSSSE(lvl, H, b, refToNew_current, aff_g2l_current);
+		calcGSSSE(lvl, H, b, refToNew_current, aff_g2l_current); //Build the system Jacobian and Hessian for the current level.
 
-		float lambda = 0.01;
+		float lambda = 0.01; //damping parameter for Levenberg-Marquardt style optimization.
 
 		if(debugPrint)
 		{
@@ -968,6 +989,383 @@ void CoarseTracker::debugPlotIDepthMapFloat(std::vector<IOWrap::Output3DWrapper*
         ow->pushDepthImageFloat(&mim, lastRef);
 }
 
+// =================== DEPTH INTEGRATION IMPLEMENTATION ===================
+
+/**
+ * @brief Set external depth image for depth integration
+ * 
+ * @param depth_image External depth image (CV_32FC1 format, values in meters)
+ */
+void CoarseTracker::setExternalDepthImage(const cv::Mat& depth_image)
+{
+    if(depth_image.empty()) {
+        clearExternalDepthImage();
+        return;
+    }
+    
+    // Validate depth image format
+    if(depth_image.type() != CV_32FC1) {
+        printf("WARNING: External depth image must be CV_32FC1\n");
+        clearExternalDepthImage();
+        return;
+    }
+    
+    // Validate dimensions
+    if(depth_image.cols != w[0] || depth_image.rows != h[0]) {
+        printf("WARNING: External depth image dimensions mismatch (%dx%d vs %dx%d)\n",
+               depth_image.cols, depth_image.rows, w[0], h[0]);
+        clearExternalDepthImage();
+        return;
+    }
+    
+    external_depth_image = depth_image.clone();
+    has_external_depth = true;
+    
+    printf("CoarseTracker: External depth image set (%dx%d)\n", w[0], h[0]);
+}
+
+/**
+ * @brief Clear external depth image and disable depth integration
+ */
+void CoarseTracker::clearExternalDepthImage()
+{
+    external_depth_image.release();
+    has_external_depth = false;
+    last_stats = DepthIntegrationStats();
+}
+
+/**
+ * @brief Check if external depth image is available
+ * 
+ * @return bool True if external depth image is set and valid
+ */
+bool CoarseTracker::hasExternalDepth() const
+{
+    return has_external_depth && !external_depth_image.empty();
+}
+
+/**
+ * @brief Get statistics from last depth integration
+ * 
+ * @return DepthIntegrationStats Statistics from last makeCoarseDepthL0Enhanced call
+ */
+CoarseTracker::DepthIntegrationStats CoarseTracker::getLastIntegrationStats() const
+{
+    return last_stats;
+}
+
+/**
+ * @brief Enhanced depth map creation with external depth integration
+ * 
+ * @param frameHessians Active frame hessians for depth map creation
+ */
+void CoarseTracker::makeCoarseDepthL0Enhanced(std::vector<FrameHessian*> frameHessians)
+{
+    // Clear integration statistics
+    last_stats = DepthIntegrationStats();
+    
+    // Step 1: Initialize depth and weight buffers
+    memset(idepth[0], 0, sizeof(float) * w[0] * h[0]);
+    memset(weightSums[0], 0, sizeof(float) * w[0] * h[0]);
+    
+    // Step 2: Integrate existing map points (preserve current functionality)
+    for(FrameHessian* fh : frameHessians) {
+        for(PointHessian* ph : fh->pointHessians) {
+            if(ph->lastResiduals[0].first != 0 && ph->lastResiduals[0].second == ResState::IN) {
+                PointFrameResidual* r = ph->lastResiduals[0].first;
+                assert(r->efResidual->isActive() && r->target == lastRef);
+                
+                int u = r->centerProjectedTo[0] + 0.5f;
+                int v = r->centerProjectedTo[1] + 0.5f;
+                float new_idepth = r->centerProjectedTo[2];
+                float weight = sqrtf(1e-3 / (ph->efPoint->HdiF + 1e-12));
+                
+                // Ensure bounds
+                if(u >= 0 && u < w[0] && v >= 0 && v < h[0]) {
+                    idepth[0][u + w[0] * v] += new_idepth * weight;
+                    weightSums[0][u + w[0] * v] += weight;
+                    last_stats.pixels_from_map_points++;
+                }
+            }
+        }
+    }
+    
+    // Step 3: Integrate external depth if available
+    if(hasExternalDepth()) {
+        integrateExternalDepthL0();
+    }
+    
+    // Step 4: Multi-level pyramid processing (existing functionality)
+    for(int lvl = 1; lvl < pyrLevelsUsed; lvl++) {
+        int lvlm1 = lvl-1;
+        int wl = w[lvl], hl = h[lvl], wlm1 = w[lvlm1];
+
+        float* idepth_l = idepth[lvl];
+        float* weightSums_l = weightSums[lvl];
+
+        float* idepth_lm = idepth[lvlm1];
+        float* weightSums_lm = weightSums[lvlm1];
+
+        // For all pixels
+        for(int y=0;y<hl;y++)
+            for(int x=0;x<wl;x++)
+            {
+                int bidx = 2*x   + 2*y*wlm1;
+                idepth_l[x + y*wl] = 		idepth_lm[bidx] +
+                                            idepth_lm[bidx+1] +
+                                            idepth_lm[bidx+wlm1] +
+                                            idepth_lm[bidx+wlm1+1];
+
+                weightSums_l[x + y*wl] = 	weightSums_lm[bidx] +
+                                            weightSums_lm[bidx+1] +
+                                            weightSums_lm[bidx+wlm1] +
+                                            weightSums_lm[bidx+wlm1+1];
+            }
+    }
+    
+    // Step 5: Depth dilation for levels 0-1 (existing functionality)
+    for(int lvl=0; lvl<2; lvl++)
+    {
+        int numIts = 1;
+
+        for(int it=0;it<numIts;it++)
+        {
+            int wh = w[lvl]*h[lvl]-w[lvl];
+            int wl = w[lvl];
+            float* weightSumsl = weightSums[lvl];
+            float* weightSumsl_bak = weightSums_bak[lvl];
+            memcpy(weightSumsl_bak, weightSumsl, w[lvl]*h[lvl]*sizeof(float));
+            float* idepthl = idepth[lvl];
+            
+            for(int i=w[lvl]+1;i<wh-1;i++)
+            {
+                if(weightSumsl_bak[i] <= 0)
+                {
+                    float sum=0, num=0, numn=0;
+                    // Dilation matrix is a X shape
+                    if(weightSumsl_bak[i+1+wl] > 0) { sum += idepthl[i+1+wl]; num+=weightSumsl_bak[i+1+wl]; numn++;}
+                    if(weightSumsl_bak[i-1-wl] > 0) { sum += idepthl[i-1-wl]; num+=weightSumsl_bak[i-1-wl]; numn++;}
+                    if(weightSumsl_bak[i+wl-1] > 0) { sum += idepthl[i+wl-1]; num+=weightSumsl_bak[i+wl-1]; numn++;}
+                    if(weightSumsl_bak[i-wl+1] > 0) { sum += idepthl[i-wl+1]; num+=weightSumsl_bak[i-wl+1]; numn++;}
+                    if(numn>0) {idepthl[i] = sum/numn; weightSumsl[i] = num/numn;}
+                }
+            }
+        }
+    }
+
+    // Step 6: Depth dilation for levels 2+ (existing functionality)
+    for(int lvl=2; lvl<pyrLevelsUsed; lvl++)
+    {
+        int wh = w[lvl]*h[lvl]-w[lvl];
+        int wl = w[lvl];
+        float* weightSumsl = weightSums[lvl];
+        float* weightSumsl_bak = weightSums_bak[lvl];
+        memcpy(weightSumsl_bak, weightSumsl, w[lvl]*h[lvl]*sizeof(float));
+        float* idepthl = idepth[lvl];
+        
+        for(int i=w[lvl]+1;i<wh-1;i++)
+        {
+            if(weightSumsl_bak[i] <= 0)
+            {
+                float sum=0, num=0, numn=0;
+                // Dilation matrix is a + shape
+                if(weightSumsl_bak[i+1] > 0) { sum += idepthl[i+1]; num+=weightSumsl_bak[i+1]; numn++;}
+                if(weightSumsl_bak[i-1] > 0) { sum += idepthl[i-1]; num+=weightSumsl_bak[i-1]; numn++;}
+                if(weightSumsl_bak[i+wl] > 0) { sum += idepthl[i+wl]; num+=weightSumsl_bak[i+wl]; numn++;}
+                if(weightSumsl_bak[i-wl] > 0) { sum += idepthl[i-wl]; num+=weightSumsl_bak[i-wl]; numn++;}
+                if(numn>0) {idepthl[i] = sum/numn; weightSumsl[i] = num/numn;}
+            }
+        }
+    }
+    
+    // Step 7: Normalize and create point cloud (existing functionality)
+    for(int lvl = 0; lvl < pyrLevelsUsed; lvl++) {
+        float* weightSumsl = weightSums[lvl];
+        float* idepthl = idepth[lvl];
+        Eigen::Vector3f* dIRefl = lastRef->dIp[lvl];
+
+        int wl = w[lvl], hl = h[lvl];
+
+        int lpc_n=0;
+        float* lpc_u = pc_u[lvl];
+        float* lpc_v = pc_v[lvl];
+        float* lpc_idepth = pc_idepth[lvl];
+        float* lpc_color = pc_color[lvl];
+
+        // For all of the frame area excluding the border
+        for(int y=2;y<hl-2;y++)
+            for(int x=2;x<wl-2;x++)
+            {
+                int i = x+y*wl;
+
+                // Add the active frames to the point list
+                if(weightSumsl[i] > 0)
+                {
+                    idepthl[i] /= weightSumsl[i];
+                    lpc_u[lpc_n] = x;
+                    lpc_v[lpc_n] = y;
+                    lpc_idepth[lpc_n] = idepthl[i];
+                    lpc_color[lpc_n] = dIRefl[i][0];
+
+                    if(!std::isfinite(lpc_color[lpc_n]) || !(idepthl[i]>0))
+                    {
+                        idepthl[i] = -1;
+                        continue;	// just skip if something is wrong.
+                    }
+                    lpc_n++;
+                }
+                else
+                    idepthl[i] = -1;
+
+                weightSumsl[i] = 1;
+            }
+
+        pc_n[lvl] = lpc_n;
+    }
+    
+    // Step 8: Calculate final integration statistics
+    last_stats.total_valid_pixels = pc_n[0];
+    if(last_stats.total_valid_pixels > 0) {
+        last_stats.integration_rate = (float)last_stats.pixels_from_external_depth / 
+                                      (float)last_stats.total_valid_pixels;
+    } else {
+        last_stats.integration_rate = 0.0f;
+    }
+    
+    // Log integration results
+    printf("CoarseTracker Depth Integration: Map Points=%d, External=%d, Fused=%d, Total=%d, Rate=%.1f%%\n",
+           last_stats.pixels_from_map_points, last_stats.pixels_from_external_depth,
+           last_stats.pixels_fused, last_stats.total_valid_pixels, last_stats.integration_rate * 100.0f);
+}
+
+/**
+ * @brief Integrate external depth into level 0 depth map
+ */
+void CoarseTracker::integrateExternalDepthL0()
+{
+    const float MIN_DEPTH = 0.1f;  // Minimum valid depth (TUM dataset appropriate)
+    const float MAX_DEPTH = 10.0f; // Maximum valid depth (TUM dataset appropriate)
+    
+    int integrated_count = 0;
+    int fused_count = 0;
+    
+    // Process each pixel in the depth image
+    for(int v = 0; v < h[0]; v++) {
+        for(int u = 0; u < w[0]; u++) {
+            int idx = u + v * w[0];
+            
+            // Get external depth value
+            float external_depth = external_depth_image.at<float>(v, u);
+            
+            // Validate external depth
+            if(!validateExternalDepth(external_depth, u, v)) {
+                continue;
+            }
+            
+            float external_idepth = 1.0f / external_depth;
+            float external_weight = calculateConfidenceWeight(external_depth, u, v, true);
+            
+            // Check if map point already exists at this location
+            bool has_map_point = (weightSums[0][idx] > 0);
+            
+            if(has_map_point) {
+                // Fuse external depth with existing map point
+                float existing_idepth = idepth[0][idx] / weightSums[0][idx];
+                float existing_weight = weightSums[0][idx];
+                
+                // Weighted combination of map point and external depth
+                float combined_weight = existing_weight + external_weight;
+                float combined_idepth = (existing_idepth * existing_weight + 
+                                       external_idepth * external_weight) / combined_weight;
+                
+                idepth[0][idx] = combined_idepth * combined_weight;
+                weightSums[0][idx] = combined_weight;
+                
+                fused_count++;
+            } else {
+                // Use external depth directly
+                idepth[0][idx] = external_idepth * external_weight;
+                weightSums[0][idx] = external_weight;
+                
+                integrated_count++;
+            }
+        }
+    }
+    
+    last_stats.pixels_from_external_depth = integrated_count;
+    last_stats.pixels_fused = fused_count;
+    
+    printf("External depth integration: %d new pixels, %d fused pixels\n", 
+           integrated_count, fused_count);
+}
+
+/**
+ * @brief Validate external depth value
+ * 
+ * @param depth Depth value to validate (in meters)
+ * @param u Horizontal pixel coordinate
+ * @param v Vertical pixel coordinate
+ * @return bool True if depth value is valid for integration
+ */
+bool CoarseTracker::validateExternalDepth(float depth, int u, int v)
+{
+    // Range validation
+    if(depth < 0.1f || depth > 10.0f) return false;
+    
+    // Finite validation
+    if(!std::isfinite(depth)) return false;
+    
+    // Image bounds validation
+    if(u < 0 || u >= w[0] || v < 0 || v >= h[0]) return false;
+    
+    return true;
+}
+
+/**
+ * @brief Calculate confidence weight for depth value
+ * 
+ * @param depth Depth value (in meters)
+ * @param u Horizontal pixel coordinate
+ * @param v Vertical pixel coordinate
+ * @param is_external True if depth is from external source, false if from map points
+ * @return float Confidence weight for depth integration
+ */
+float CoarseTracker::calculateConfidenceWeight(float depth, int u, int v, bool is_external)
+{
+    if(is_external) {
+        // External depth confidence based on:
+        // 1. Depth value stability (closer depths more reliable)
+        // 2. Image gradient (higher gradient = more reliable)
+        // 3. Base confidence for ground truth
+        
+        float base_confidence = 0.9f;  // High confidence for ground truth
+        float depth_factor = 1.0f / (1.0f + depth * 0.1f);  // Closer depths more reliable
+        
+        // Get image gradient at this location
+        float gradient_factor = 1.0f;
+        if(lastRef && lastRef->dIp[0]) {
+            Eigen::Vector3f grad = lastRef->dIp[0][u + v * w[0]];
+            gradient_factor = std::min(2.0f, std::max(0.5f, grad.norm() * 0.01f));
+        }
+        
+        return base_confidence * depth_factor * gradient_factor;
+    } else {
+        // Map point confidence (existing calculation)
+        return sqrtf(1e-3 / (1e-12 + 1e-3));  // Simplified version
+    }
+}
+
+/**
+ * @brief Fuse depth sources at specified pyramid level
+ * 
+ * @param level Pyramid level for depth fusion
+ */
+void CoarseTracker::fuseDepthSources(int level)
+{
+    // This method is reserved for future multi-level depth fusion
+    // Currently, fusion is handled directly in integrateExternalDepthL0()
+    // for level 0, and pyramid processing handles higher levels
+}
 
 /**
  * @brief Construct a new Coarse Distance Map

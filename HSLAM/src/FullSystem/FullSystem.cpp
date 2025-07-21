@@ -415,19 +415,20 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 {
 
 	assert(allFrameHistory.size() > 0);
-	// set pose initialization.
-
-
-
+	// If there is at least one frame in history, set pose initialization.
 	FrameHessian* lastF = coarseTracker->lastRef;
-
 	AffLight aff_last_2_l = AffLight(0,0);
-
 	std::vector<SE3,Eigen::aligned_allocator<SE3>> lastF_2_fh_tries;
+	
+	// =====Pose Hypothesis Generation======
+	// The function generates a set of possible relative poses (lastF_2_fh_tries)
+	// between the last reference frame and the new frame. This is crucial for robustness, 
+	//as tracking can fail if the initial guess is poor.
+	//If only two frames, use identity transformation as the only guess.
 	if(allFrameHistory.size() == 2)
 		for(unsigned int i=0;i<lastF_2_fh_tries.size();i++) lastF_2_fh_tries.push_back(SE3());
 	else
-	{
+	{	// If there are more than two frames, generate a set of possible relative poses.
 		FrameShell* slast = allFrameHistory[allFrameHistory.size()-2];
 		FrameShell* sprelast = allFrameHistory[allFrameHistory.size()-3];
 		SE3 slast_2_sprelast;
@@ -444,7 +445,7 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 		{
 			lastF_2_fh_tries.push_back(fh->shell->getPoseInverse() * lastF->shell->getPose());
 		}
-		
+		// Add several motion hypotheses
 		// get last delta-movement.
 		lastF_2_fh_tries.push_back(fh_2_slast.inverse() * lastF_2_slast);							// assume constant motion.
 		lastF_2_fh_tries.push_back(fh_2_slast.inverse() * fh_2_slast.inverse() * lastF_2_slast);	// assume double motion (frame skipped)
@@ -452,7 +453,7 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 		lastF_2_fh_tries.push_back(lastF_2_slast); // assume zero motion.
         lastF_2_fh_tries.push_back(SE3()); 															// assume zero motion from KF.
 
-
+		// Add several rotation hypotheses
 		// just try a TON of different initializations (all rotations). In the end,
 		// if they don't work they will only be tried on the coarsest level, which is super fast anyway.
 		// also, if tracking rails here we loose, so we really, really want to avoid that.
@@ -495,6 +496,7 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 
 
 	// ============== Test all of the pose guesses ===================
+	// ===Initialize variables===
 	Vec3 flowVecs = Vec3(100,100,100); // Flow vector of tracked motion
 	SE3 lastF_2_fh = SE3();
 	AffLight aff_g2l = AffLight(0,0);
@@ -508,6 +510,8 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 	Vec5 achievedRes = Vec5::Constant(NAN);
 	bool haveOneGood = false;
 	int tryIterations=0;
+
+	// ===Hypothesis Evaluation Loop===
 	for(unsigned int i=0;i<lastF_2_fh_tries.size();i++) // Try tracking for all poses in lastF_2_fh_tries
 	{
 		AffLight aff_g2l_this = aff_last_2_l;
@@ -610,7 +614,7 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 						<< tryIterations << "\n";
 	}
 
-	
+	// ===Output===
 	Vec5 Output;
 	Output << achievedRes[0], flowVecs[0], flowVecs[1], flowVecs[2], (double)(tryIterations > 1 ? -1.0: +1.0);
 	return Output;
@@ -1119,6 +1123,9 @@ void FullSystem::TrackRGBD(const cv::Mat& rgb_img, const cv::Mat& depth_img, con
     // Store depth image for use in makeNewTraces
     currentDepthImage = depth_img.clone();
     
+    // Synchronize depth with coarse trackers immediately
+    synchronizeDepthWithTracking();
+    
     // Create ImageAndExposure from RGB for compatibility with existing pipeline
     ImageAndExposure* img = new ImageAndExposure(rgb_img.cols, rgb_img.rows, timestamp);
     memcpy(img->image, rgb_img.data, rgb_img.cols * rgb_img.rows * sizeof(float));
@@ -1245,6 +1252,9 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 
 
 		// =========================== Do coarse tracking =========================
+		// Synchronize depth information before coarse tracking
+		synchronizeDepthWithTracking();
+		
 		// Coarse Tracking is only done on only the new frame and reference frame
 		// The reference frame should be the latest keyframe
 		Vec5 tres = trackNewCoarse(fh, ! (isUsable && computedBoW) );
@@ -1608,6 +1618,10 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	{
 		boost::unique_lock<boost::mutex> crlock(coarseTrackerSwapMutex);
 		coarseTracker_forNewKF->makeK(&Hcalib);
+		
+		// Synchronize depth information before setting coarse tracking reference
+		synchronizeDepthWithTracking();
+		
 		coarseTracker_forNewKF->setCoarseTrackingRef(frameHessians);
 
 
@@ -2788,4 +2802,79 @@ void FullSystem::setVocab(DBoW3::Vocabulary* _Vocabpnt)
 // 		return vVelocity.back();
 // 	}
 // }
+
+// =================== COARSE TRACKER DEPTH INTEGRATION COORDINATION ===================
+
+/**
+ * @brief Update CoarseTracker instances with current depth information
+ * 
+ * Synchronizes external depth information with both coarseTracker and 
+ * coarseTracker_forNewKF instances to ensure consistent depth integration.
+ */
+void FullSystem::updateCoarseTrackerDepth()
+{
+    // Skip if not initialized yet or trackers are not ready
+    if(!initialized || !coarseTracker || !coarseTracker_forNewKF) {
+        return;
+    }
+    
+    // Ensure depth synchronization with tracking
+    if(!currentDepthImage.empty()) {
+        // Validate depth image format before setting
+        if(currentDepthImage.type() == CV_32FC1) {
+            // Update main coarse tracker
+            coarseTracker->setExternalDepthImage(currentDepthImage);
+            
+            // Update coarse tracker for new keyframes
+            coarseTracker_forNewKF->setExternalDepthImage(currentDepthImage);
+            
+            if(!setting_debugout_runquiet) {
+                printf("FullSystem: Updated CoarseTracker instances with depth image (%dx%d)\n", 
+                       currentDepthImage.cols, currentDepthImage.rows);
+            }
+        } else {
+            printf("WARNING: Invalid depth image format for CoarseTracker integration\n");
+        }
+    } else {
+        // Clear depth from both trackers if no depth available
+        coarseTracker->clearExternalDepthImage();
+        coarseTracker_forNewKF->clearExternalDepthImage();
+        
+        if(!setting_debugout_runquiet) {
+            printf("FullSystem: Cleared depth from CoarseTracker instances\n");
+        }
+    }
+}
+
+/**
+ * @brief Synchronize depth with tracking operations
+ * 
+ * Ensures proper timing and coordination between depth updates and 
+ * tracking operations to maintain system consistency.
+ */
+void FullSystem::synchronizeDepthWithTracking()
+{
+    // Update depth information before tracking operations
+    updateCoarseTrackerDepth();
+    
+    // Ensure both trackers have consistent depth information
+    if(coarseTracker && coarseTracker_forNewKF) {
+        bool main_has_depth = coarseTracker->hasExternalDepth();
+        bool kf_has_depth = coarseTracker_forNewKF->hasExternalDepth();
+        
+        if(main_has_depth != kf_has_depth) {
+            printf("WARNING: Depth synchronization mismatch between CoarseTracker instances\n");
+            // Re-synchronize to ensure consistency
+            updateCoarseTrackerDepth();
+        }
+        
+        // Log depth integration statistics from the main tracker
+        if(main_has_depth) {
+            auto stats = coarseTracker->getLastIntegrationStats();
+            printf("FullSystem Depth Integration Stats: External=%d, Fused=%d, Total=%d, Rate=%.1f%%\n",
+                   stats.pixels_from_external_depth, stats.pixels_fused, 
+                   stats.total_valid_pixels, stats.integration_rate * 100.0f);
+        }
+    }
+}
 }

@@ -144,6 +144,23 @@ public:
 	// RGB-D tracking method - for now, calls TrackMonocular
 	void TrackRGBD(const cv::Mat& rgb_img, const cv::Mat& depth_img, const double timestamp);
 
+	// =================== COARSE TRACKER DEPTH INTEGRATION ===================
+	/**
+	 * @brief Update CoarseTracker instances with current depth information
+	 * 
+	 * Synchronizes external depth information with both coarseTracker and 
+	 * coarseTracker_forNewKF instances to ensure consistent depth integration.
+	 */
+	void updateCoarseTrackerDepth();
+	
+	/**
+	 * @brief Synchronize depth with tracking operations
+	 * 
+	 * Ensures proper timing and coordination between depth updates and 
+	 * tracking operations to maintain system consistency.
+	 */
+	void synchronizeDepthWithTracking();
+
 	// marginalizes a frame. drops / marginalizes points & residuals.
 	void marginalizeFrame(FrameHessian* frame);
 	void blockUntilMappingIsFinished();

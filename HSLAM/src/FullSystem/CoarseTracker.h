@@ -32,6 +32,7 @@
 #include "util/settings.h"
 #include "OptimizationBackend/MatrixAccumulators.h"
 #include "IOWrapper/Output3DWrapper.h"
+#include <opencv2/opencv.hpp>
 
 
 
@@ -60,6 +61,54 @@ public:
 
 	void makeK(
 			CalibHessian* HCalib);
+
+	// =================== DEPTH INTEGRATION INTERFACE ===================
+	/**
+	 * @brief Set external depth image for depth integration
+	 * 
+	 * @param depth_image External depth image (CV_32FC1 format, values in meters)
+	 */
+	void setExternalDepthImage(const cv::Mat& depth_image);
+	
+	/**
+	 * @brief Clear external depth image and disable depth integration
+	 */
+	void clearExternalDepthImage();
+	
+	/**
+	 * @brief Enhanced depth map creation with external depth integration
+	 * 
+	 * @param frameHessians Active frame hessians for depth map creation
+	 */
+	void makeCoarseDepthL0Enhanced(std::vector<FrameHessian*> frameHessians);
+	
+	/**
+	 * @brief Statistics structure for depth integration monitoring
+	 */
+	struct DepthIntegrationStats {
+		int pixels_from_map_points;      // Pixels using existing map points
+		int pixels_from_external_depth;  // Pixels using external depth
+		int pixels_fused;                // Pixels using both sources (fused)
+		int total_valid_pixels;          // Total valid pixels in depth map
+		float integration_rate;          // Percentage of pixels using external depth
+		
+		DepthIntegrationStats() : pixels_from_map_points(0), pixels_from_external_depth(0), 
+		                         pixels_fused(0), total_valid_pixels(0), integration_rate(0.0f) {}
+	};
+	
+	/**
+	 * @brief Get statistics from last depth integration
+	 * 
+	 * @return DepthIntegrationStats Statistics from last makeCoarseDepthL0Enhanced call
+	 */
+	DepthIntegrationStats getLastIntegrationStats() const;
+	
+	/**
+	 * @brief Check if external depth image is available
+	 * 
+	 * @return bool True if external depth image is set and valid
+	 */
+	bool hasExternalDepth() const;
 
 	bool debugPrint, debugPlot;
 
@@ -92,6 +141,7 @@ private:
 
 
 	void makeCoarseDepthL0(std::vector<FrameHessian*> frameHessians);
+	void makeCoarseDepthL0Original(std::vector<FrameHessian*> frameHessians);
 	float* idepth[PYR_LEVELS];
 	float* weightSums[PYR_LEVELS];
 	float* weightSums_bak[PYR_LEVELS];
@@ -125,6 +175,62 @@ private:
 
 
 	Accumulator9 acc;
+	
+	// =================== DEPTH INTEGRATION INFRASTRUCTURE ===================
+	/**
+	 * @brief External depth image storage
+	 * 
+	 * Thread-safe storage for external depth information.
+	 * Format: CV_32FC1, values in meters, same dimensions as tracking images.
+	 */
+	cv::Mat external_depth_image;
+	
+	/**
+	 * @brief Flag indicating external depth availability
+	 */
+	bool has_external_depth;
+	
+	/**
+	 * @brief Statistics from last depth integration
+	 */
+	DepthIntegrationStats last_stats;
+	
+	// =================== DEPTH PROCESSING UTILITIES ===================
+	/**
+	 * @brief Integrate external depth into level 0 depth map
+	 * 
+	 * Core method for incorporating external depth information into the
+	 * semi-dense depth map creation process.
+	 */
+	void integrateExternalDepthL0();
+	
+	/**
+	 * @brief Fuse depth sources at specified pyramid level
+	 * 
+	 * @param level Pyramid level for depth fusion
+	 */
+	void fuseDepthSources(int level);
+	
+	/**
+	 * @brief Validate external depth value
+	 * 
+	 * @param depth Depth value to validate (in meters)
+	 * @param u Horizontal pixel coordinate
+	 * @param v Vertical pixel coordinate
+	 * @return bool True if depth value is valid for integration
+	 */
+	bool validateExternalDepth(float depth, int u, int v);
+	
+	/**
+	 * @brief Calculate confidence weight for depth value
+	 * 
+	 * @param depth Depth value (in meters)
+	 * @param u Horizontal pixel coordinate
+	 * @param v Vertical pixel coordinate
+	 * @param is_external True if depth is from external source, false if from map points
+	 * @return float Confidence weight for depth integration
+	 */
+	float calculateConfidenceWeight(float depth, int u, int v, bool is_external);
 };
 
 
