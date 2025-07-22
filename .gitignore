@@ -35,16 +35,15 @@ build/
 
 result.txt
 
+HSLAM/Thirdparty/CompiledLibs/
 
-HSLAM/Thirdparty
 HSLAM/run_scripts/
 HSLAM/results/
 HSLAM/models/
-HSLAM/logs
-HSLAM/mats
-HSLAM/docs/papers
-HSLAM/docs/prompts
-.cursorrules
+HSLAM/logs/
+HSLAM/mats/
+HSLAM/docs/papers/
+HSLAM/docs/prompts/
 
 HSLAM/mats
 HSLAM/docs/papers
@@ -54,6 +53,19 @@ HSLAM/docs/prompts
 *.avi
 
 analytics
-cursor_agent/live_dso_camera.md
 .vscode/settings.json
-.vscode/settings.json
+
+HSLAM/Thirdparty/cmake_install.cmake
+HSLAM/Thirdparty/CMakeFiles
+HSLAM/Thirdparty/CMakeCache.txt
+HSLAM/Thirdparty/cmake_install.cmake
+HSLAM/Thirdparty/Makefile
+
+HSLAM/Thirdparty/cmake_uninstall.cmake
+HSLAM/Thirdparty/cmake_uninstall.cmake.in
+HSLAM/Thirdparty/cmake_uninstall.cmake.in
+
+HSLAM/Thirdparty/onnxruntime
+HSLAM/Thirdparty/onnxruntime-linux-x64-1.19.2.tgz
+
+.cursor/rules/
