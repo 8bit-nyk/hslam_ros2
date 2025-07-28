@@ -66,6 +66,7 @@
 #include "IOWrapper/Output3DWrapper.h"
 
 #include "util/ImageAndExposure.h"
+#include "util/DepthLogger.h"
 
 #include "Indirect/IndirectTracker.h"
 
@@ -1869,12 +1870,12 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 					impt->idepth_min = std::max(0.0f, idepth - uncertainty);
 					impt->idepth_max = idepth + uncertainty;
 					
-					// Log first few depth-integrated points for verification
+					// Debug-only logging for depth-integrated point details
 					static int depthPointCount = 0;
 					if (depthPointCount < 10)
 					{
-						printf("Depth-integrated point %d: (u=%d, v=%d) depth=%.3fm, idepth=%.3f, range=[%.3f, %.3f]\n", 
-							   depthPointCount, x, y, depth, idepth, impt->idepth_min, impt->idepth_max);
+						HSLAM::DepthLogger::logDepthPoint(depthPointCount, x, y, depth, 
+														  idepth, impt->idepth_min, impt->idepth_max);
 						depthPointCount++;
 					}
 				}
@@ -1926,8 +1927,8 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 		}
 	}
 	
-	printf("MADE %d IMMATURE POINTS (%d with depth integration)!\n", 
-		   (int)newFrame->immaturePoints.size(), depthIntegratedCount);
+	// Log point creation statistics using DepthLogger
+	HSLAM::DepthLogger::logPointCreation((int)newFrame->immaturePoints.size(), depthIntegratedCount);
 }
 
 
@@ -2871,9 +2872,13 @@ void FullSystem::synchronizeDepthWithTracking()
         // Log depth integration statistics from the main tracker
         if(main_has_depth) {
             auto stats = coarseTracker->getLastIntegrationStats();
-            printf("FullSystem Depth Integration Stats: External=%d, Fused=%d, Total=%d, Rate=%.1f%%\n",
-                   stats.pixels_from_external_depth, stats.pixels_fused, 
-                   stats.total_valid_pixels, stats.integration_rate * 100.0f);
+            HSLAM::DepthLogger::logIntegrationStats(
+                stats.pixels_from_external_depth,
+                stats.pixels_fused,
+                stats.total_valid_pixels,
+                stats.integration_rate,
+                "FullSystem"
+            );
         }
     }
 }

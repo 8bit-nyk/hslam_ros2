@@ -14,6 +14,7 @@
 #include "util/globalCalib.h"
 
 #include "util/NumType.h"
+#include "util/DepthLogger.h"
 #include "FullSystem/FullSystem.h"
 
 #include "IOWrapper/Pangolin/PangolinDSOViewer.h"
@@ -275,6 +276,20 @@ int main(int argc, char **argv)
             // RGB-D pipeline using associations.txt
             printf("Using RGB-D pipeline with associations file: %s\n", associations.c_str());
             
+            // Initialize DepthLogger for RGB-D pipeline
+            std::string dataset_name = "unknown";
+            // Extract dataset name from source path
+            size_t last_slash = source.find_last_of('/');
+            if (last_slash != std::string::npos) {
+                std::string path_part = source.substr(last_slash + 1);
+                if (path_part.find("rgbd_dataset_") == 0) {
+                    dataset_name = path_part.substr(13); // Remove "rgbd_dataset_" prefix
+                }
+            }
+            HSLAM::DepthLogger::initialize("results", dataset_name);
+            HSLAM::DepthLogger::setDebugMode(false); // Disable debug mode by default
+            printf("DepthLogger: Initialized for dataset: %s\n", dataset_name.c_str());
+            
             // Load associations using tum_benchmark
             typedef tum_benchmark::FileReader<RGBDAssociation> FileReader;
             FileReader reader_assoc(associations);
@@ -351,9 +366,9 @@ int main(int argc, char **argv)
                 cv::Mat depth_img;
                 depth_img_raw.convertTo(depth_img, CV_32FC1, 1.0/5000.0);
                 
-                printf("Frame %d: RGB %dx%d, Depth %dx%d, timestamp=%.6f\n", 
-                       processedFrames, rgb_img.cols, rgb_img.rows, 
-                       depth_img.cols, depth_img.rows, timestamp);
+                // Debug-only logging for frame processing details
+                HSLAM::DepthLogger::logFrameProcessing(processedFrames, rgb_img.cols, rgb_img.rows,
+                                                     depth_img.cols, depth_img.rows, timestamp);
                 
                 // Call new TrackRGBD method
                 fullSystem->TrackRGBD(rgb_img, depth_img, timestamp);
@@ -518,13 +533,13 @@ int main(int argc, char **argv)
         double MilliSecondsTakenMT = sInitializerOffset + ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f);
         
         if (!associations.empty()) {
-            // RGB-D pipeline statistics
-            printf("\n======================\n");
-            printf("RGB-D Pipeline Results\n");
-            printf("Processed frames: %d\n", processedFrames);
-            printf("%.2fms per frame (single core)\n", MilliSecondsTakenSingle/processedFrames);
-            printf("%.2fms per frame (multi core)\n", MilliSecondsTakenMT / (float)processedFrames);
-            printf("======================\n\n");
+            // RGB-D pipeline statistics using DepthLogger
+            double avg_ms_per_frame = MilliSecondsTakenMT / (float)processedFrames;
+            double fps = 1000.0 / avg_ms_per_frame;
+            HSLAM::DepthLogger::logPerformance(processedFrames, avg_ms_per_frame, fps);
+            
+            // Finalize DepthLogger
+            HSLAM::DepthLogger::finalize();
         } else {
             // Monocular pipeline statistics
             int numFramesProcessed = abs(idsToPlay[0]-idsToPlay.back());

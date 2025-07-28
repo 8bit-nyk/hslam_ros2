@@ -29,6 +29,7 @@
 #include "FullSystem/Residuals.h"
 #include "OptimizationBackend/EnergyFunctionalStructs.h"
 #include "IOWrapper/ImageRW.h"
+#include "util/DepthLogger.h"
 #include <algorithm>
 
 #if !defined(__SSE3__) && !defined(__SSE2__) && !defined(__SSE1__)
@@ -1232,10 +1233,14 @@ void CoarseTracker::makeCoarseDepthL0Enhanced(std::vector<FrameHessian*> frameHe
         last_stats.integration_rate = 0.0f;
     }
     
-    // Log integration results
-    printf("CoarseTracker Depth Integration: Map Points=%d, External=%d, Fused=%d, Total=%d, Rate=%.1f%%\n",
-           last_stats.pixels_from_map_points, last_stats.pixels_from_external_depth,
-           last_stats.pixels_fused, last_stats.total_valid_pixels, last_stats.integration_rate * 100.0f);
+    // Log integration results using DepthLogger
+    HSLAM::DepthLogger::logIntegrationStats(
+        last_stats.pixels_from_external_depth,
+        last_stats.pixels_fused,
+        last_stats.total_valid_pixels,
+        last_stats.integration_rate,
+        "CoarseTracker"
+    );
 }
 
 /**
@@ -1295,8 +1300,8 @@ void CoarseTracker::integrateExternalDepthL0()
     last_stats.pixels_from_external_depth = integrated_count;
     last_stats.pixels_fused = fused_count;
     
-    printf("External depth integration: %d new pixels, %d fused pixels\n", 
-           integrated_count, fused_count);
+    // Debug-only logging for external depth integration details
+    HSLAM::DepthLogger::logExternalDepthDetails(integrated_count, fused_count);
 }
 
 /**

@@ -40,15 +40,13 @@ HSLAM/Thirdparty/CompiledLibs/
 HSLAM/run_scripts/
 HSLAM/results/
 HSLAM/models/
-HSLAM/logs/
-HSLAM/mats/
-HSLAM/docs/papers/
-HSLAM/docs/prompts/
-
+HSLAM/logs
 HSLAM/mats
 HSLAM/docs/papers
 HSLAM/docs/prompts
-.cursorrules
+
+.cursor/rules
+
 
 *.avi
 
@@ -69,3 +67,5 @@ HSLAM/Thirdparty/onnxruntime
 HSLAM/Thirdparty/onnxruntime-linux-x64-1.19.2.tgz
 
 .cursor/rules/
+HSLAM/tests/
+HSLAM/tests/build_validation/
