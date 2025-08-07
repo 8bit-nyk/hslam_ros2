@@ -4,6 +4,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include "util/settings.h"  // Add this include for setting_debugout_runquiet
 
 namespace HSLAM {
 
@@ -54,8 +55,10 @@ void DepthLogger::logIntegrationStats(int external_pixels, int fused_pixels,
     std::string rate_str = formatRate(integration_rate);
     
     // Console output (essential statistics)
-    printf("Depth Integration [%s]: External=%d, Fused=%d, Total=%d, Rate=%s\n",
-           component.c_str(), external_pixels, fused_pixels, total_pixels, rate_str.c_str());
+    if (!setting_debugout_runquiet) {
+        printf("Depth Integration [%s]: External=%d, Fused=%d, Total=%d, Rate=%s\n",
+               component.c_str(), external_pixels, fused_pixels, total_pixels, rate_str.c_str());
+    }
     
     // File logging (detailed)
     if (log_file.is_open()) {
@@ -75,8 +78,10 @@ void DepthLogger::logPointCreation(int total_points, int depth_integrated_points
         (100.0f * depth_integrated_points / total_points) : 0.0f;
     
     // Console output (essential statistics)
-    printf("Points Created: %d total, %d with depth integration (%.1f%%)\n",
-           total_points, depth_integrated_points, integration_percentage);
+    if (!setting_debugout_runquiet) {
+        printf("Points Created: %d total, %d with depth integration (%.1f%%)\n",
+               total_points, depth_integrated_points, integration_percentage);
+    }
     
     // File logging (detailed)
     if (log_file.is_open()) {
@@ -94,8 +99,10 @@ void DepthLogger::logPerformance(int processed_frames, double avg_ms_per_frame, 
     std::string timestamp = getTimestamp();
     
     // Console output (essential statistics)
-    printf("RGB-D Performance: %d frames, %.2fms/frame, %.1f fps\n",
-           processed_frames, avg_ms_per_frame, fps);
+    if (!setting_debugout_runquiet) {
+        printf("RGB-D Performance: %d frames, %.2fms/frame, %.1f fps\n",
+               processed_frames, avg_ms_per_frame, fps);
+    }
     
     // File logging (detailed)
     if (log_file.is_open()) {
@@ -111,7 +118,7 @@ void DepthLogger::logPerformance(int processed_frames, double avg_ms_per_frame, 
 }
 
 void DepthLogger::debugLog(const std::string& message, const std::string& component) {
-    if (!debug_mode) return;
+    if (!debug_mode || setting_debugout_runquiet) return;
     
     std::string timestamp = getTimestamp();
     std::string prefix = component.empty() ? "" : "[" + component + "] ";
@@ -177,7 +184,9 @@ void DepthLogger::finalize() {
 
 void DepthLogger::setDebugMode(bool enabled) {
     debug_mode = enabled;
-    std::cout << "DepthLogger: Debug mode " << (enabled ? "enabled" : "disabled") << std::endl;
+    if (!setting_debugout_runquiet) {
+        std::cout << "DepthLogger: Debug mode " << (enabled ? "enabled" : "disabled") << std::endl;
+    }
 }
 
 std::string DepthLogger::getLogFilePath() {

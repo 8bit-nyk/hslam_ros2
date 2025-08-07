@@ -71,6 +71,9 @@
 #include "Indirect/IndirectTracker.h"
 
 #include <cmath>
+#include <chrono>
+#include "ML/MLInference.h"
+#include "ML/MLDepthService.h"
 
 namespace HSLAM
 {
@@ -255,6 +258,12 @@ FullSystem::~FullSystem()
 	delete coarseInitializer;
 	delete pixelSelector;
 	delete ef;
+	
+	// Phase 2: Shutdown ML depth service
+	if (ml_depth_service_) {
+		shutdownMLDepthService();
+	}
+	
 	loopCloser.reset();
 	matcher.reset();
 	detector.reset();
@@ -1092,48 +1101,162 @@ void FullSystem::flagPointsForRemoval()
  * @param depth_img Depth image as CV_32FC1 in meters
  * @param timestamp Frame timestamp
  */
-void FullSystem::TrackRGBD(const cv::Mat& rgb_img, const cv::Mat& depth_img, const double timestamp)
+void FullSystem::TrackRGBD(const cv::Mat& rgb_image, const cv::Mat& depth_image, const double timestamp)
 {
     if(isLost) return;
     
     // Validate input images
-    if(rgb_img.empty() || depth_img.empty()) {
+    if(rgb_image.empty() || depth_image.empty()) {
         printf("ERROR: Empty RGB or depth image in TrackRGBD\n");
         return;
     }
-    
-    if(rgb_img.type() != CV_32FC1) {
-        printf("ERROR: RGB image must be CV_32FC1\n");
-        return;
+
+    // Log frame processing details
+    if (!setting_debugout_runquiet) {
+        printf("TrackRGBD: Processing frame with timestamp %.6f, RGB %dx%d, Depth %dx%d\n",
+               timestamp, rgb_image.cols, rgb_image.rows, depth_image.cols, depth_image.rows);
     }
-    
-    if(depth_img.type() != CV_32FC1) {
-        printf("ERROR: Depth image must be CV_32FC1\n");
-        return;
-    }
-    
-    if(rgb_img.size() != depth_img.size()) {
-        printf("ERROR: RGB and depth images must have the same dimensions\n");
-        return;
-    }
-    
-    // Log RGB-D data loading for verification
-    printf("TrackRGBD: Processing frame with timestamp %.6f, RGB %dx%d, Depth %dx%d\n", 
-           timestamp, rgb_img.cols, rgb_img.rows, depth_img.cols, depth_img.rows);
     
     // Store depth image for use in makeNewTraces
-    currentDepthImage = depth_img.clone();
+    currentDepthImage = depth_image.clone();
     
     // Synchronize depth with coarse trackers immediately
     synchronizeDepthWithTracking();
     
     // Create ImageAndExposure from RGB for compatibility with existing pipeline
-    ImageAndExposure* img = new ImageAndExposure(rgb_img.cols, rgb_img.rows, timestamp);
-    memcpy(img->image, rgb_img.data, rgb_img.cols * rgb_img.rows * sizeof(float));
+    ImageAndExposure* img = new ImageAndExposure(rgb_image.cols, rgb_image.rows, timestamp);
+    memcpy(img->image, rgb_image.data, rgb_image.cols * rgb_image.rows * sizeof(float));
     
     
     static int frame_id = 0;
     addActiveFrame(img, frame_id++);
+    
+    delete img;
+}
+
+/**
+ * @brief Enhanced monocular tracking with ML depth estimation (Phase 2)
+ * 
+ * Uses asynchronous MLDepthService with multiple inference strategies.
+ * Submits frames for ML processing and retrieves results when available.
+ * Falls back to standard monocular tracking if ML depth unavailable.
+ * 
+ * @param rgb_img RGB image as CV_8UC3 or CV_32FC3
+ * @param timestamp Frame timestamp
+ */
+void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_img, double timestamp)
+{
+    if(isLost) return;
+    
+    ml_metrics_.total_frames++;
+    
+    // Validate input image
+    if(rgb_img.empty()) {
+        printf("ERROR: Empty RGB image in TrackMonocularWithML\n");
+        return;
+    }
+    
+    cv::Mat ml_depth_image;
+    bool ml_depth_available = false;
+    
+    // Phase 2: Asynchronous ML depth processing
+    if(ml_depth_enabled_ && ml_depth_service_ && ml_depth_service_->isActive()) {
+        // Submit frame for ML depth estimation
+        static int frame_id = 0;
+        frame_id++;
+        
+        ML::MLDepthService::FrameRequest request(
+            rgb_img, timestamp, frame_id, shouldCreateKeyframe());
+        
+        ml_depth_service_->submitFrame(request);
+        
+        // Try to get ML depth result with increased tolerance for async processing
+        // Since inference takes ~650ms, we need a larger tolerance
+        auto depth_result = ml_depth_service_->getDepthResult(timestamp, 1000.0);  // 1 second tolerance
+        if(depth_result && depth_result->valid) {
+            ml_depth_image = depth_result->depth_map;
+            ml_depth_available = true;
+            ml_metrics_.frames_with_ml_depth++;
+            ml_metrics_.avg_ml_inference_time_ms = depth_result->inference_time_ms;
+            
+            // Store ML depth for other components
+            {
+                std::lock_guard<std::mutex> lock(ml_depth_mutex_);
+                current_ml_depth_image_ = ml_depth_image.clone();
+            }
+            
+            printf("TrackMonocularWithML: ML depth available (%.1fms), size %dx%d, conf=%.2f\n", 
+                   depth_result->inference_time_ms, ml_depth_image.cols, ml_depth_image.rows, 
+                   depth_result->confidence);
+        } else {
+            // Try to get any available result if exact match failed
+            auto any_result = ml_depth_service_->getDepthResult(timestamp, 5000.0);  // 5 second tolerance
+            if(any_result && any_result->valid) {
+                ml_depth_image = any_result->depth_map;
+                ml_depth_available = true;
+                ml_metrics_.frames_with_ml_depth++;
+                ml_metrics_.avg_ml_inference_time_ms = any_result->inference_time_ms;
+                
+                // Store ML depth for other components
+                {
+                    std::lock_guard<std::mutex> lock(ml_depth_mutex_);
+                    current_ml_depth_image_ = ml_depth_image.clone();
+                }
+                
+                printf("TrackMonocularWithML: Using cached ML depth (%.1fms), size %dx%d, conf=%.2f\n", 
+                       any_result->inference_time_ms, ml_depth_image.cols, ml_depth_image.rows, 
+                       any_result->confidence);
+            } else {
+                // Debug: Check if any results are available
+                auto perf_stats = ml_depth_service_->getPerformanceStats();
+                if (perf_stats.successful_inferences > 0) {
+                    printf("TrackMonocularWithML: No depth result for timestamp %.6f (tolerance: 5000ms)\n", timestamp);
+                    printf("TrackMonocularWithML: Available results: %d successful, %d failed\n", 
+                           perf_stats.successful_inferences, perf_stats.failed_inferences);
+                }
+            }
+        }
+        
+        // Update performance statistics from service
+        auto perf_stats = ml_depth_service_->getPerformanceStats();
+        ml_metrics_.frames_skipped = perf_stats.frames_skipped;
+    }
+    
+    // Update ML utilization rate
+    ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
+    
+    // Convert RGB to HSLAM format
+    cv::Mat gray_image;
+    if(rgb_img.channels() == 3) {
+        cv::cvtColor(rgb_img, gray_image, cv::COLOR_BGR2GRAY);
+    } else {
+        gray_image = rgb_img;
+    }
+    
+    // Convert to float if needed
+    cv::Mat float_image;
+    if(gray_image.type() != CV_32FC1) {
+        gray_image.convertTo(float_image, CV_32FC1);
+    } else {
+        float_image = gray_image;
+    }
+    
+    // Create ImageAndExposure for HSLAM pipeline
+    ImageAndExposure* img = new ImageAndExposure(float_image.cols, float_image.rows, timestamp);
+    std::memcpy(img->image, float_image.ptr<float>(), float_image.cols * float_image.rows * sizeof(float));
+    
+    // Store ML depth for point creation if available
+    if(ml_depth_available) {
+        currentDepthImage = ml_depth_image.clone();
+        printf("TrackMonocularWithML: Using ML depth for point creation\n");
+    } else {
+        // Clear any existing depth to use pure monocular
+        currentDepthImage = cv::Mat();
+    }
+    
+    // Process frame using existing HSLAM pipeline
+    static int frame_id_tracking = 0;
+    addActiveFrame(img, frame_id_tracking++);
     
     delete img;
 }
@@ -2882,4 +3005,202 @@ void FullSystem::synchronizeDepthWithTracking()
         }
     }
 }
+
+// =================== ML DEPTH SERVICE INTEGRATION (Phase 2) ===================
+
+bool FullSystem::initializeMLDepthService(const MLConfig& config,
+                                          const std::string& strategy_name,
+                                          int snapshot_interval)
+{
+    try {
+        // Convert FullSystem::MLConfig to ML::MLInference::InferenceConfig
+        ML::MLInference::InferenceConfig ml_config;
+        ml_config.model_path = config.model_path;
+        ml_config.model_type = ML::MLInference::METRIC3D_V2;
+        ml_config.enable_gpu = config.enable_gpu;
+        ml_config.num_threads = config.num_threads;
+        
+        // GPU-specific parameters
+        ml_config.enable_fp16 = config.enable_fp16;
+        ml_config.gpu_device_id = config.gpu_device_id;
+        ml_config.gpu_memory_limit = config.gpu_memory_limit_mb * 1024 * 1024;  // Convert MB to bytes
+        
+        ml_config.input_width = 256;   // Optimized for performance (was 518)
+        ml_config.input_height = 256;  // Optimized for performance (was 518)
+        ml_config.normalize_input = true;
+        ml_config.depth_scale = 1.0f;
+        ml_config.min_depth = config.min_depth;
+        ml_config.max_depth = config.max_depth;
+        ml_config.benchmark_enabled = config.benchmark_enabled;
+        
+        // Parse strategy name
+        ML::MLDepthService::InferenceStrategy strategy = ML::MLDepthService::EVERY_FRAME;
+        if (strategy_name == "keyframe_only") {
+            strategy = ML::MLDepthService::KEYFRAME_ONLY;
+        } else if (strategy_name == "snapshot_mode") {
+            strategy = ML::MLDepthService::SNAPSHOT_MODE;
+        } else if (strategy_name != "every_frame") {
+            printf("Warning: Unknown ML strategy '%s', using every_frame\n", strategy_name.c_str());
+        }
+        
+        // Create ML depth service
+        ml_depth_service_ = std::make_unique<ML::MLDepthService>(ml_config, strategy, snapshot_interval);
+        
+        // Start asynchronous processing
+        if (!ml_depth_service_->start()) {
+            printf("Failed to start ML depth service\n");
+            ml_depth_service_.reset();
+            return false;
+        }
+        
+        ml_depth_enabled_ = true;
+        
+        printf("FullSystem: ML depth service initialized successfully\n");
+        printf("  Strategy: %s\n", strategy_name.c_str());
+        if (strategy == ML::MLDepthService::SNAPSHOT_MODE) {
+            printf("  Snapshot interval: %d frames\n", snapshot_interval);
+        }
+        
+        return true;
+        
+    } catch (const std::exception& e) {
+        printf("FullSystem: ML depth service initialization failed: %s\n", e.what());
+        ml_depth_enabled_ = false;
+        ml_depth_service_.reset();
+        return false;
+    }
+}
+
+void FullSystem::shutdownMLDepthService()
+{
+    if (ml_depth_service_) {
+        printf("FullSystem: Shutting down ML depth service...\n");
+        ml_depth_service_->stop();
+        ml_depth_service_.reset();
+    }
+    
+    ml_depth_enabled_ = false;
+    
+    // Clear ML depth image
+    {
+        std::lock_guard<std::mutex> lock(ml_depth_mutex_);
+        current_ml_depth_image_ = cv::Mat();
+    }
+    
+    printf("FullSystem: ML depth service shutdown complete\n");
+}
+
+bool FullSystem::setMLInferenceStrategy(const std::string& strategy_name, int snapshot_interval)
+{
+    if (!ml_depth_service_) {
+        printf("FullSystem: ML depth service not initialized\n");
+        return false;
+    }
+    
+    // Parse strategy name
+    ML::MLDepthService::InferenceStrategy strategy = ML::MLDepthService::EVERY_FRAME;
+    if (strategy_name == "keyframe_only") {
+        strategy = ML::MLDepthService::KEYFRAME_ONLY;
+    } else if (strategy_name == "snapshot_mode") {
+        strategy = ML::MLDepthService::SNAPSHOT_MODE;
+    } else if (strategy_name != "every_frame") {
+        printf("FullSystem: Unknown ML strategy '%s', using every_frame\n", strategy_name.c_str());
+    }
+    
+    // Update strategy
+    ml_depth_service_->setStrategy(strategy, snapshot_interval);
+    
+    printf("FullSystem: ML inference strategy changed to %s\n", strategy_name.c_str());
+    if (strategy == ML::MLDepthService::SNAPSHOT_MODE) {
+        printf("FullSystem: Snapshot interval set to %d frames\n", snapshot_interval);
+    }
+    
+    return true;
+}
+
+FullSystem::MLMetrics FullSystem::getMLMetrics() const
+{
+    MLMetrics metrics = ml_metrics_;
+    
+    // Update with performance statistics from ML depth service
+    if (ml_depth_service_) {
+        auto perf_stats = ml_depth_service_->getPerformanceStats();
+        metrics.avg_ml_inference_time_ms = perf_stats.avg_inference_time_ms;
+        metrics.frames_skipped = perf_stats.frames_skipped;
+    }
+    
+    return metrics;
+}
+
+bool FullSystem::shouldCreateKeyframe() const
+{
+    // Use existing HSLAM keyframe creation logic
+    // This is a simplified version - the actual logic is in addActiveFrame
+    // For now, use a basic heuristic based on frame count and tracking quality
+    
+    if (allFrameHistory.size() == 1) {
+        return true;  // Always make first frame a keyframe
+    }
+    
+    if (setting_keyframesPerSecond > 0) {
+        // Fixed keyframe rate mode
+        if (allKeyFramesHistory.empty()) {
+            return true;
+        }
+        double time_since_last_kf = allFrameHistory.back()->timestamp - allKeyFramesHistory.back()->timestamp;
+        return time_since_last_kf > 0.95f / setting_keyframesPerSecond;
+    }
+    
+    // For adaptive keyframe creation, use conservative estimate
+    // In practice, this would use more sophisticated tracking quality metrics
+    return (allFrameHistory.size() % 10 == 0);  // Every 10th frame as rough estimate
+}
+
+// Keyframe statistics methods
+float FullSystem::getKeyframeRatio() const
+{
+	boost::lock_guard<boost::mutex> lock(trackMutex);
+	
+	if (allFrameHistory.empty()) {
+		return 0.0f;
+	}
+	
+	size_t keyframeCount = allKeyFramesHistory.size();
+	size_t totalFrameCount = allFrameHistory.size();
+	
+	return static_cast<float>(keyframeCount) / static_cast<float>(totalFrameCount);
+}
+
+size_t FullSystem::getKeyframeCount() const
+{
+	boost::lock_guard<boost::mutex> lock(trackMutex);
+	return allKeyFramesHistory.size();
+}
+
+size_t FullSystem::getTotalFrameCount() const
+{
+	boost::lock_guard<boost::mutex> lock(trackMutex);
+	return allFrameHistory.size();
+}
+
+void FullSystem::printKeyframeStats() const
+{
+	size_t keyframeCount = getKeyframeCount();
+	size_t totalFrameCount = getTotalFrameCount();
+	float keyframeRatio = getKeyframeRatio();
+	
+	// Console output following existing patterns
+	if (!setting_debugout_runquiet) {
+		printf("Keyframe Statistics: %zu keyframes / %zu total frames (%.2f%% ratio)\n",
+			   keyframeCount, totalFrameCount, keyframeRatio * 100.0f);
+	}
+	
+	// File logging if enabled
+	if (setting_logStuff && numsLog != nullptr) {
+		(*numsLog) << "KEYFRAME_STATS " << keyframeCount << " " << totalFrameCount 
+				   << " " << std::fixed << std::setprecision(4) << keyframeRatio << "\n";
+		numsLog->flush();
+	}
+}
+
 }

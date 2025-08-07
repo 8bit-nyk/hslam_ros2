@@ -28,6 +28,12 @@ namespace IOWrap
 class Output3DWrapper;
 }
 
+namespace ML
+{
+class MLInference;
+class MLDepthService;
+}
+
 class PixelSelector;
 class PCSyntheticPoint;
 class CoarseTracker;
@@ -133,6 +139,8 @@ struct PC_output
 
 class FullSystem
 {
+	friend class LoopCloser;  // Allow LoopCloser access to private members
+	
 public:
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 	FullSystem();
@@ -143,6 +151,9 @@ public:
 
 	// RGB-D tracking method - for now, calls TrackMonocular
 	void TrackRGBD(const cv::Mat& rgb_img, const cv::Mat& depth_img, const double timestamp);
+
+	// ML Depth tracking method - enhanced monocular tracking with ML depth
+	void TrackMonocularWithML(const cv::Mat& rgb_img, double timestamp);
 
 	// =================== COARSE TRACKER DEPTH INTEGRATION ===================
 	/**
@@ -187,8 +198,85 @@ public:
 	// RGB-D depth integration support
 	cv::Mat currentDepthImage;  // Current depth image for depth integration
 
+	// ML Depth integration support (Phase 2)
+	std::unique_ptr<ML::MLDepthService> ml_depth_service_;
+	cv::Mat current_ml_depth_image_;
+	mutable std::mutex ml_depth_mutex_;
+	bool ml_depth_enabled_ = false;
+	
+	// ML performance tracking
+	struct MLMetrics {
+		size_t total_frames = 0;
+		size_t frames_with_ml_depth = 0;
+		float ml_depth_utilization = 0.0f;
+		float avg_ml_inference_time_ms = 0.0f;
+		size_t frames_skipped = 0;  // Added for strategy tracking
+	};
+	MLMetrics ml_metrics_;
+	
+	// ML Depth Service Management (Phase 2 additions)
+public:
+	// Simple ML configuration struct to avoid forward declaration issues
+	struct MLConfig {
+		std::string model_path;
+		bool enable_gpu = false;
+		int num_threads = 4;
+		
+		// GPU-specific parameters
+		bool enable_fp16 = false;          // FP16 optimization for GPU
+		int gpu_device_id = 0;             // GPU device selection
+		size_t gpu_memory_limit_mb = 2048; // GPU memory limit in MB
+		
+		int input_width = 518;
+		int input_height = 518;
+		float min_depth = 0.1f;
+		float max_depth = 10.0f;
+		bool benchmark_enabled = false;
+	};
+	
+	/**
+	 * @brief Initialize ML depth service with asynchronous processing
+	 * @param config ML inference configuration
+	 * @param strategy Initial inference strategy
+	 * @param snapshot_interval Frames between inference in snapshot mode
+	 * @return Initialization success status
+	 */
+	bool initializeMLDepthService(const MLConfig& config,
+	                              const std::string& strategy_name = "every_frame",
+	                              int snapshot_interval = 5);
+	
+	/**
+	 * @brief Stop and cleanup ML depth service
+	 */
+	void shutdownMLDepthService();
+	
+	/**
+	 * @brief Change ML inference strategy during runtime
+	 * @param strategy_name Strategy name ("every_frame", "keyframe_only", "snapshot_mode")
+	 * @param snapshot_interval Interval for snapshot mode
+	 * @return Success status
+	 */
+	bool setMLInferenceStrategy(const std::string& strategy_name, int snapshot_interval = 5);
+	
+	/**
+	 * @brief Get current ML depth service performance statistics
+	 * @return Performance statistics structure
+	 */
+	MLMetrics getMLMetrics() const;
+	
+	// Public utility methods
 	void setGammaFunction(float* BInv);
 	void setOriginalCalib(const VecXf &originalCalib, int originalW, int originalH);
+	
+	// Keyframe statistics methods
+	float getKeyframeRatio() const;
+	size_t getKeyframeCount() const;
+	size_t getTotalFrameCount() const;
+	void printKeyframeStats() const;
+	
+private:
+	// Helper methods for ML integration
+	bool shouldCreateKeyframe() const;  // Forward declare existing keyframe logic
 
 	boost::mutex mapMutex;
 
@@ -199,7 +287,7 @@ public:
 	EnergyFunctional* ef;
 	std::vector<FrameShell*> allKeyFramesHistory;
 	std::unordered_map<unsigned long, PC_output> allMargPointsHistory;
-	boost::mutex trackMutex;
+	mutable boost::mutex trackMutex;
 	void BAatExit();
 
 

@@ -49,7 +49,12 @@ PangolinDSOViewer::PangolinDSOViewer(int w, int h, bool startRunThread)
 	bufferValid = false;
 	ngoodPoints = 0;
 
-	pangolin::CreateWindowAndBind(main_window_name,1920,1080);
+	try {
+		pangolin::CreateWindowAndBind(main_window_name,1920,1080);
+	} catch (const std::exception& e) {
+		printf("PangolinDSOViewer: Failed to create window: %s\n", e.what());
+		throw; // Re-throw to be caught by main.cpp
+	}
 	const int UI_WIDTH = 270; //180
 
 	glEnable(GL_DEPTH_TEST);

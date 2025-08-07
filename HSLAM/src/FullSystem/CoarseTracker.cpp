@@ -1022,7 +1022,9 @@ void CoarseTracker::setExternalDepthImage(const cv::Mat& depth_image)
     external_depth_image = depth_image.clone();
     has_external_depth = true;
     
-    printf("CoarseTracker: External depth image set (%dx%d)\n", w[0], h[0]);
+    if (!setting_debugout_runquiet) {
+        printf("CoarseTracker: External depth image set (%dx%d)\n", w[0], h[0]);
+    }
 }
 
 /**

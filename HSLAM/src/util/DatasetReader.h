@@ -552,7 +552,9 @@ private:
 					try {
 						double timestamp = std::stod(timestamp_str);
 						timestamps.push_back(timestamp);
-						printf("Extracted timestamp from filename %s: %.6f\n", filename.c_str(), timestamp);
+						if (!setting_debugout_runquiet) {
+							printf("Extracted timestamp from filename %s: %.6f\n", filename.c_str(), timestamp);
+						}
 					} catch (const std::exception& e) {
 						printf("Failed to extract timestamp from filename %s, using fallback\n", filename.c_str());
 						timestamps.clear();

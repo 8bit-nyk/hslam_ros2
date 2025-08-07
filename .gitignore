@@ -44,6 +44,7 @@ HSLAM/logs
 HSLAM/mats
 HSLAM/docs/papers
 HSLAM/docs/prompts
+HSLAM/docs
 
 .cursor/rules
 
@@ -51,7 +52,7 @@ HSLAM/docs/prompts
 *.avi
 
 analytics
-.vscode/settings.json
+.vscode
 
 HSLAM/Thirdparty/cmake_install.cmake
 HSLAM/Thirdparty/CMakeFiles
@@ -63,9 +64,12 @@ HSLAM/Thirdparty/cmake_uninstall.cmake
 HSLAM/Thirdparty/cmake_uninstall.cmake.in
 HSLAM/Thirdparty/cmake_uninstall.cmake.in
 
-HSLAM/Thirdparty/onnxruntime
+HSLAM/Thirdparty/onnxruntime*
 HSLAM/Thirdparty/onnxruntime-linux-x64-1.19.2.tgz
 
 .cursor/rules/
+.cursorignore
 HSLAM/tests/
 HSLAM/tests/build_validation/
+HSLAM/docs/dl_reference_code/
+HSLAM/docs/depth_integration

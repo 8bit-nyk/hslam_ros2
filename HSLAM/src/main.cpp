@@ -11,6 +11,7 @@
 #include "util/settings.h"
 #include "util/globalFuncs.h"
 #include "util/DatasetReader.h"
+#include <pangolin/pangolin.h>
 #include "util/globalCalib.h"
 
 #include "util/NumType.h"
@@ -25,6 +26,12 @@
 // RGB-D pipeline includes
 #include "tum_benchmark/tum_benchmark.hpp"
 #include <opencv2/opencv.hpp>
+
+// ML depth integration includes
+#include "ML/MLInference.h"
+
+// FPS logging includes
+#include "util/FPSLogger.h"
 
 // Custom structure for parsing associations.txt
 struct RGBDAssociation {
@@ -97,6 +104,15 @@ int main(int argc, char **argv)
 		("S,use16bit", "Read 16 bit images", cxxopts::value<bool>()->default_value("false"))
 		("P,outPC", "Output point cloud", cxxopts::value<bool>()->default_value("false"))
 		("E,pauseEnd", "Pause at end", cxxopts::value<bool>()->default_value("false"))
+		("ml-depth", "Enable ML depth estimation", cxxopts::value<bool>()->default_value("false"))
+		("ml-model", "Path to ONNX ML depth model", cxxopts::value<std::string>()->default_value("models/metric3d-vit-small/onnx/model.onnx"))
+		("ml-strategy", "ML inference strategy (every_frame|keyframe_only|snapshot_mode)", cxxopts::value<std::string>()->default_value("every_frame"))
+		("ml-snapshot-interval", "Frames between ML inference in snapshot mode", cxxopts::value<int>()->default_value("5"))
+		("ml-benchmark", "Enable ML performance benchmarking", cxxopts::value<bool>()->default_value("false"))
+		("ml-gpu", "Enable GPU acceleration for ML inference", cxxopts::value<bool>()->default_value("false"))
+		("ml-fp16", "Enable FP16 optimization for GPU inference", cxxopts::value<bool>()->default_value("false"))
+		("ml-gpu-device", "GPU device ID for ML inference", cxxopts::value<int>()->default_value("0"))
+		("ml-gpu-memory", "GPU memory limit in MB", cxxopts::value<size_t>()->default_value("2048"))
 		("h,help", "Print usage")
     ;
 
@@ -129,6 +145,19 @@ int main(int argc, char **argv)
 	bool use_16bit = result["use16bit"].as<bool>(); 
 
 	bool pauseEnd = result["pauseEnd"].as<bool>(); 
+
+	// ML depth options (Phase 2 + GPU Integration)
+	bool ml_depth_enabled = result["ml-depth"].as<bool>();
+	std::string ml_model_path = result["ml-model"].as<std::string>();
+	std::string ml_strategy = result["ml-strategy"].as<std::string>();
+	int ml_snapshot_interval = result["ml-snapshot-interval"].as<int>();
+	bool ml_benchmark_enabled = result["ml-benchmark"].as<bool>();
+	
+	// GPU acceleration options (Phase 3)
+	bool ml_gpu_enabled = result["ml-gpu"].as<bool>();
+	bool ml_fp16_enabled = result["ml-fp16"].as<bool>();
+	int ml_gpu_device = result["ml-gpu-device"].as<int>();
+	size_t ml_gpu_memory_mb = result["ml-gpu-memory"].as<size_t>();
 
 	if(source.empty() || calib.empty()) { std::cout<< "Path to images or calibration not provided! cannot function without them. exit." << std::endl; return(0);}
 
@@ -250,17 +279,97 @@ int main(int argc, char **argv)
 		printf("Vocabulary Set\n");
 	}
 
+	// Initialize ML depth system (Phase 2) if enabled
+	if(ml_depth_enabled) {
+		printf("Initializing ML depth system (Phase 2)...\n");
+		printf("  Model: %s\n", ml_model_path.c_str());
+		printf("  Strategy: %s\n", ml_strategy.c_str());
+		if(ml_strategy == "snapshot_mode") {
+			printf("  Snapshot interval: %d frames\n", ml_snapshot_interval);
+		}
+		
+		// Create ML configuration using FullSystem's MLConfig
+		FullSystem::MLConfig ml_config;
+		ml_config.model_path = ml_model_path;
+		ml_config.enable_gpu = ml_gpu_enabled;
+		ml_config.num_threads = 4;
+		
+		// GPU-specific configuration
+		ml_config.enable_fp16 = ml_fp16_enabled;
+		ml_config.gpu_device_id = ml_gpu_device;
+		ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
+		
+		ml_config.input_width = 256;   // Optimized for performance (was 518)
+		ml_config.input_height = 256;  // Optimized for performance (was 518)
+		ml_config.min_depth = 0.1f;
+		ml_config.max_depth = 10.0f;
+		ml_config.benchmark_enabled = ml_benchmark_enabled;
+		
+		if(ml_gpu_enabled) {
+			printf("  GPU Acceleration: Enabled (Device %d, Memory: %zu MB, FP16: %s)\n",
+			       ml_gpu_device, ml_gpu_memory_mb, ml_fp16_enabled ? "Yes" : "No");
+		} else {
+			printf("  GPU Acceleration: Disabled (CPU mode)\n");
+		}
+		
+		// Initialize ML depth service (asynchronous)
+		if(!fullSystem->initializeMLDepthService(ml_config, ml_strategy, ml_snapshot_interval)) {
+			printf("ERROR: Failed to initialize ML depth service\n");
+			return -1;
+		}
+		
+		printf("ML Depth Service (Phase 2) initialized successfully\n");
+		
+		// Extract dataset name from source path for results directory
+		std::string dataset_name = "unknown";
+		size_t last_slash = source.find_last_of('/');
+		if (last_slash != std::string::npos) {
+			std::string path_part = source.substr(last_slash + 1);
+			if (path_part.find("rgbd_dataset_") == 0) {
+				dataset_name = path_part.substr(13); // Remove "rgbd_dataset_" prefix
+			} else {
+				dataset_name = path_part; // Use the directory name as dataset name
+			}
+		}
+
+		// Benchmark is now integrated into the service automatically
+		if (ml_benchmark_enabled) {
+			printf("ML performance benchmarking enabled - metrics will be collected during operation\n");
+		}
+	} else {
+		printf("ML depth system disabled\n");
+		fullSystem->ml_depth_enabled_ = false;
+	}
+
 	IOWrap::PangolinDSOViewer* viewer = 0;
 	if(!disableAllDisplay)
     {
-        viewer = new IOWrap::PangolinDSOViewer(wG[0],hG[0], false);
-        fullSystem->outputWrapper.push_back(viewer);
+        // Check for headless environment (no DISPLAY variable)
+        const char* display_env = std::getenv("DISPLAY");
+        if (display_env == nullptr || strlen(display_env) == 0) {
+            printf("WARNING: No DISPLAY environment variable found. Running in headless mode (GUI disabled).\n");
+            disableAllDisplay = true;
+        } else {
+            // Try to initialize GUI with error handling
+            try {
+                viewer = new IOWrap::PangolinDSOViewer(wG[0],hG[0], true);  // Enable GUI thread
+                fullSystem->outputWrapper.push_back(viewer);
+                printf("GUI viewer initialized successfully\n");
+            } catch (const std::exception& e) {
+                printf("WARNING: Failed to initialize GUI viewer: %s\n", e.what());
+                printf("Continuing in headless mode...\n");
+                disableAllDisplay = true;
+                viewer = nullptr;
+            }
+        }
     }
 
 
 
     if(useSampleOutput)
         fullSystem->outputWrapper.push_back(new IOWrap::SampleOutputWrapper());
+
+
 
 
 	// RGB-D pipeline: Use associations file if provided, otherwise fallback to monocular
@@ -272,20 +381,27 @@ int main(int argc, char **argv)
         int processedFrames = 0;  // Declare at function scope
         std::vector<int> idsToPlay;  // Declare at function scope for statistics
 
+        // Initialize FPSLogger for performance monitoring
+        std::string dataset_name = "unknown";
+        // Extract dataset name from source path
+        size_t last_slash = source.find_last_of('/');
+        if (last_slash != std::string::npos) {
+            std::string path_part = source.substr(last_slash + 1);
+            if (path_part.find("rgbd_dataset_") == 0) {
+                dataset_name = path_part.substr(13); // Remove "rgbd_dataset_" prefix
+            } else {
+                dataset_name = path_part; // Use the directory name as dataset name
+            }
+        }
+        HSLAM::FPSLogger::initialize("results", dataset_name);
+        HSLAM::FPSLogger::setDebugMode(false); // Disable debug mode by default
+        printf("FPSLogger: Initialized for dataset: %s\n", dataset_name.c_str());
+
         if (!associations.empty()) {
             // RGB-D pipeline using associations.txt
             printf("Using RGB-D pipeline with associations file: %s\n", associations.c_str());
             
             // Initialize DepthLogger for RGB-D pipeline
-            std::string dataset_name = "unknown";
-            // Extract dataset name from source path
-            size_t last_slash = source.find_last_of('/');
-            if (last_slash != std::string::npos) {
-                std::string path_part = source.substr(last_slash + 1);
-                if (path_part.find("rgbd_dataset_") == 0) {
-                    dataset_name = path_part.substr(13); // Remove "rgbd_dataset_" prefix
-                }
-            }
             HSLAM::DepthLogger::initialize("results", dataset_name);
             HSLAM::DepthLogger::setDebugMode(false); // Disable debug mode by default
             printf("DepthLogger: Initialized for dataset: %s\n", dataset_name.c_str());
@@ -333,16 +449,22 @@ int main(int argc, char **argv)
                     std::string timestamp_str = rgb_filename.substr(0, dot_pos);
                     try {
                         timestamp = std::stod(timestamp_str);
-                        printf("Extracted timestamp from filename: %.6f\n", timestamp);
+                        if (!setting_debugout_runquiet) {
+                            printf("Extracted timestamp from filename: %.6f\n", timestamp);
+                        }
                     } catch (const std::exception& e) {
                         // Fallback to associations.txt timestamp
                         timestamp = entry.rgb_timestamp;
-                        printf("Using associations.txt timestamp: %.6f (filename extraction failed)\n", timestamp);
+                        if (!setting_debugout_runquiet) {
+                            printf("Using associations.txt timestamp: %.6f (filename extraction failed)\n", timestamp);
+                        }
                     }
                 } else {
                     // Fallback to associations.txt timestamp
                     timestamp = entry.rgb_timestamp;
-                    printf("Using associations.txt timestamp: %.6f (no extension found)\n", timestamp);
+                    if (!setting_debugout_runquiet) {
+                        printf("Using associations.txt timestamp: %.6f (no extension found)\n", timestamp);
+                    }
                 }
                 
                 // Load RGB image
@@ -475,7 +597,16 @@ int main(int argc, char **argv)
                     }
                 }
 
-                if (!skipFrame) fullSystem->addActiveFrame(img, i);
+                if (!skipFrame) {
+                    if(ml_depth_enabled && fullSystem->ml_depth_enabled_) {
+                        // Use ML-enhanced tracking
+                        cv::Mat rgb_mat(img->h, img->w, CV_32FC1, img->image);
+                        fullSystem->TrackMonocularWithML(rgb_mat, img->timestamp);
+                    } else {
+                        // Use standard monocular tracking
+                        fullSystem->addActiveFrame(img, i);
+                    }
+                }
 
                 delete img;
         
@@ -529,21 +660,49 @@ int main(int argc, char **argv)
         fullSystem->printResult("result.txt");
 		if (outputPC) fullSystem->printPC("PC.PCD");
         
+        // Log keyframe statistics
+        fullSystem->printKeyframeStats();
+        
         double MilliSecondsTakenSingle = 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC);
         double MilliSecondsTakenMT = sInitializerOffset + ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f);
         
+        // Log performance statistics using FPSLogger
         if (!associations.empty()) {
-            // RGB-D pipeline statistics using DepthLogger
+            // RGB-D pipeline statistics
             double avg_ms_per_frame = MilliSecondsTakenMT / (float)processedFrames;
             double fps = 1000.0 / avg_ms_per_frame;
-            HSLAM::DepthLogger::logPerformance(processedFrames, avg_ms_per_frame, fps);
             
-            // Finalize DepthLogger
+            // Log SLAM performance
+            HSLAM::FPSLogger::logSlamPerformance(processedFrames, avg_ms_per_frame, fps, "RGB-D");
+            
+            // Log RGB-D specific statistics using DepthLogger
+            HSLAM::DepthLogger::logPerformance(processedFrames, avg_ms_per_frame, fps);
             HSLAM::DepthLogger::finalize();
         } else {
             // Monocular pipeline statistics
             int numFramesProcessed = abs(idsToPlay[0]-idsToPlay.back());
             double numSecondsProcessed = fabs(reader->getTimestamp(idsToPlay[0])-reader->getTimestamp(idsToPlay.back()));
+            double avg_ms_per_frame = MilliSecondsTakenMT / (float)numFramesProcessed;
+            double fps = 1000.0 / avg_ms_per_frame;
+            
+            // Determine pipeline type for logging
+            std::string pipeline_type = (ml_depth_enabled && fullSystem->ml_depth_enabled_) ? "ML_Enhanced" : "Monocular";
+            
+            // Log SLAM performance
+            HSLAM::FPSLogger::logSlamPerformance(numFramesProcessed, avg_ms_per_frame, fps, pipeline_type);
+            
+            // Log ML performance if enabled
+            if (ml_depth_enabled && fullSystem->ml_depth_enabled_) {
+                auto ml_metrics = fullSystem->ml_metrics_;
+                HSLAM::FPSLogger::logMLPerformance(
+                    ml_metrics.total_frames,
+                    ml_metrics.frames_with_ml_depth,
+                    ml_metrics.avg_ml_inference_time_ms,
+                    ml_metrics.ml_depth_utilization
+                );
+            }
+            
+            // Console output for compatibility
             printf("\n======================"
                     "\n%d Frames (%.1f fps)"
                     "\n%.2fms per frame (single core); "
@@ -557,6 +716,9 @@ int main(int argc, char **argv)
                     1000 / (MilliSecondsTakenSingle/numSecondsProcessed),
                     1000 / (MilliSecondsTakenMT / numSecondsProcessed));
         }
+        
+        // Finalize FPSLogger
+        HSLAM::FPSLogger::finalize();
         
         //fullSystem->printFrameLifetimes();
         if(setting_logStuff)

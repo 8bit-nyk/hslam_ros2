@@ -17,7 +17,7 @@ set(EXECUTABLE_OUTPUT_PATH bin)
 set(LIBRARY_OUTPUT_PATH lib)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -34,6 +34,20 @@ find_package(DBoW3 REQUIRED) #PATHS ~/colcon_ws/src/HSLAM/Thirdparty/CompiledLib
 find_package(LibZip QUIET)
 find_package(Pangolin 0.2 QUIET)# PATHS ~/colcon_ws/src/HSLAM/Thirdparty/CompiledLibs)
 
+# ONNX Runtime configuration
+set(ONNXRUNTIME_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/onnxruntime)
+if(EXISTS ${ONNXRUNTIME_DIR})
+    message("--- found ONNX Runtime, compiling with ONNX Runtime library.")
+    set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_DIR}/include)
+    set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_DIR}/lib)
+    set(HAS_ONNXRUNTIME 1)
+    add_definitions(-DHAS_ONNXRUNTIME=1)
+else()
+    message("--- could not find ONNX Runtime, not compiling with ONNX Runtime library.")
+    message("    this means there will be no deep learning model inference capabilities.")
+    set(HAS_ONNXRUNTIME 0)
+    add_definitions(-DHAS_ONNXRUNTIME=0)
+endif()
 
 # flags
 add_definitions("-DENABLE_SSE")
@@ -44,15 +58,15 @@ add_definitions("-DThreadCount=${NUMTHREADS}")
 
 set(CMAKE_GENERATOR "Unix Makefiles")
 set(CMAKE_CXX_FLAGS
-   "${SSE_FLAGS} -O3 -g -std=c++0x -march=native -Wno-deprecated -Wno-deprecated-declarations" #-fopenmp is added if g2o is compiled with openmp capabilities
-#   "${SSE_FLAGS} -O3 -g -std=c++0x -fno-omit-frame-pointer"
+   "${SSE_FLAGS} -O3 -g -std=c++14 -march=native -Wno-deprecated -Wno-deprecated-declarations" #-fopenmp is added if g2o is compiled with openmp capabilities
+#   "${SSE_FLAGS} -O3 -g -std=c++14 -fno-omit-frame-pointer"
 )
 #SET CXX FLAGS to use march antive and gcc
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -std=gnu++0x")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -march=native -std=gnu++0x")
-set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -march=native -std=gnu++0x")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native -std=gnu++0x")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -march=native -std=gnu++0x")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -std=gnu++14")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -march=native -std=gnu++14")
+set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -march=native -std=gnu++14")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native -std=gnu++14")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -march=native -std=gnu++14")
 
 if (MSVC)
      set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
@@ -79,6 +93,9 @@ set(SOURCE_FILES
   ${PROJECT_SOURCE_DIR}/src/util/Undistort.cpp
   ${PROJECT_SOURCE_DIR}/src/util/globalCalib.cpp
   ${PROJECT_SOURCE_DIR}/src/util/DepthLogger.cpp
+  ${PROJECT_SOURCE_DIR}/src/util/FPSLogger.cpp
+  ${PROJECT_SOURCE_DIR}/src/ML/MLInference.cpp
+  ${PROJECT_SOURCE_DIR}/src/ML/MLDepthService.cpp
   ${PROJECT_SOURCE_DIR}/src/Indirect/Frame.cpp
   ${PROJECT_SOURCE_DIR}/src/Indirect/Detector.cpp
   ${PROJECT_SOURCE_DIR}/src/Indirect/MapPoint.cpp
@@ -99,6 +116,7 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/Thirdparty/tum_benchmark
   ${EIGEN3_INCLUDE_DIR}
   ${G2O_INCLUDE_DIR}
+  ${ONNXRUNTIME_INCLUDE_DIR}
 ) 
 
 
@@ -170,6 +188,11 @@ set(LIBS
   cxsparse
   cholmod
 )
+
+# Add ONNX Runtime library if available
+if(HAS_ONNXRUNTIME)
+    list(APPEND LIBS ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so)
+endif()
 
 # build main executable (only if we have both OpenCV and Pangolin)
 if (OpenCV_FOUND AND Pangolin_FOUND)
