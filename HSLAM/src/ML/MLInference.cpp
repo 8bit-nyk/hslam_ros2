@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstring>
 #include <cmath>
+#include <fstream>
+#include <unistd.h>
 
 namespace HSLAM {
 namespace ML {
@@ -30,10 +32,15 @@ bool MLInference::initialize() {
         // Initialize ONNX Runtime environment
         onnx_env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "HSLAM_ML");
         
-        // Configure session options
+        // Configure session options (Sprint 2 Optimization)
         session_options_ = std::make_unique<Ort::SessionOptions>();
         session_options_->SetIntraOpNumThreads(config_.num_threads);
-        session_options_->SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+        session_options_->SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        
+        // Additional optimizations for GPU performance
+        session_options_->SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+        session_options_->EnableMemPattern();
+        session_options_->EnableCpuMemArena();
         
         // Configure GPU execution provider if enabled
         if(config_.enable_gpu) {
@@ -66,8 +73,43 @@ bool MLInference::initialize() {
         
         printf("MLInference: Loading model from %s\n", config_.model_path.c_str());
         
-        // Load ONNX model
-        onnx_session_ = std::make_unique<Ort::Session>(*onnx_env_, config_.model_path.c_str(), *session_options_);
+        // Check if model file exists
+        std::ifstream model_file(config_.model_path);
+        if (!model_file.good()) {
+            printf("ERROR: Model file not found or not readable: %s\n", config_.model_path.c_str());
+            
+            // Try to get current working directory
+            char cwd[1024];
+            if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+                printf("  Current working directory: %s\n", cwd);
+            }
+            
+            // Check if parent directory exists
+            size_t last_slash = config_.model_path.find_last_of("/\\");
+            if (last_slash != std::string::npos) {
+                std::string parent_dir = config_.model_path.substr(0, last_slash);
+                std::ifstream parent_check(parent_dir);
+                printf("  Parent directory (%s) exists: %s\n", parent_dir.c_str(), 
+                       parent_check.good() ? "Yes" : "No");
+            }
+            
+            return false;
+        }
+        model_file.close();
+        
+        // Load ONNX model with enhanced error handling
+        try {
+            onnx_session_ = std::make_unique<Ort::Session>(*onnx_env_, config_.model_path.c_str(), *session_options_);
+            printf("MLInference: Model loaded successfully\n");
+        } catch (const Ort::Exception& e) {
+            printf("ERROR: Failed to load ONNX model: %s\n", e.what());
+            printf("  Model path: %s\n", config_.model_path.c_str());
+            printf("  ONNX Error code: %d\n", e.GetOrtErrorCode());
+            return false;
+        } catch (const std::exception& e) {
+            printf("ERROR: Unexpected error loading model: %s\n", e.what());
+            return false;
+        }
         
         // Create memory info
         memory_info_ = std::make_unique<Ort::MemoryInfo>(
@@ -166,15 +208,49 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                        channels[c].ptr<float>(), channel_size * sizeof(float));
         }
         
-        // Create input tensor
-        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-            *memory_info_, input_tensor_values.data(), input_tensor_size, 
-            input_shape.data(), input_shape.size());
-        
-        // Run inference
-        auto output_tensors = onnx_session_->Run(Ort::RunOptions{nullptr}, 
+        // Use memory pool for GPU optimization (Sprint 2)
+        std::vector<Ort::Value> output_tensors;
+        if (config_.enable_gpu && memory_pool_ && memory_pool_->initialized_) {
+            // Use IoBinding for GPU memory pool
+            try {
+                auto& io_binding = *memory_pool_->io_binding_;
+                
+                // Bind input tensor to GPU memory
+                Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+                    *memory_info_, input_tensor_values.data(), input_tensor_size, 
+                    input_shape.data(), input_shape.size());
+                
+                io_binding.BindInput(input_names_[0], input_tensor);
+                io_binding.BindOutput(output_names_[0], *memory_info_);
+                
+                // Run with IoBinding (GPU optimized)
+                onnx_session_->Run(Ort::RunOptions{nullptr}, io_binding);
+                output_tensors = io_binding.GetOutputValues();
+                
+                // Update memory pool statistics
+                memory_pool_->reuse_count_++;
+                
+            } catch (const std::exception& e) {
+                // Fallback to regular inference on memory pool failure
+                printf("MLInference: Memory pool failed, falling back: %s\n", e.what());
+                Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+                    *memory_info_, input_tensor_values.data(), input_tensor_size, 
+                    input_shape.data(), input_shape.size());
+                
+                output_tensors = onnx_session_->Run(Ort::RunOptions{nullptr}, 
+                                                   input_names_.data(), &input_tensor, 1,
+                                                   output_names_.data(), output_names_.size());
+            }
+        } else {
+            // Regular inference (CPU or GPU without memory pool)
+            Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+                *memory_info_, input_tensor_values.data(), input_tensor_size, 
+                input_shape.data(), input_shape.size());
+            
+            output_tensors = onnx_session_->Run(Ort::RunOptions{nullptr}, 
                                                input_names_.data(), &input_tensor, 1,
                                                output_names_.data(), output_names_.size());
+        }
         
         // Extract output tensor
         if(output_tensors.empty()) {
@@ -437,6 +513,11 @@ void MLInference::setupInputOutputNames() {
 }
 
 void MLInference::shutdown() {
+    // Stop warm-up thread if running
+    if (warm_up_thread_.joinable()) {
+        warm_up_thread_.join();
+    }
+    
     std::lock_guard<std::mutex> lock(mutex_);
     
     if (!initialized_.load()) {
@@ -444,6 +525,9 @@ void MLInference::shutdown() {
     }
 
 #ifdef HAS_ONNXRUNTIME
+    // Clean up memory pool
+    memory_pool_.reset();
+    
     onnx_session_.reset();
     session_options_.reset();
     memory_info_.reset();
@@ -456,7 +540,151 @@ void MLInference::shutdown() {
 #endif
 
     initialized_.store(false);
+    warm_up_complete_.store(false);
     printf("MLInference: Shutdown complete\n");
+}
+
+// GPU Warm-up Implementation (Sprint 2 Optimization)
+
+bool MLInference::startBackgroundWarmup(bool async) {
+    if (!initialized_.load()) {
+        printf("MLInference: Cannot start warm-up - not initialized\n");
+        return false;
+    }
+    
+    if (warm_up_complete_.load()) {
+        printf("MLInference: Warm-up already complete\n");
+        return true;
+    }
+    
+    // Check if GPU is enabled
+    if (!config_.enable_gpu) {
+        // No warm-up needed for CPU inference
+        warm_up_complete_.store(true);
+        return true;
+    }
+    
+    printf("MLInference: Starting GPU warm-up (async=%s)...\n", async ? "true" : "false");
+    
+    // Create dummy input for warm-up
+    {
+        std::lock_guard<std::mutex> lock(warm_up_mutex_);
+        dummy_input_ = cv::Mat(config_.input_height, config_.input_width, CV_8UC3);
+        cv::randu(dummy_input_, cv::Scalar(0, 0, 0), cv::Scalar(255, 255, 255));
+    }
+    
+    if (async) {
+        // Start warm-up in background thread
+        warm_up_thread_ = std::thread([this]() {
+            auto start = std::chrono::steady_clock::now();
+            performWarmupInference();
+            auto end = std::chrono::steady_clock::now();
+            
+            double warmup_time_ms = std::chrono::duration<double, std::milli>(end - start).count();
+            printf("MLInference: GPU warm-up completed in %.2f ms\n", warmup_time_ms);
+            
+            warm_up_complete_.store(true);
+            warm_up_cv_.notify_all();
+        });
+        
+        // Detach thread to run independently
+        warm_up_thread_.detach();
+        return true;
+    } else {
+        // Synchronous warm-up
+        auto start = std::chrono::steady_clock::now();
+        performWarmupInference();
+        auto end = std::chrono::steady_clock::now();
+        
+        double warmup_time_ms = std::chrono::duration<double, std::milli>(end - start).count();
+        printf("MLInference: GPU warm-up completed in %.2f ms\n", warmup_time_ms);
+        
+        warm_up_complete_.store(true);
+        return true;
+    }
+}
+
+void MLInference::performWarmupInference() {
+#ifdef HAS_ONNXRUNTIME
+    try {
+        printf("MLInference: Executing warm-up inference...\n");
+        
+        // Initialize memory pool if GPU enabled
+        if (config_.enable_gpu && !memory_pool_) {
+            memory_pool_ = std::make_unique<GPUMemoryPool>();
+            
+            // Create IO binding for GPU memory management
+            if (onnx_session_) {
+                try {
+                    memory_pool_->io_binding_ = std::make_unique<Ort::IoBinding>(*onnx_session_);
+                    memory_pool_->allocated_bytes_ = config_.input_width * config_.input_height * 3 * sizeof(float);
+                    memory_pool_->initialized_ = true;
+                    printf("MLInference: Memory pool initialized (%zu bytes)\n", memory_pool_->allocated_bytes_);
+                } catch (const std::exception& e) {
+                    printf("MLInference: Memory pool initialization failed: %s\n", e.what());
+                    memory_pool_.reset();
+                }
+            }
+        }
+        
+        // Run 2-3 dummy inferences to fully warm up GPU
+        for (int i = 0; i < 3; ++i) {
+            auto result = inferDepth(dummy_input_);
+            if (!result.success) {
+                printf("MLInference: Warm-up inference %d failed: %s\n", 
+                       i+1, result.error_message.c_str());
+            } else {
+                printf("MLInference: Warm-up inference %d completed in %.2f ms\n", 
+                       i+1, result.inference_time_ms);
+            }
+        }
+        
+        // Clear dummy input
+        {
+            std::lock_guard<std::mutex> lock(warm_up_mutex_);
+            dummy_input_.release();
+        }
+        
+        printf("MLInference: GPU warm-up successful\n");
+    } catch (const std::exception& e) {
+        printf("MLInference: Warm-up failed: %s\n", e.what());
+    }
+#else
+    printf("MLInference: ONNX Runtime not available for warm-up\n");
+#endif
+}
+
+bool MLInference::waitForWarmup(int timeout_ms) {
+    if (warm_up_complete_.load()) {
+        return true;
+    }
+    
+    if (!config_.enable_gpu) {
+        // No warm-up needed for CPU
+        return true;
+    }
+    
+    std::unique_lock<std::mutex> lock(warm_up_mutex_);
+    return warm_up_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                                [this] { return warm_up_complete_.load(); });
+}
+
+MLInference::MemoryPoolStats MLInference::getMemoryPoolStats() const {
+    MemoryPoolStats stats;
+    
+    if (memory_pool_) {
+        stats.allocated_bytes = memory_pool_->allocated_bytes_;
+        stats.reuse_count = memory_pool_->reuse_count_;
+        stats.pool_initialized = memory_pool_->initialized_;
+        
+        if (memory_pool_->reuse_count_ > 0) {
+            // Calculate efficiency as ratio of reuses to total allocations
+            stats.memory_efficiency = static_cast<float>(memory_pool_->reuse_count_) / 
+                                     (memory_pool_->reuse_count_ + 1);
+        }
+    }
+    
+    return stats;
 }
 
 bool MLInference::validateMetric3DModel() const {

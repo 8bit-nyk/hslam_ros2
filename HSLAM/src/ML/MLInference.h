@@ -6,6 +6,9 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <chrono>
 
 #ifdef HAS_ONNXRUNTIME
 #include <onnxruntime_cxx_api.h>
@@ -93,6 +96,31 @@ private:
     std::atomic<bool> initialized_{false};
     mutable std::mutex mutex_;
     
+    // GPU Warm-up Members (Sprint 2)
+    std::atomic<bool> warm_up_complete_{false};
+    std::thread warm_up_thread_;
+    mutable std::mutex warm_up_mutex_;
+    cv::Mat dummy_input_;
+    std::condition_variable warm_up_cv_;
+    
+    // Memory Pool Members (Sprint 2)
+    struct GPUMemoryPool {
+#ifdef HAS_ONNXRUNTIME
+        std::unique_ptr<Ort::IoBinding> io_binding_;
+        std::unique_ptr<Ort::Value> input_tensor_;
+        std::vector<std::unique_ptr<Ort::Value>> output_tensors_;
+#endif
+        size_t allocated_bytes_ = 0;
+        int reuse_count_ = 0;
+        bool initialized_ = false;
+        
+        GPUMemoryPool() = default;
+    };
+    std::unique_ptr<GPUMemoryPool> memory_pool_;
+    
+    // Helper method for warm-up
+    void performWarmupInference();
+    
     // Model-specific preprocessing
     cv::Mat preprocessMetric3D(const cv::Mat& input_image) const;
     cv::Mat preprocessDepthAnything(const cv::Mat& input_image) const;
@@ -158,6 +186,42 @@ public:
      * @return Average inference time in milliseconds
      */
     float benchmarkInferencePerformance(const cv::Mat& test_image = cv::Mat(), const std::string& results_dir = "") const;
+    
+    // GPU Warm-up Methods (Sprint 2 Optimization)
+    
+    /**
+     * @brief Start background GPU warm-up to eliminate first-call penalty
+     * @param async If true, warm-up runs in background thread
+     * @return True if warm-up started successfully
+     */
+    bool startBackgroundWarmup(bool async = true);
+    
+    /**
+     * @brief Check if GPU warm-up is complete
+     * @return True if warm-up finished
+     */
+    bool isWarmupComplete() const { return warm_up_complete_.load(); }
+    
+    /**
+     * @brief Wait for warm-up completion with timeout
+     * @param timeout_ms Maximum time to wait in milliseconds
+     * @return True if warm-up completed within timeout
+     */
+    bool waitForWarmup(int timeout_ms = 5000);
+    
+    // Memory Pool Methods (Sprint 2 Optimization)
+    
+    /**
+     * @brief Get memory pool statistics
+     * @return Memory usage and efficiency metrics
+     */
+    struct MemoryPoolStats {
+        size_t allocated_bytes = 0;
+        int reuse_count = 0;
+        float memory_efficiency = 0.0f;
+        bool pool_initialized = false;
+    };
+    MemoryPoolStats getMemoryPoolStats() const;
 };
 
 } // namespace ML

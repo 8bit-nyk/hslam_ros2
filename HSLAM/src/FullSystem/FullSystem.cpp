@@ -1225,6 +1225,51 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_img, double timestamp)
     // Update ML utilization rate
     ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
     
+    // Process frame with ML depth enhancement
+    if(ml_depth_available) {
+        // Store ML depth for point creation
+        currentDepthImage = ml_depth_image.clone();
+        printf("TrackMonocularWithML: Using ML depth for enhanced SLAM tracking\n");
+        
+        // Use ML-enhanced tracking
+        TrackFrameWithMLDepth(rgb_img, ml_depth_image, timestamp);
+    } else {
+        // Clear any existing depth to use pure monocular
+        currentDepthImage = cv::Mat();
+        
+        // Convert RGB to HSLAM format for standard tracking
+        cv::Mat gray_image;
+        if(rgb_img.channels() == 3) {
+            cv::cvtColor(rgb_img, gray_image, cv::COLOR_BGR2GRAY);
+        } else {
+            gray_image = rgb_img;
+        }
+        
+        // Convert to float if needed
+        cv::Mat float_image;
+        if(gray_image.type() != CV_32FC1) {
+            gray_image.convertTo(float_image, CV_32FC1);
+        } else {
+            float_image = gray_image;
+        }
+        
+        // Create ImageAndExposure for standard HSLAM pipeline
+        ImageAndExposure* img = new ImageAndExposure(float_image.cols, float_image.rows, timestamp);
+        std::memcpy(img->image, float_image.ptr<float>(), float_image.cols * float_image.rows * sizeof(float));
+        
+        // Fallback to standard monocular tracking
+        static int frame_id_tracking = 0;
+        addActiveFrame(img, frame_id_tracking++);
+        
+        delete img;
+    }
+}
+
+void FullSystem::TrackFrameWithMLDepth(const cv::Mat& rgb_img, 
+                                       const cv::Mat& ml_depth, 
+                                       double timestamp) {
+    if(isLost) return;
+    
     // Convert RGB to HSLAM format
     cv::Mat gray_image;
     if(rgb_img.channels() == 3) {
@@ -1245,18 +1290,76 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_img, double timestamp)
     ImageAndExposure* img = new ImageAndExposure(float_image.cols, float_image.rows, timestamp);
     std::memcpy(img->image, float_image.ptr<float>(), float_image.cols * float_image.rows * sizeof(float));
     
-    // Store ML depth for point creation if available
-    if(ml_depth_available) {
-        currentDepthImage = ml_depth_image.clone();
-        printf("TrackMonocularWithML: Using ML depth for point creation\n");
-    } else {
-        // Clear any existing depth to use pure monocular
-        currentDepthImage = cv::Mat();
+    // Store ML depth for point creation
+    {
+        std::lock_guard<std::mutex> lock(ml_depth_mutex_);
+        current_ml_depth_image_ = ml_depth.clone();
     }
+    currentDepthImage = ml_depth.clone();
     
-    // Process frame using existing HSLAM pipeline
-    static int frame_id_tracking = 0;
-    addActiveFrame(img, frame_id_tracking++);
+    // Enhanced tracking with ML depth context
+    boost::unique_lock<boost::mutex> lock(trackMutex);
+    
+    // Create frame with ML depth context
+    FrameHessian* fh = new FrameHessian();
+    FrameShell* shell = new FrameShell();
+    fh->ab_exposure = img->exposure_time;
+    fh->makeImages(img->image, &Hcalib);
+    
+    // Indirect: Create indirect frame with ML depth available
+    shell->frame = std::make_shared<Frame>(img->image, detector, &Hcalib, fh, shell, globalMap);
+    
+    fh->shell = shell;
+    shell->setPose(SE3());  // Initialize pose using proper accessor
+    shell->aff_g2l = AffLight(0,0);
+    shell->marginalizedAt = shell->id = allFrameHistory.size();
+    shell->timestamp = timestamp;
+    shell->incoming_id = static_cast<int>(ml_metrics_.total_frames);
+    allFrameHistory.push_back(shell);
+    
+    if(!initialized) {
+        // Initialize with ML depth assistance
+        if(coarseInitializer->frameID < 0) {
+            coarseInitializer->setFirst(&Hcalib, fh);
+        } else if(coarseInitializer->trackFrame(fh, outputWrapper)) {
+            initializeFromInitializer(fh);
+            lock.unlock();
+            deliverTrackedFrame(fh, true);
+        } else {
+            // If tracking fails, delete frame
+            delete fh;
+            delete img;
+            return;
+        }
+    } else {
+        // Track with ML depth enhancement
+        Vec5 tres = trackNewCoarse(fh);
+        
+        // Use ML depth in point creation - this is the key enhancement!
+        if(!setting_debugout_runquiet) {
+            printf("TrackFrameWithMLDepth: Creating new traces with ML depth\n");
+        }
+        
+        // Call enhanced makeNewTracesWithMLDepth method
+        makeNewTracesWithMLDepth(fh, ml_depth);
+        
+        // Standard frame processing
+        for(IOWrap::Output3DWrapper* ow : outputWrapper) {
+            ow->publishGraph(ef->connectivityMap);
+            ow->publishKeyframes(frameHessians, false, &Hcalib);
+            ow->publishGlobalMap(globalMap);
+        }
+        
+        // Marginalization
+        for (unsigned int i = 0; i < frameHessians.size(); i++)
+            if (frameHessians[i]->flaggedForMarginalization) {
+                marginalizeFrame(frameHessians[i]);
+                i = 0;
+            }
+        
+        lock.unlock();
+        deliverTrackedFrame(fh, needNewKFAfter < 0);
+    }
     
     delete img;
 }
@@ -2054,7 +2157,76 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 	HSLAM::DepthLogger::logPointCreation((int)newFrame->immaturePoints.size(), depthIntegratedCount);
 }
 
-
+void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth) {
+    int numPointsTotal = pixelSelector->makeMaps(newFrame, selectionMap, setting_desiredImmatureDensity);
+    
+    newFrame->pointHessians.reserve(numPointsTotal * 1.2f);
+    newFrame->pointHessiansMarginalized.reserve(numPointsTotal * 1.2f);
+    newFrame->pointHessiansOut.reserve(numPointsTotal * 1.2f);
+    
+    int ml_depth_points = 0;
+    int total_points = 0;
+    SE3 Tcw = newFrame->shell->getPoseInverse();
+    
+    for(int y = PATTERNPADDING + 1; y < hG[0] - PATTERNPADDING - 2; y++) {
+        for(int x = PATTERNPADDING + 1; x < wG[0] - PATTERNPADDING - 2; x++) {
+            int i = x + y * wG[0];
+            if(selectionMap[i] == 0) continue;
+            
+            ImmaturePoint* impt = new ImmaturePoint(x, y, newFrame, selectionMap[i], &Hcalib);
+            
+            // ML depth integration
+            if(!ml_depth.empty() && y < ml_depth.rows && x < ml_depth.cols) {
+                float depth = ml_depth.at<float>(y, x);
+                
+                if(depth > 0.1f && depth < 10.0f && !std::isnan(depth)) {
+                    float idepth = 1.0f / depth;
+                    float uncertainty = 0.08f + 0.1f * depth;  // Uncertainty increases with distance
+                    
+                    impt->idepth_min = std::max(0.0f, idepth - uncertainty);
+                    impt->idepth_max = idepth + uncertainty;
+                    impt->idepth_GT = idepth;  // Store ML estimate as GT for validation
+                    
+                    ml_depth_points++;
+                }
+            }
+            
+            // Handle indirect point priors (existing HSLAM functionality)
+            if(selectionMap[i] > 4) {
+                int index = selectionMap[i] - 5;
+                auto pMP = newFrame->shell->frame->getMapPoint(index);
+                if(pMP && !pMP->isBad()) {
+                    Vec3 PointinFrame = (Tcw * pMP->getWorldPose().cast<double>());
+                    float invz = (1.0 / (float)PointinFrame[2]);
+                    if(invz > 0) {
+                        float devi = pMP->getStdDev();
+                        float idepthmin = invz - 15 * devi;
+                        impt->idepth_min = idepthmin > 0 ? idepthmin : 0;
+                        impt->idepth_max = invz + 15 * devi;
+                    }
+                }
+            }
+            
+            if(!std::isfinite(impt->energyTH)) {
+                delete impt;
+                continue;
+            }
+            
+            newFrame->immaturePoints.push_back(impt);
+            total_points++;
+        }
+    }
+    
+    // Log ML integration statistics
+    if(ml_depth_points > 0) {
+        printf("ML Depth Integration: %d/%d points (%.1f%%)\n",
+               ml_depth_points, total_points, 
+               100.0f * ml_depth_points / total_points);
+    }
+    
+    // Log using existing depth logger
+    HSLAM::DepthLogger::logPointCreation(total_points, ml_depth_points);
+}
 
 /**
  * @brief Sets pre-calculation values for the active frames
@@ -3064,7 +3236,11 @@ bool FullSystem::initializeMLDepthService(const MLConfig& config,
         return true;
         
     } catch (const std::exception& e) {
-        printf("FullSystem: ML depth service initialization failed: %s\n", e.what());
+        printf("ERROR: FullSystem ML depth service initialization failed: %s\n", e.what());
+        printf("  Model path provided: %s\n", config.model_path.c_str());
+        printf("  GPU enabled: %s\n", config.enable_gpu ? "Yes" : "No");
+        printf("  GPU device: %d\n", config.gpu_device_id);
+        printf("  Memory limit: %.1f MB\n", config.gpu_memory_limit_mb);
         ml_depth_enabled_ = false;
         ml_depth_service_.reset();
         return false;

@@ -49,6 +49,20 @@ else()
     add_definitions(-DHAS_ONNXRUNTIME=0)
 endif()
 
+# CUDA configuration for GPU acceleration
+find_package(CUDA QUIET)
+if(CUDA_FOUND AND EXISTS ${ONNXRUNTIME_LIB_DIR}/libonnxruntime_providers_cuda.so)
+    message("--- found CUDA and ONNX Runtime GPU provider, enabling GPU acceleration.")
+    set(HAS_CUDA 1)
+    add_definitions(-DHAS_CUDA=1)
+    message("    CUDA Version: ${CUDA_VERSION}")
+    message("    CUDA Libraries: ${CUDA_LIBRARIES}")
+else()
+    message("--- CUDA not found or ONNX Runtime GPU provider missing, GPU acceleration disabled.")
+    set(HAS_CUDA 0)
+    add_definitions(-DHAS_CUDA=0)
+endif()
+
 # flags
 add_definitions("-DENABLE_SSE")
 #detect and number of processors
@@ -201,4 +215,55 @@ if (OpenCV_FOUND AND Pangolin_FOUND)
     target_link_libraries(HSLAM HSLAM_lib ${LIBS} )
 else()
 	message("--- not building executable, since either don't have openCV or Pangolin.")
+endif()
+
+# GPU functionality tests (if ONNX Runtime is available)
+option(BUILD_GPU_TESTS "Build GPU functionality tests" ON)
+if(BUILD_GPU_TESTS AND HAS_ONNXRUNTIME)
+    # Try to find Google Test
+    find_package(GTest QUIET)
+    if(NOT GTest_FOUND)
+        message("--- Google Test not found, attempting to download...")
+        include(FetchContent)
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+        )
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+    endif()
+    
+    if(GTest_FOUND OR TARGET gtest)
+        message("--- Building GPU functionality tests")
+        add_executable(gpu_functionality_tests ${PROJECT_SOURCE_DIR}/tests/gpu_functionality_tests.cpp)
+        target_link_libraries(gpu_functionality_tests 
+            HSLAM_lib 
+            ${LIBS} 
+            GTest::gtest 
+            GTest::gtest_main
+        )
+        target_include_directories(gpu_functionality_tests PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${EIGEN3_INCLUDE_DIR}
+            ${ONNXRUNTIME_INCLUDE_DIR}
+        )
+        
+        # Add test to CTest
+        enable_testing()
+        add_test(NAME gpu_functionality COMMAND gpu_functionality_tests)
+        
+        # Set test properties for CI
+        set_tests_properties(gpu_functionality PROPERTIES
+            TIMEOUT 300  # 5 minute timeout
+            ENVIRONMENT "CUDA_VISIBLE_DEVICES=0"
+        )
+    else()
+        message("--- Could not configure Google Test, GPU tests will not be built")
+    endif()
+else()
+    if(NOT HAS_ONNXRUNTIME)
+        message("--- GPU tests not built: ONNX Runtime not available")
+    else()
+        message("--- GPU tests disabled by BUILD_GPU_TESTS option")
+    endif()
 endif()

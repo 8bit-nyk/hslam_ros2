@@ -46,6 +46,12 @@ bool MLDepthService::start() {
         return false;
     }
     
+    // Start GPU warm-up in background (Sprint 2 Optimization)
+    if (ml_inference_->getConfig().enable_gpu) {
+        printf("MLDepthService: Starting background GPU warm-up...\n");
+        ml_inference_->startBackgroundWarmup(true);
+    }
+    
     shutdown_requested_.store(false);
     processing_active_.store(true);
     processing_thread_ = std::thread(&MLDepthService::processingLoop, this);

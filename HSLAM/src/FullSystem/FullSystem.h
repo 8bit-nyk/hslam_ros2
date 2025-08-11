@@ -154,6 +154,9 @@ public:
 
 	// ML Depth tracking method - enhanced monocular tracking with ML depth
 	void TrackMonocularWithML(const cv::Mat& rgb_img, double timestamp);
+	
+	// Core ML-enhanced SLAM tracking method - uses ML depth for enhanced tracking
+	void TrackFrameWithMLDepth(const cv::Mat& rgb_img, const cv::Mat& ml_depth, double timestamp);
 
 	// =================== COARSE TRACKER DEPTH INTEGRATION ===================
 	/**
@@ -307,6 +310,7 @@ private:
 	void activatePointsOldFirst();
 	void flagPointsForRemoval();
 	void makeNewTraces(FrameHessian* newFrame, float* gtDepth);
+	void makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth);
 	void initializeFromInitializer(FrameHessian* newFrame);
 	void flagFramesForMarginalization(FrameHessian* newFH);
 
