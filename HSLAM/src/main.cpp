@@ -106,7 +106,7 @@ int main(int argc, char **argv)
 		("E,pauseEnd", "Pause at end", cxxopts::value<bool>()->default_value("false"))
 		("ml-depth", "Enable ML depth estimation", cxxopts::value<bool>()->default_value("false"))
 		("ml-model", "Path to ONNX ML depth model", cxxopts::value<std::string>()->default_value("models/metric3d-vit-small/onnx/model.onnx"))
-		("ml-strategy", "ML inference strategy (every_frame|keyframe_only|snapshot_mode)", cxxopts::value<std::string>()->default_value("every_frame"))
+		("ml-strategy", "ML inference strategy (every_frame|keyframe_only|snapshot_mode)", cxxopts::value<std::string>()->default_value("keyframe_only"))
 		("ml-snapshot-interval", "Frames between ML inference in snapshot mode", cxxopts::value<int>()->default_value("5"))
 		("ml-benchmark", "Enable ML performance benchmarking", cxxopts::value<bool>()->default_value("false"))
 		("ml-gpu", "Enable GPU acceleration for ML inference", cxxopts::value<bool>()->default_value("false"))
@@ -320,6 +320,16 @@ int main(int argc, char **argv)
 		
 		printf("ML Depth Service (Phase 2) initialized successfully\n");
 		
+		// Phase 1A: Wait for ML warm-up to complete before starting SLAM
+		if(ml_gpu_enabled) {
+			printf("Waiting for ML GPU warm-up to complete...\n");
+			if (fullSystem->waitForMLWarmup(10000)) {  // 10 second timeout
+				printf("ML GPU warm-up completed successfully\n");
+			} else {
+				printf("WARNING: ML warm-up timeout, continuing with degraded performance\n");
+			}
+		}
+		
 		// Extract dataset name from source path for results directory
 		std::string dataset_name = "unknown";
 		size_t last_slash = source.find_last_of('/');
@@ -519,6 +529,31 @@ int main(int argc, char **argv)
                             printf("Vocabulary Set\n");
                         }
                         
+                        // CRITICAL FIX: Reinitialize ML depth service after reset
+                        if(ml_depth_enabled) {
+                            printf("Reinitializing ML depth service after SLAM reset...\n");
+                            
+                            // Recreate ML config (same as original initialization)
+                            FullSystem::MLConfig ml_config;
+                            ml_config.model_path = ml_model_path;
+                            ml_config.enable_gpu = ml_gpu_enabled;
+                            ml_config.num_threads = 4;
+                            ml_config.enable_fp16 = ml_fp16_enabled;
+                            ml_config.gpu_device_id = ml_gpu_device;
+                            ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
+                            ml_config.input_width = 256;
+                            ml_config.input_height = 256;
+                            ml_config.min_depth = 0.1f;
+                            ml_config.max_depth = 10.0f;
+                            ml_config.benchmark_enabled = ml_benchmark_enabled;
+                            
+                            if(!fullSystem->initializeMLDepthService(ml_config, ml_strategy, ml_snapshot_interval)) {
+                                printf("WARNING: Failed to reinitialize ML depth service after reset\n");
+                            } else {
+                                printf("ML depth service reinitialized successfully\n");
+                            }
+                        }
+                        
                         fullSystem->outputWrapper = wraps;
                         setting_fullResetRequested=false;
                     }
@@ -636,6 +671,31 @@ int main(int argc, char **argv)
                         {
                             fullSystem->setVocab(Vocabpnt);
                             printf("Vocabulary Set\n");
+                        }
+
+                        // CRITICAL FIX: Reinitialize ML depth service after reset (second path)
+                        if(ml_depth_enabled) {
+                            printf("Reinitializing ML depth service after SLAM reset...\n");
+                            
+                            // Recreate ML config (same as original initialization)
+                            FullSystem::MLConfig ml_config;
+                            ml_config.model_path = ml_model_path;
+                            ml_config.enable_gpu = ml_gpu_enabled;
+                            ml_config.num_threads = 4;
+                            ml_config.enable_fp16 = ml_fp16_enabled;
+                            ml_config.gpu_device_id = ml_gpu_device;
+                            ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
+                            ml_config.input_width = 256;
+                            ml_config.input_height = 256;
+                            ml_config.min_depth = 0.1f;
+                            ml_config.max_depth = 10.0f;
+                            ml_config.benchmark_enabled = ml_benchmark_enabled;
+                            
+                            if(!fullSystem->initializeMLDepthService(ml_config, ml_strategy, ml_snapshot_interval)) {
+                                printf("WARNING: Failed to reinitialize ML depth service after reset\n");
+                            } else {
+                                printf("ML depth service reinitialized successfully\n");
+                            }
                         }
 
                         fullSystem->outputWrapper = wraps;

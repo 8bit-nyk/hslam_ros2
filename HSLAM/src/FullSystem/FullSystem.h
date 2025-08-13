@@ -18,6 +18,7 @@
 #include "FullSystem/PixelSelector2.h"
 
 #include <math.h>
+#include <chrono>
 #include <opencv2/opencv.hpp>
 
 
@@ -158,6 +159,9 @@ public:
 	// Core ML-enhanced SLAM tracking method - uses ML depth for enhanced tracking
 	void TrackFrameWithMLDepth(const cv::Mat& rgb_img, const cv::Mat& ml_depth, double timestamp);
 
+	// Phase 2.5: ML service persistence through SLAM resets
+	void restartSLAMSystem();
+
 	// =================== COARSE TRACKER DEPTH INTEGRATION ===================
 	/**
 	 * @brief Update CoarseTracker instances with current depth information
@@ -199,11 +203,13 @@ public:
 	bool linearizeOperation;
 
 	// RGB-D depth integration support
-	cv::Mat currentDepthImage;  // Current depth image for depth integration
+	cv::Mat currentDepthImage;     // RGB-D sensor depth for direct component
+	cv::Mat currentMLDepthImage;   // Dedicated ML depth storage (NEW)
 
 	// ML Depth integration support (Phase 2)
 	std::unique_ptr<ML::MLDepthService> ml_depth_service_;
 	cv::Mat current_ml_depth_image_;
+	cv::Mat last_bgr_frame_;  // Store last BGR frame for keyframe ML submissions
 	mutable std::mutex ml_depth_mutex_;
 	bool ml_depth_enabled_ = false;
 	
@@ -216,6 +222,12 @@ public:
 		size_t frames_skipped = 0;  // Added for strategy tracking
 	};
 	MLMetrics ml_metrics_;
+	
+	// Phase 2.5: ML Service Persistence State
+	bool ml_service_persistent_;
+	bool slam_restart_in_progress_;
+	std::chrono::steady_clock::time_point slam_last_restart_;
+	int slam_restart_count_;
 	
 	// ML Depth Service Management (Phase 2 additions)
 public:
@@ -252,6 +264,13 @@ public:
 	 * @brief Stop and cleanup ML depth service
 	 */
 	void shutdownMLDepthService();
+	
+	/**
+	 * @brief Wait for ML warm-up completion with timeout
+	 * @param timeout_ms Maximum wait time in milliseconds
+	 * @return True if warm-up completed, false if timeout
+	 */
+	bool waitForMLWarmup(int timeout_ms = 5000);
 	
 	/**
 	 * @brief Change ML inference strategy during runtime

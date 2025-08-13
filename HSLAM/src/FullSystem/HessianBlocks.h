@@ -33,6 +33,10 @@
  
 #include <iostream>
 #include <fstream>
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <opencv2/opencv.hpp>
 #include "util/NumType.h"
 #include "FullSystem/Residuals.h"
 #include "util/ImageAndExposure.h"
@@ -148,6 +152,14 @@ struct FrameHessian
 	std::vector<PointHessian*> pointHessiansOut;		// contains all OUTLIER points (= discarded.).
 	std::vector<ImmaturePoint*> immaturePoints;		// contains all OUTLIER points (= discarded.).
 
+	// ML Depth Integration Fields (Phase 2.7 - Frame-Integrated Architecture)
+	std::shared_ptr<cv::Mat> ml_depth_map_;			// ML-estimated depth map (shared ownership)
+	std::atomic<bool> has_ml_depth_{false};			// Flag indicating ML depth availability
+	std::atomic<bool> ml_pending_{false};			// ML request submitted but not complete
+	int ml_request_frame_id_ = -1;					// Tracks ML request by absolute frame ID
+	std::atomic<float> ml_confidence_{0.0f};			// ML depth confidence score (thread-safe)
+	std::atomic<double> ml_inference_time_ms_{0.0};	// ML inference timing for metrics (thread-safe)
+	mutable std::mutex ml_mutex_;					// Mutex for shared_ptr protection
 
 	Mat66 nullspaces_pose;
 	Mat42 nullspaces_affine;
@@ -255,7 +267,10 @@ struct FrameHessian
 	};
 	inline FrameHessian() :
 		ab_exposure(0.0),
-		idx(0)
+		idx(0),
+		ml_depth_map_(nullptr),
+		has_ml_depth_(false),
+		ml_pending_(false)
 	{
 		instanceCounter++;
 		flaggedForMarginalization=false;
@@ -307,6 +322,45 @@ struct FrameHessian
 	{
 		return Vec10::Zero();
 	}
+
+	// ML Depth Thread-Safe Access Methods
+	inline bool hasMLDepth() const { 
+		return has_ml_depth_.load() && ml_depth_map_ != nullptr; 
+	}
+
+	inline std::shared_ptr<cv::Mat> getMLDepth() const {
+		std::lock_guard<std::mutex> lock(ml_mutex_);
+		return has_ml_depth_.load() ? ml_depth_map_ : nullptr;
+	}
+
+	inline void setMLDepth(const cv::Mat& depth, float confidence, double inference_time) {
+		if (!depth.empty()) {
+			{
+				std::lock_guard<std::mutex> lock(ml_mutex_);
+				ml_depth_map_ = std::make_shared<cv::Mat>(depth.clone());
+			}
+			ml_confidence_.store(confidence);
+			ml_inference_time_ms_.store(inference_time);
+			has_ml_depth_.store(true);
+			ml_pending_.store(false);
+		}
+	}
+
+	inline void clearMLDepth() {
+		{
+			std::lock_guard<std::mutex> lock(ml_mutex_);
+			ml_depth_map_.reset();
+		}
+		has_ml_depth_.store(false);
+		ml_pending_.store(false);
+		ml_confidence_.store(0.0f);
+		ml_inference_time_ms_.store(0.0);
+	}
+
+	inline bool isMLPending() const { return ml_pending_.load(); }
+	inline void setMLPending(bool pending) { ml_pending_.store(pending); }
+	inline float getMLConfidence() const { return ml_confidence_.load(); }
+	inline double getMLInferenceTime() const { return ml_inference_time_ms_.load(); }
 
 };
 

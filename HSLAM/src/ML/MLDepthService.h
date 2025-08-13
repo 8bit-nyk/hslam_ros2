@@ -79,12 +79,19 @@ private:
     // Asynchronous processing
     std::queue<FrameRequest> request_queue_;
     std::map<double, DepthResult> result_cache_;  // Keyed by timestamp
+    
+    // Frame Index Support (Phase 2.7)
+    std::map<int, DepthResult> frame_index_cache_;  // Frame ID keyed cache
+    mutable std::mutex frame_index_mutex_;          // Thread-safe frame access
+    static constexpr size_t MAX_FRAME_CACHE_SIZE = 50;  // Limit frame cache size
+    
     std::thread processing_thread_;
     mutable std::mutex queue_mutex_;
     mutable std::mutex cache_mutex_;
     std::condition_variable queue_condition_;
     std::atomic<bool> processing_active_{false};
     std::atomic<bool> shutdown_requested_{false};
+    std::atomic<bool> processing_paused_{false};
     
     // Strategy parameters
     int snapshot_interval_ = 5;
@@ -139,6 +146,21 @@ public:
     std::optional<DepthResult> getDepthResult(double target_timestamp, double tolerance_ms = 50.0);
     
     /**
+     * @brief Submit frame for ML processing with frame index
+     * @param request Frame request with frame_id for synchronization
+     * @return Success status
+     */
+    bool submitFrameByIndex(const FrameRequest& request);
+    
+    /**
+     * @brief Get depth result by frame index with tolerance
+     * @param frame_index Target frame index to match
+     * @param tolerance_frames Allow nearby frames within this distance (default: 2)
+     * @return Depth result if available within tolerance
+     */
+    std::optional<DepthResult> getDepthResultByFrameIndex(int frame_index, int tolerance_frames = 2);
+    
+    /**
      * @brief Get performance statistics
      * @return Current performance metrics
      */
@@ -173,6 +195,17 @@ public:
      * @brief Clear result cache
      */
     void clearCache();
+    
+    /**
+     * @brief Pause ML processing during tracking failure recovery
+     * @brief Prevents race conditions during RE-TRACK attempts
+     */
+    void pauseProcessing();
+    
+    /**
+     * @brief Resume ML processing after tracking failure recovery
+     */
+    void resumeProcessing();
 
 private:
     /**
@@ -205,6 +238,8 @@ private:
      * @brief Clean up old results from cache
      */
     void cleanupCache();
+    
+    void cleanupFrameIndexCache();
     
     /**
      * @brief Get current timestamp

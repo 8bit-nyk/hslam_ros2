@@ -258,18 +258,67 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             return result;
         }
         
-        auto& output_tensor = output_tensors[0];
+        // Debug: Check all output shapes for Metric3D
+        if(config_.model_type == METRIC3D_V2) {
+            printf("MLInference: Metric3D model has %zu outputs:\n", output_tensors.size());
+            for(size_t i = 0; i < output_tensors.size(); i++) {
+                auto shape = output_tensors[i].GetTensorTypeAndShapeInfo().GetShape();
+                printf("  Output[%zu] shape: [", i);
+                for(size_t j = 0; j < shape.size(); j++) {
+                    printf("%lld", shape[j]);
+                    if(j < shape.size()-1) printf(", ");
+                }
+                printf("]\n");
+            }
+        }
+        
+        // Use appropriate output for Metric3D (typically the depth output is at index 1 or 2)
+        size_t depth_output_index = 0;
+        if(config_.model_type == METRIC3D_V2 && output_tensors.size() > 1) {
+            // Try to find the depth output by examining shapes
+            for(size_t i = 0; i < output_tensors.size(); i++) {
+                auto shape = output_tensors[i].GetTensorTypeAndShapeInfo().GetShape();
+                // Depth output should be 4D: [batch, 1, height, width] or 3D: [1, height, width]
+                if((shape.size() == 4 && shape[1] == 1) || 
+                   (shape.size() == 3 && shape[0] == 1) ||
+                   (shape.size() == 2)) {  // 2D height x width
+                    depth_output_index = i;
+                    printf("MLInference: Using output[%zu] as depth map\n", i);
+                    break;
+                }
+            }
+        }
+        
+        auto& output_tensor = output_tensors[depth_output_index];
         auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
         auto output_data = output_tensor.GetTensorData<float>();
+        
+        // Debug: Validate output shape
+        if(output_shape.empty()) {
+            result.error_message = "Output tensor has empty shape";
+            return result;
+        }
         
         // Convert output to vector
         size_t output_size = 1;
         for(auto dim : output_shape) output_size *= dim;
+        
+        if(output_size == 0) {
+            result.error_message = "Output tensor has zero size";
+            return result;
+        }
+        
         std::vector<float> output_values(output_data, output_data + output_size);
         
         // Postprocess output based on model type
-        int output_height = static_cast<int>(output_shape[output_shape.size()-2]);
-        int output_width = static_cast<int>(output_shape[output_shape.size()-1]);
+        int output_height, output_width;
+        if(output_shape.size() >= 2) {
+            output_height = static_cast<int>(output_shape[output_shape.size()-2]);
+            output_width = static_cast<int>(output_shape[output_shape.size()-1]);
+        } else {
+            result.error_message = "Invalid output shape dimensions";
+            return result;
+        }
         
         cv::Mat depth_map;
         switch(config_.model_type) {
@@ -282,6 +331,12 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             case MIDAS_V3:
                 depth_map = postprocessMiDaS(output_values, output_width, output_height);
                 break;
+        }
+        
+        // Check if depth map is valid before resizing
+        if(depth_map.empty()) {
+            result.error_message = "Postprocessing returned empty depth map";
+            return result;
         }
         
         // Resize to input image size if needed
@@ -315,66 +370,46 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     
     // Handle both grayscale and RGB inputs
     if(input_image.channels() == 1) {
-        // Grayscale input - convert to 3-channel RGB
+        // Grayscale input - convert to 3-channel RGB (replicate to R=G=B)
         cv::Mat rgb_image;
         cv::cvtColor(input_image, rgb_image, cv::COLOR_GRAY2BGR);
         
-        // Convert to float
-        if(rgb_image.type() != CV_32FC3) {
-            rgb_image.convertTo(processed, CV_32FC3, 1.0/255.0);
-        } else {
-            processed = rgb_image.clone();
-        }
+        // Convert BGR to RGB and normalize by 255.0 only
+        cv::cvtColor(rgb_image, processed, cv::COLOR_BGR2RGB);
+        processed.convertTo(processed, CV_32FC3, 1.0/255.0);
     } else if(input_image.channels() == 3) {
-        // RGB input - convert to float if needed
-        if(input_image.type() != CV_32FC3) {
-            input_image.convertTo(processed, CV_32FC3, 1.0/255.0);
-        } else {
-            processed = input_image.clone();
-        }
+        // BGR input - convert to RGB once for ML processing
+        cv::Mat rgb_image;
+        cv::cvtColor(input_image, rgb_image, cv::COLOR_BGR2RGB);
+        
+        // Normalize by 255.0 to [0,1] range only (no [-1,1] conversion)
+        rgb_image.convertTo(processed, CV_32FC3, 1.0/255.0);
     } else {
         // Invalid number of channels
         printf("ERROR: preprocessMetric3D - Invalid input channels: %d (expected 1 or 3)\n", input_image.channels());
         return cv::Mat();
     }
     
-    // Performance optimization: Use smaller input size for faster inference
-    // Original: 518x518, Optimized: 256x256 for real-time performance
-    int target_width = 256;   // Reduced from 518
-    int target_height = 256;  // Reduced from 518
+    // SIMPLIFIED APPROACH: Remove center-crop, use multiples-of-14 preserving aspect ratio
+    int w = processed.cols;  // Original width (e.g., 640)  
+    int h = processed.rows;  // Original height (e.g., 480)
     
-    // Calculate scaling to maintain aspect ratio
-    float scale_x = (float)target_width / processed.cols;
-    float scale_y = (float)target_height / processed.rows;
-    float scale = std::min(scale_x, scale_y);
+    // Resize to nearest multiples of 14, preserving aspect ratio approximately  
+    int target_width = int(std::round(w / 14.0f)) * 14;   // 640 → 644
+    int target_height = int(std::round(h / 14.0f)) * 14;  // 480 → 476
     
-    int new_width = (int)(processed.cols * scale);
-    int new_height = (int)(processed.rows * scale);
+    // Ensure minimum size (at least 14x14)
+    target_width = std::max(target_width, 14);
+    target_height = std::max(target_height, 14);
     
-    // Ensure dimensions are multiples of 14 (Metric3D requirement)
-    new_width = (new_width / 14) * 14;
-    new_height = (new_height / 14) * 14;
+    // Direct resize preserving aspect ratio - NO CENTER CROP, NO LETTERBOX
+    cv::Mat result;
+    cv::resize(processed, result, cv::Size(target_width, target_height), 0, 0, cv::INTER_LINEAR);
     
-    // Clamp to target size
-    new_width = std::min(new_width, target_width);
-    new_height = std::min(new_height, target_height);
+    printf("MLInference: preprocessMetric3D - Simplified: %dx%d → %dx%d (multiples of 14, AR preserved)\n", 
+           w, h, target_width, target_height);
     
-    // Resize with aspect ratio preservation
-    cv::Mat resized;
-    cv::resize(processed, resized, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
-    
-    // Pad to target size (256x256)
-    cv::Mat padded = cv::Mat::zeros(target_height, target_width, CV_32FC3);
-    int offset_x = (target_width - new_width) / 2;
-    int offset_y = (target_height - new_height) / 2;
-    
-    cv::Rect roi(offset_x, offset_y, new_width, new_height);
-    resized.copyTo(padded(roi));
-    
-    // Metric3D normalization: [0,1] to [-1,1] range
-    padded = padded * 2.0 - 1.0;
-    
-    return padded;
+    return result;
 }
 
 cv::Mat MLInference::preprocessDepthAnything(const cv::Mat& input_image) const {
@@ -408,25 +443,59 @@ cv::Mat MLInference::preprocessMiDaS(const cv::Mat& input_image) const {
 }
 
 cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, int width, int height) const {
+    // Validate input dimensions
+    size_t expected_size = static_cast<size_t>(width * height);
+    if(raw_output.size() != expected_size) {
+        printf("MLInference: Dimension mismatch - expected %zu elements (%dx%d), got %zu\n", 
+               expected_size, width, height, raw_output.size());
+        return cv::Mat();
+    }
+    
     // Create depth map from raw output
     cv::Mat depth_map(height, width, CV_32FC1);
     std::memcpy(depth_map.ptr<float>(), raw_output.data(), raw_output.size() * sizeof(float));
+    
+    // Add postprocess sanity checks (Fix #4)
+    int total_pixels = depth_map.rows * depth_map.cols;
+    cv::Mat finite_mask;
+    cv::compare(depth_map, depth_map, finite_mask, cv::CMP_EQ); // NaN check
+    int finite_count = cv::countNonZero(finite_mask);
+    float finite_ratio = (float)finite_count / total_pixels;
+    
+    double min_depth, max_depth;
+    cv::minMaxLoc(depth_map, &min_depth, &max_depth);
+    
+    // Relaxed validation: Allow wider depth range for real-world scenes
+    // finite_ratio > 0.5 and max_depth > 0.5 (some valid depth)
+    if (finite_ratio < 0.5 || max_depth < 0.5) {
+        printf("ML depth validation failed: finite_ratio=%.2f, range=[%.2f, %.2f], marking as invalid\n", 
+               finite_ratio, min_depth, max_depth);
+        // Return empty result to skip depth fusion
+        return cv::Mat();
+    }
+    
+    printf("ML depth validation passed: finite_ratio=%.2f, range=[%.2f, %.2f]\n", 
+           finite_ratio, min_depth, max_depth);
     
     // Validate depth range
     double min_val, max_val;
     cv::minMaxLoc(depth_map, &min_val, &max_val);
     
-    // Clip to valid range
+    // Apply gentle clipping to outliers (preserve most of the depth range)
     cv::Mat clipped_depth;
-    cv::threshold(depth_map, clipped_depth, config_.max_depth, config_.max_depth, cv::THRESH_TRUNC);
-    cv::threshold(clipped_depth, clipped_depth, config_.min_depth, 0, cv::THRESH_TOZERO);
+    double clip_max = std::min(max_val * 1.1, 50.0);  // Allow 10% overhead, cap at 50m
+    double clip_min = std::max(min_val * 0.9, 0.01);  // Allow 10% underhead, floor at 1cm
     
-    // Resize to original input size for SLAM integration
-    // The preprocessing resized to 256x256, but SLAM expects original image size
-    cv::Mat resized_depth;
-    cv::resize(clipped_depth, resized_depth, cv::Size(640, 480), 0, 0, cv::INTER_LINEAR);
+    cv::threshold(depth_map, clipped_depth, clip_max, clip_max, cv::THRESH_TRUNC);
+    cv::threshold(clipped_depth, clipped_depth, clip_min, 0, cv::THRESH_TOZERO);
     
-    return resized_depth;
+    // Apply final clipping to standard depth range for SLAM
+    cv::threshold(clipped_depth, clipped_depth, 10.0, 10.0, cv::THRESH_TRUNC);  // Cap at 10m
+    cv::threshold(clipped_depth, clipped_depth, 0.1, 0, cv::THRESH_TOZERO);     // Floor at 0.1m
+    
+    // Return depth map at inference resolution
+    // The calling code will handle resizing to match the original image size if needed
+    return clipped_depth;
 }
 
 cv::Mat MLInference::postprocessDepthAnything(const std::vector<float>& raw_output, int width, int height) const {

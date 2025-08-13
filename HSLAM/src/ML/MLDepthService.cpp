@@ -25,6 +25,12 @@ MLDepthService::MLDepthService(const MLInference::InferenceConfig& config,
             printf("MLDepthService: Snapshot interval set to %d frames\n", snapshot_interval);
         }
         
+        // Phase 1B: Start GPU warm-up immediately during construction
+        if (config.enable_gpu) {
+            printf("MLDepthService: Starting immediate GPU warm-up during initialization...\n");
+            ml_inference_->startBackgroundWarmup(true);
+        }
+        
     } catch (const std::exception& e) {
         printf("MLDepthService initialization failed: %s\n", e.what());
         throw;
@@ -46,11 +52,7 @@ bool MLDepthService::start() {
         return false;
     }
     
-    // Start GPU warm-up in background (Sprint 2 Optimization)
-    if (ml_inference_->getConfig().enable_gpu) {
-        printf("MLDepthService: Starting background GPU warm-up...\n");
-        ml_inference_->startBackgroundWarmup(true);
-    }
+    // GPU warm-up now starts during construction (Phase 1B optimization)
     
     shutdown_requested_.store(false);
     processing_active_.store(true);
@@ -87,7 +89,32 @@ void MLDepthService::stop() {
     
     clearCache();
     
+    // Clear frame index cache
+    {
+        std::lock_guard<std::mutex> lock(frame_index_mutex_);
+        frame_index_cache_.clear();
+    }
+    
     printf("MLDepthService: Stopped\n");
+}
+
+void MLDepthService::pauseProcessing() {
+    if (!processing_active_.load()) {
+        return;
+    }
+    
+    printf("MLDepthService: Pausing processing for tracking failure recovery...\n");
+    processing_paused_.store(true);
+}
+
+void MLDepthService::resumeProcessing() {
+    if (!processing_active_.load()) {
+        return;
+    }
+    
+    printf("MLDepthService: Resuming processing after tracking failure recovery...\n");
+    processing_paused_.store(false);
+    queue_condition_.notify_all();  // Wake up processing thread
 }
 
 bool MLDepthService::submitFrame(const FrameRequest& request) {
@@ -194,6 +221,9 @@ MLDepthService::PerformanceStats MLDepthService::getPerformanceStats() const {
         stats.cache_size = result_cache_.size();
     }
     
+    // Note: Frame index cache size could be added to stats if needed
+    // but keeping minimal changes for now
+    
     return stats;
 }
 
@@ -213,6 +243,80 @@ void MLDepthService::clearCache() {
     result_cache_.clear();
 }
 
+bool MLDepthService::submitFrameByIndex(const FrameRequest& request) {
+    // Simply delegate to existing submitFrame since request already has frame_id
+    return submitFrame(request);
+}
+
+std::optional<MLDepthService::DepthResult> MLDepthService::getDepthResultByFrameIndex(int frame_index, int tolerance_frames) {
+    std::lock_guard<std::mutex> lock(frame_index_mutex_);
+    
+    printf("MLDepthService: Looking for frame %d in cache (cache has %zu entries, tolerance: ±%d frames)\n", 
+           frame_index, frame_index_cache_.size(), tolerance_frames);
+    
+    // Debug: Show what's in the cache
+    if (!frame_index_cache_.empty()) {
+        printf("MLDepthService: Frame cache contents: ");
+        for (const auto& entry : frame_index_cache_) {
+            printf("%d ", entry.first);
+        }
+        printf("\n");
+    }
+    
+    // Phase 4: Enhanced caching with frame tolerance
+    
+    // First try exact match
+    auto exact_it = frame_index_cache_.find(frame_index);
+    if (exact_it != frame_index_cache_.end()) {
+        DepthResult result = exact_it->second;
+        printf("MLDepthService: ✓ Retrieved exact match for frame %d (%.1fms inference, conf=%.2f)\n", 
+               frame_index, result.inference_time_ms, result.confidence);
+        return result;
+    }
+    
+    // Try nearby frames within tolerance if exact match not found
+    DepthResult best_result;
+    int best_frame_id = -1;
+    int best_distance = tolerance_frames + 1;
+    bool found_nearby = false;
+    
+    for (int offset = 1; offset <= tolerance_frames; offset++) {
+        // Check frame before
+        auto before_it = frame_index_cache_.find(frame_index - offset);
+        if (before_it != frame_index_cache_.end() && offset < best_distance) {
+            best_result = before_it->second;
+            best_frame_id = frame_index - offset;
+            best_distance = offset;
+            found_nearby = true;
+        }
+        
+        // Check frame after
+        auto after_it = frame_index_cache_.find(frame_index + offset);
+        if (after_it != frame_index_cache_.end() && offset < best_distance) {
+            best_result = after_it->second;
+            best_frame_id = frame_index + offset;
+            best_distance = offset;
+            found_nearby = true;
+        }
+    }
+    
+    if (found_nearby) {
+        printf("MLDepthService: ✓ Using frame %d result for requested frame %d (distance: %d, conf=%.2f)\n", 
+               best_frame_id, frame_index, best_distance, best_result.confidence);
+        return best_result;
+    }
+    
+    printf("MLDepthService: ✗ No result found for frame %d (tolerance: ±%d)\n", frame_index, tolerance_frames);
+    return std::nullopt;
+}
+
+void MLDepthService::cleanupFrameIndexCache() {
+    // Remove oldest entries if cache too large
+    while (frame_index_cache_.size() > MAX_FRAME_CACHE_SIZE) {
+        frame_index_cache_.erase(frame_index_cache_.begin());
+    }
+}
+
 void MLDepthService::processingLoop() {
     printf("MLDepthService: Processing thread started\n");
     
@@ -224,17 +328,17 @@ void MLDepthService::processingLoop() {
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
             queue_condition_.wait(lock, [this] { 
-                return !request_queue_.empty() || !processing_active_.load() || shutdown_requested_.load(); 
+                return (!request_queue_.empty() && !processing_paused_.load()) || !processing_active_.load() || shutdown_requested_.load(); 
             });
             
-            if (!request_queue_.empty()) {
+            if (!request_queue_.empty() && !processing_paused_.load()) {
                 request = request_queue_.front();
                 request_queue_.pop();
                 has_request = true;
             }
         }
         
-        if (!has_request || !processing_active_.load() || shutdown_requested_.load()) {
+        if (!has_request || !processing_active_.load() || shutdown_requested_.load() || processing_paused_.load()) {
             continue;
         }
         
@@ -285,6 +389,15 @@ void MLDepthService::processingLoop() {
             
             // Clean up old results
             cleanupCache();
+        }
+        
+        // Store in frame index cache
+        {
+            std::lock_guard<std::mutex> lock(frame_index_mutex_);
+            frame_index_cache_[request.frame_id] = result;
+            printf("MLDepthService: ✓ Stored result for frame %d in cache (cache now has %zu entries)\n", 
+                   request.frame_id, frame_index_cache_.size());
+            cleanupFrameIndexCache();
         }
     }
     

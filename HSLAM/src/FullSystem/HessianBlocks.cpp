@@ -170,6 +170,9 @@ void FrameHessian::release()
 	pointHessiansMarginalized.clear();
 	pointHessiansOut.clear();
 	immaturePoints.clear();
+
+	// ML Depth cleanup
+	clearMLDepth();
 }
 
 
