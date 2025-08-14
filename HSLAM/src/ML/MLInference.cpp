@@ -134,7 +134,8 @@ bool MLInference::initialize() {
             printf("  FP16 Optimization: %s\n", config_.enable_fp16 ? "Enabled" : "Disabled");
         }
         printf("  Threads: %d\n", config_.num_threads);
-        printf("  Input size: %dx%d\n", config_.input_width, config_.input_height);
+        printf("  Input size configured: %dx%d\n", config_.input_width, config_.input_height);
+        printf("  Model expects: 518x518 input, outputs: 252x252 (ViT architecture)\n");
         
         return true;
         
@@ -164,6 +165,9 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
         result.error_message = "Input image is empty";
         return result;
     }
+    
+    printf("DEBUG: MLInference.inferDepth - Input RGB: %dx%d channels=%d\n", 
+           input_image.cols, input_image.rows, input_image.channels());
 
 #ifdef HAS_ONNXRUNTIME
     std::lock_guard<std::mutex> lock(mutex_);
@@ -323,7 +327,7 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
         cv::Mat depth_map;
         switch(config_.model_type) {
             case METRIC3D_V2:
-                depth_map = postprocessMetric3D(output_values, output_width, output_height);
+                depth_map = postprocessMetric3D(output_values, output_width, output_height, input_image.cols, input_image.rows);
                 break;
             case DEPTH_ANYTHING:
                 depth_map = postprocessDepthAnything(output_values, output_width, output_height);
@@ -370,44 +374,68 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     
     // Handle both grayscale and RGB inputs
     if(input_image.channels() == 1) {
-        // Grayscale input - convert to 3-channel RGB (replicate to R=G=B)
-        cv::Mat rgb_image;
-        cv::cvtColor(input_image, rgb_image, cv::COLOR_GRAY2BGR);
-        
-        // Convert BGR to RGB and normalize by 255.0 only
-        cv::cvtColor(rgb_image, processed, cv::COLOR_BGR2RGB);
-        processed.convertTo(processed, CV_32FC3, 1.0/255.0);
+        cv::cvtColor(input_image, processed, cv::COLOR_GRAY2BGR);
     } else if(input_image.channels() == 3) {
-        // BGR input - convert to RGB once for ML processing
-        cv::Mat rgb_image;
-        cv::cvtColor(input_image, rgb_image, cv::COLOR_BGR2RGB);
-        
-        // Normalize by 255.0 to [0,1] range only (no [-1,1] conversion)
-        rgb_image.convertTo(processed, CV_32FC3, 1.0/255.0);
+        processed = input_image.clone();
     } else {
-        // Invalid number of channels
         printf("ERROR: preprocessMetric3D - Invalid input channels: %d (expected 1 or 3)\n", input_image.channels());
         return cv::Mat();
     }
     
-    // SIMPLIFIED APPROACH: Remove center-crop, use multiples-of-14 preserving aspect ratio
-    int w = processed.cols;  // Original width (e.g., 640)  
-    int h = processed.rows;  // Original height (e.g., 480)
+    // Convert BGR to RGB (model expects RGB)
+    cv::cvtColor(processed, processed, cv::COLOR_BGR2RGB);
     
-    // Resize to nearest multiples of 14, preserving aspect ratio approximately  
-    int target_width = int(std::round(w / 14.0f)) * 14;   // 640 → 644
-    int target_height = int(std::round(h / 14.0f)) * 14;  // 480 → 476
+    // Calculate scale to preserve aspect ratio (keep_aspect_ratio: true)
+    float scale = std::min(
+        (float)config_.input_height / processed.rows,
+        (float)config_.input_width / processed.cols
+    );
     
-    // Ensure minimum size (at least 14x14)
-    target_width = std::max(target_width, 14);
-    target_height = std::max(target_height, 14);
+    printf("DEBUG: Preprocessing - Input %dx%d, scale=%.3f for target %dx%d\n", 
+           processed.cols, processed.rows, scale, config_.input_width, config_.input_height);
     
-    // Direct resize preserving aspect ratio - NO CENTER CROP, NO LETTERBOX
+    // Resize preserving aspect ratio
+    cv::Mat resized;
+    int new_width = (int)(processed.cols * scale);
+    int new_height = (int)(processed.rows * scale);
+    cv::resize(processed, resized, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
+    
+    printf("DEBUG: After aspect-ratio resize: %dx%d\n", resized.cols, resized.rows);
+    
+    // Calculate padding to reach target size
+    int pad_top = (config_.input_height - new_height) / 2;
+    int pad_bottom = config_.input_height - new_height - pad_top;
+    int pad_left = (config_.input_width - new_width) / 2;
+    int pad_right = config_.input_width - new_width - pad_left;
+    
+    // Store padding info for postprocessing
+    current_padding_.top = pad_top;
+    current_padding_.bottom = pad_bottom;
+    current_padding_.left = pad_left;
+    current_padding_.right = pad_right;
+    
+    printf("DEBUG: Padding - top:%d, bottom:%d, left:%d, right:%d\n", 
+           pad_top, pad_bottom, pad_left, pad_right);
+    
+    // Pad with ImageNet mean values (RGB: 123.675, 116.28, 103.53)
+    cv::Mat padded;
+    cv::copyMakeBorder(resized, padded, pad_top, pad_bottom, pad_left, pad_right,
+                       cv::BORDER_CONSTANT, cv::Scalar(123.675, 116.28, 103.53));
+    
+    printf("DEBUG: After padding: %dx%d\n", padded.cols, padded.rows);
+    
+    // Convert to float32 WITHOUT normalization (keep [0,255] range)
     cv::Mat result;
-    cv::resize(processed, result, cv::Size(target_width, target_height), 0, 0, cv::INTER_LINEAR);
+    padded.convertTo(result, CV_32FC3); // No 1.0/255.0 scaling!
     
-    printf("MLInference: preprocessMetric3D - Simplified: %dx%d → %dx%d (multiples of 14, AR preserved)\n", 
-           w, h, target_width, target_height);
+    // Debug: Check final values
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(result, mean, stddev);
+    printf("DEBUG: Final values - mean=[%.1f,%.1f,%.1f], std=[%.1f,%.1f,%.1f]\n",
+           mean[0], mean[1], mean[2], stddev[0], stddev[1], stddev[2]);
+    
+    printf("MLInference: preprocessMetric3D - RGB %dx%d → Model input %dx%d (aspect ratio preserved)\n", 
+           input_image.cols, input_image.rows, config_.input_width, config_.input_height);
     
     return result;
 }
@@ -442,11 +470,14 @@ cv::Mat MLInference::preprocessMiDaS(const cv::Mat& input_image) const {
     return processed;
 }
 
-cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, int width, int height) const {
+cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, int width, int height, int target_width, int target_height) const {
+    // Debug: Model output analysis
+    printf("DEBUG: Model output - dimensions %dx%d, total elements: %zu\n", width, height, raw_output.size());
+    
     // Validate input dimensions
     size_t expected_size = static_cast<size_t>(width * height);
     if(raw_output.size() != expected_size) {
-        printf("MLInference: Dimension mismatch - expected %zu elements (%dx%d), got %zu\n", 
+        printf("ERROR: Dimension mismatch - expected %zu elements (%dx%d), got %zu\n", 
                expected_size, width, height, raw_output.size());
         return cv::Mat();
     }
@@ -455,47 +486,61 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
     cv::Mat depth_map(height, width, CV_32FC1);
     std::memcpy(depth_map.ptr<float>(), raw_output.data(), raw_output.size() * sizeof(float));
     
-    // Add postprocess sanity checks (Fix #4)
-    int total_pixels = depth_map.rows * depth_map.cols;
-    cv::Mat finite_mask;
-    cv::compare(depth_map, depth_map, finite_mask, cv::CMP_EQ); // NaN check
-    int finite_count = cv::countNonZero(finite_mask);
-    float finite_ratio = (float)finite_count / total_pixels;
-    
-    double min_depth, max_depth;
-    cv::minMaxLoc(depth_map, &min_depth, &max_depth);
-    
-    // Relaxed validation: Allow wider depth range for real-world scenes
-    // finite_ratio > 0.5 and max_depth > 0.5 (some valid depth)
-    if (finite_ratio < 0.5 || max_depth < 0.5) {
-        printf("ML depth validation failed: finite_ratio=%.2f, range=[%.2f, %.2f], marking as invalid\n", 
-               finite_ratio, min_depth, max_depth);
-        // Return empty result to skip depth fusion
-        return cv::Mat();
+    // Remove padding if it was applied during preprocessing
+    cv::Mat unpadded_depth;
+    if (current_padding_.top >= 0) {
+        int unpadded_height = height - current_padding_.top - current_padding_.bottom;
+        int unpadded_width = width - current_padding_.left - current_padding_.right;
+        
+        printf("DEBUG: Removing padding - original %dx%d, unpadded %dx%d\n", 
+               width, height, unpadded_width, unpadded_height);
+        
+        if (unpadded_height > 0 && unpadded_width > 0 && 
+            current_padding_.top + unpadded_height <= height &&
+            current_padding_.left + unpadded_width <= width) {
+            
+            cv::Rect crop_region(current_padding_.left, current_padding_.top, 
+                                 unpadded_width, unpadded_height);
+            unpadded_depth = depth_map(crop_region).clone();
+            printf("DEBUG: Padding removed - depth map now %dx%d\n", 
+                   unpadded_depth.cols, unpadded_depth.rows);
+        } else {
+            printf("WARNING: Invalid padding info, using full depth map\n");
+            unpadded_depth = depth_map;
+        }
+    } else {
+        printf("DEBUG: No padding to remove\n");
+        unpadded_depth = depth_map;
     }
     
-    printf("ML depth validation passed: finite_ratio=%.2f, range=[%.2f, %.2f]\n", 
-           finite_ratio, min_depth, max_depth);
+    // Resize to target resolution if needed
+    cv::Mat final_depth;
+    if (target_width > 0 && target_height > 0 && 
+        (target_width != unpadded_depth.cols || target_height != unpadded_depth.rows)) {
+        cv::resize(unpadded_depth, final_depth, cv::Size(target_width, target_height), 0, 0, cv::INTER_LINEAR);
+        printf("ML depth postprocess: %dx%d → %dx%d (after padding removal)\n", 
+               unpadded_depth.cols, unpadded_depth.rows, target_width, target_height);
+    } else {
+        final_depth = unpadded_depth;
+    }
     
-    // Validate depth range
-    double min_val, max_val;
-    cv::minMaxLoc(depth_map, &min_val, &max_val);
+    // Enhanced depth validation and statistics
+    double min_depth, max_depth;
+    cv::minMaxLoc(final_depth, &min_depth, &max_depth);
     
-    // Apply gentle clipping to outliers (preserve most of the depth range)
-    cv::Mat clipped_depth;
-    double clip_max = std::min(max_val * 1.1, 50.0);  // Allow 10% overhead, cap at 50m
-    double clip_min = std::max(min_val * 0.9, 0.01);  // Allow 10% underhead, floor at 1cm
+    cv::Scalar mean_depth = cv::mean(final_depth);
+    printf("ML depth postprocess: range=[%.2f, %.2f], mean=%.2f\n", min_depth, max_depth, mean_depth[0]);
     
-    cv::threshold(depth_map, clipped_depth, clip_max, clip_max, cv::THRESH_TRUNC);
-    cv::threshold(clipped_depth, clipped_depth, clip_min, 0, cv::THRESH_TOZERO);
+    // Quality validation
+    if (min_depth < 0.0 || max_depth > 100.0) {
+        printf("WARNING: Depth values outside reasonable range (0-100m)\n");
+    }
+    if (std::abs(min_depth - max_depth) < 1e-6) {
+        printf("ERROR: All depth values are nearly identical (%.6f) - processing may have failed\n", min_depth);
+    }
     
-    // Apply final clipping to standard depth range for SLAM
-    cv::threshold(clipped_depth, clipped_depth, 10.0, 10.0, cv::THRESH_TRUNC);  // Cap at 10m
-    cv::threshold(clipped_depth, clipped_depth, 0.1, 0, cv::THRESH_TOZERO);     // Floor at 0.1m
-    
-    // Return depth map at inference resolution
-    // The calling code will handle resizing to match the original image size if needed
-    return clipped_depth;
+    // Return depth map at target resolution
+    return final_depth;
 }
 
 cv::Mat MLInference::postprocessDepthAnything(const std::vector<float>& raw_output, int width, int height) const {

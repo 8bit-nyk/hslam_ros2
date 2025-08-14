@@ -299,8 +299,8 @@ int main(int argc, char **argv)
 		ml_config.gpu_device_id = ml_gpu_device;
 		ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
 		
-		ml_config.input_width = 256;   // Optimized for performance (was 518)
-		ml_config.input_height = 256;  // Optimized for performance (was 518)
+		ml_config.input_width = 518;   // Metric3D model requirement
+		ml_config.input_height = 518;  // Metric3D model requirement
 		ml_config.min_depth = 0.1f;
 		ml_config.max_depth = 10.0f;
 		ml_config.benchmark_enabled = ml_benchmark_enabled;
@@ -477,16 +477,24 @@ int main(int argc, char **argv)
                     }
                 }
                 
-                // Load RGB image
-                cv::Mat rgb_img_raw = cv::imread(rgb_path, cv::IMREAD_GRAYSCALE);
-                if (rgb_img_raw.empty()) {
+                // Load RGB image as color for ML depth processing
+                cv::Mat rgb_img_color = cv::imread(rgb_path, cv::IMREAD_COLOR);
+                if (rgb_img_color.empty()) {
                     printf("ERROR: Could not load RGB image: %s\n", rgb_path.c_str());
                     continue;
                 }
                 
-                // Convert RGB to float
+                // Create grayscale version for SLAM processing
+                cv::Mat rgb_img_raw;
+                cv::cvtColor(rgb_img_color, rgb_img_raw, cv::COLOR_BGR2GRAY);
+                
+                // Convert grayscale to float for SLAM
                 cv::Mat rgb_img;
                 rgb_img_raw.convertTo(rgb_img, CV_32FC1);
+                
+                // Convert RGB to proper format for ML
+                cv::Mat rgb_for_ml;
+                cv::cvtColor(rgb_img_color, rgb_for_ml, cv::COLOR_BGR2RGB);
                 
                 // Load depth image (16-bit PNG -> CV_32FC1, scaled by 1/5000.0)
                 cv::Mat depth_img_raw = cv::imread(depth_path, cv::IMREAD_UNCHANGED);
@@ -502,8 +510,8 @@ int main(int argc, char **argv)
                 HSLAM::DepthLogger::logFrameProcessing(processedFrames, rgb_img.cols, rgb_img.rows,
                                                      depth_img.cols, depth_img.rows, timestamp);
                 
-                // Call new TrackRGBD method
-                fullSystem->TrackRGBD(rgb_img, depth_img, timestamp);
+                // Call TrackRGBD with RGB color for ML and grayscale for SLAM
+                fullSystem->TrackRGBD(rgb_for_ml, rgb_img, depth_img, timestamp);
                 
                 processedFrames++;
                 
@@ -541,8 +549,8 @@ int main(int argc, char **argv)
                             ml_config.enable_fp16 = ml_fp16_enabled;
                             ml_config.gpu_device_id = ml_gpu_device;
                             ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
-                            ml_config.input_width = 256;
-                            ml_config.input_height = 256;
+                            ml_config.input_width = 518;
+                            ml_config.input_height = 518;
                             ml_config.min_depth = 0.1f;
                             ml_config.max_depth = 10.0f;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
@@ -634,9 +642,22 @@ int main(int argc, char **argv)
 
                 if (!skipFrame) {
                     if(ml_depth_enabled && fullSystem->ml_depth_enabled_) {
-                        // Use ML-enhanced tracking
+                        // Load RGB version for ML depth processing
+                        cv::Mat rgb_color;
+                        std::string imagefile = reader->getFilename(i);
+                        if (!imagefile.empty()) {
+                            rgb_color = cv::imread(imagefile, cv::IMREAD_COLOR);
+                            if (!rgb_color.empty()) {
+                                printf("DEBUG: Loaded RGB from file %dx%d\n", rgb_color.cols, rgb_color.rows);
+                                cv::cvtColor(rgb_color, rgb_color, cv::COLOR_BGR2RGB);
+                            }
+                        }
+                        
+                        // Create grayscale matrix from existing processed data
                         cv::Mat rgb_mat(img->h, img->w, CV_32FC1, img->image);
-                        fullSystem->TrackMonocularWithML(rgb_mat, img->timestamp);
+                        
+                        // Use ML-enhanced tracking with both RGB and grayscale
+                        fullSystem->TrackMonocularWithML(rgb_color.empty() ? rgb_mat : rgb_color, rgb_mat, img->timestamp);
                     } else {
                         // Use standard monocular tracking
                         fullSystem->addActiveFrame(img, i);
@@ -685,8 +706,8 @@ int main(int argc, char **argv)
                             ml_config.enable_fp16 = ml_fp16_enabled;
                             ml_config.gpu_device_id = ml_gpu_device;
                             ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
-                            ml_config.input_width = 256;
-                            ml_config.input_height = 256;
+                            ml_config.input_width = 518;
+                            ml_config.input_height = 518;
                             ml_config.min_depth = 0.1f;
                             ml_config.max_depth = 10.0f;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;

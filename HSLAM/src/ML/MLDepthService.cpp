@@ -346,6 +346,18 @@ void MLDepthService::processingLoop() {
         frames_processed_.fetch_add(1);
         auto start_time = std::chrono::steady_clock::now();
         
+        printf("DEBUG: MLDepthService - RGB before MLInference: %dx%d channels=%d\n", 
+               request.rgb_image.cols, request.rgb_image.rows, request.rgb_image.channels());
+        
+        // Validate input image dimensions
+        if (request.rgb_image.empty()) {
+            printf("ERROR: Empty RGB image submitted for processing\n");
+            continue;
+        }
+        if (request.rgb_image.channels() != 3) {
+            printf("WARNING: Expected 3-channel RGB, got %d channels\n", request.rgb_image.channels());
+        }
+        
         auto inference_result = ml_inference_->inferDepth(request.rgb_image);
         
         auto end_time = std::chrono::steady_clock::now();

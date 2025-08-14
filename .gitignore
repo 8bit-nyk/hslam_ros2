@@ -30,7 +30,7 @@
 *.exe
 *.out
 *.app
-
+*.gdb
 
 result.txt
 

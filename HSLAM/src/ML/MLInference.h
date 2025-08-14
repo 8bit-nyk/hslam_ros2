@@ -62,8 +62,8 @@ public:
             , enable_fp16(false)
             , gpu_device_id(0)
             , gpu_memory_limit(2ULL * 1024 * 1024 * 1024)  // 2GB default
-            , input_width(256)   // Optimized for performance (was 518)
-            , input_height(256)  // Optimized for performance (was 518)
+            , input_width(518)   // Metric3D model requirement for quality inference
+            , input_height(518)  // Metric3D model requirement for quality inference
             , normalize_input(true)
             , depth_scale(1.0f)
             , min_depth(0.1f)
@@ -127,9 +127,15 @@ private:
     cv::Mat preprocessMiDaS(const cv::Mat& input_image) const;
     
     // Model-specific postprocessing
-    cv::Mat postprocessMetric3D(const std::vector<float>& raw_output, int width, int height) const;
+    cv::Mat postprocessMetric3D(const std::vector<float>& raw_output, int width, int height, int target_width = -1, int target_height = -1) const;
     cv::Mat postprocessDepthAnything(const std::vector<float>& raw_output, int width, int height) const;
     cv::Mat postprocessMiDaS(const std::vector<float>& raw_output, int width, int height) const;
+    
+    // Padding info for aspect ratio preservation
+    struct PaddingInfo {
+        int top = -1, bottom = -1, left = -1, right = -1;
+    };
+    mutable PaddingInfo current_padding_;
     
     // Helper methods
     bool validateModelSignature() const;

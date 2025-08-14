@@ -151,10 +151,10 @@ public:
 	void addActiveFrame(ImageAndExposure* image, int id);
 
 	// RGB-D tracking method - for now, calls TrackMonocular
-	void TrackRGBD(const cv::Mat& rgb_img, const cv::Mat& depth_img, const double timestamp);
+	void TrackRGBD(const cv::Mat& rgb_color, const cv::Mat& rgb_img, const cv::Mat& depth_img, const double timestamp);
 
 	// ML Depth tracking method - enhanced monocular tracking with ML depth
-	void TrackMonocularWithML(const cv::Mat& rgb_img, double timestamp);
+	void TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& rgb_img, double timestamp);
 	
 	// Core ML-enhanced SLAM tracking method - uses ML depth for enhanced tracking
 	void TrackFrameWithMLDepth(const cv::Mat& rgb_img, const cv::Mat& ml_depth, double timestamp);
@@ -211,6 +211,7 @@ public:
 	cv::Mat current_ml_depth_image_;
 	cv::Mat last_bgr_frame_;  // Store last BGR frame for keyframe ML submissions
 	mutable std::mutex ml_depth_mutex_;
+	mutable std::mutex rgbd_depth_mutex_;  // NEW: Protect RGB-D depth access
 	bool ml_depth_enabled_ = false;
 	
 	// ML performance tracking

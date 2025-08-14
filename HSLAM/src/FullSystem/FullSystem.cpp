@@ -1147,13 +1147,13 @@ void FullSystem::flagPointsForRemoval()
  * @param depth_img Depth image as CV_32FC1 in meters
  * @param timestamp Frame timestamp
  */
-void FullSystem::TrackRGBD(const cv::Mat& rgb_image, const cv::Mat& depth_image, const double timestamp)
+void FullSystem::TrackRGBD(const cv::Mat& rgb_color, const cv::Mat& rgb_image, const cv::Mat& depth_image, const double timestamp)
 {
     if(isLost) return;
     
     // Validate input images
-    if(rgb_image.empty() || depth_image.empty()) {
-        printf("ERROR: Empty RGB or depth image in TrackRGBD\n");
+    if(rgb_color.empty() || rgb_image.empty() || depth_image.empty()) {
+        printf("ERROR: Empty images in TrackRGBD\n");
         return;
     }
 
@@ -1163,8 +1163,17 @@ void FullSystem::TrackRGBD(const cv::Mat& rgb_image, const cv::Mat& depth_image,
                timestamp, rgb_image.cols, rgb_image.rows, depth_image.cols, depth_image.rows);
     }
     
-    // Store depth image for use in makeNewTraces
-    currentDepthImage = depth_image.clone();
+    // Store depth image for use in makeNewTraces (thread-safe)
+    {
+        std::lock_guard<std::mutex> lock(rgbd_depth_mutex_);
+        currentDepthImage = depth_image.clone();
+    }
+    
+    // Store RGB color for ML keyframe submissions (thread-safe)
+    {
+        std::lock_guard<std::mutex> lock(ml_depth_mutex_);
+        last_bgr_frame_ = rgb_color.clone();  // Store actual RGB for ML
+    }
     
     // Synchronize depth with coarse trackers immediately
     synchronizeDepthWithTracking();
@@ -1187,25 +1196,35 @@ void FullSystem::TrackRGBD(const cv::Mat& rgb_image, const cv::Mat& depth_image,
  * Submits frames for ML processing and retrieves results when available.
  * Falls back to standard monocular tracking if ML depth unavailable.
  * 
- * @param rgb_img RGB image as CV_8UC3 or CV_32FC3
+ * @param rgb_color RGB color image for ML processing
+ * @param rgb_img Grayscale image for SLAM processing
  * @param timestamp Frame timestamp
  */
-void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_img, double timestamp)
+void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& rgb_img, double timestamp)
 {
     if(isLost) return;
     
     ml_metrics_.total_frames++;
     
-    // Validate input image
+    // Validate input images
     if(rgb_img.empty()) {
-        printf("ERROR: Empty RGB image in TrackMonocularWithML\n");
+        printf("ERROR: Empty grayscale image in TrackMonocularWithML\n");
         return;
     }
     
-    // Store BGR frame for keyframe ML submissions (Fix #1)
+    // Store RGB color frame for keyframe ML submissions
     {
         std::lock_guard<std::mutex> lock(ml_depth_mutex_);
-        last_bgr_frame_ = rgb_img.clone();
+        if (!rgb_color.empty() && rgb_color.channels() == 3) {
+            last_bgr_frame_ = rgb_color.clone();  // Store actual RGB for ML
+            printf("DEBUG: Stored RGB for ML %dx%d channels=%d\n", 
+                   rgb_color.cols, rgb_color.rows, rgb_color.channels());
+        } else {
+            // Fallback: convert grayscale to RGB
+            printf("WARNING: No RGB color available, using grayscale->RGB conversion %dx%d\n",
+                   rgb_img.cols, rgb_img.rows);
+            cv::cvtColor(rgb_img, last_bgr_frame_, cv::COLOR_GRAY2RGB);
+        }
     }
     
     // Bounds checking: Skip ML depth retrieval if not enough frames (but keep ML enabled for future)
@@ -1374,6 +1393,14 @@ void FullSystem::TrackFrameWithMLDepth(const cv::Mat& rgb_img,
     }
     currentMLDepthImage = ml_depth.clone();
     
+    // Debug: Verify no contamination between ML and RGB-D depth
+    if(!setting_debugout_runquiet) {
+        std::lock_guard<std::mutex> lock(rgbd_depth_mutex_);
+        if(!currentDepthImage.empty()) {
+            printf("WARNING: RGB-D depth still present during ML tracking - will be cleared\n");
+        }
+    }
+    
     // Enhanced tracking with ML depth context
     boost::unique_lock<boost::mutex> lock(trackMutex);
     
@@ -1409,8 +1436,14 @@ void FullSystem::TrackFrameWithMLDepth(const cv::Mat& rgb_img,
             return;
         }
     } else {
-        // CRITICAL: Synchronize depth state immediately before tracking (mirrors monocular/RGBD flow)
-        synchronizeDepthWithTracking();
+        // CRITICAL: Clear RGB-D depth to prevent contamination of ML pipeline
+        cv::Mat backup_rgbd_depth;
+        {
+            std::lock_guard<std::mutex> depth_lock(rgbd_depth_mutex_);
+            backup_rgbd_depth = currentDepthImage.clone();
+            currentDepthImage = cv::Mat();  // Clear RGB-D depth for ML tracking
+        }
+        synchronizeDepthWithTracking(); // This now clears CoarseTracker depth
         
         // Track with ML depth enhancement
         Vec5 tres = trackNewCoarse(fh);
@@ -1436,6 +1469,13 @@ void FullSystem::TrackFrameWithMLDepth(const cv::Mat& rgb_img,
                 marginalizeFrame(frameHessians[i]);
                 i = 0;
             }
+        
+        // Restore RGB-D depth for subsequent RGB-D tracking calls
+        if(!backup_rgbd_depth.empty()) {
+            std::lock_guard<std::mutex> depth_lock(rgbd_depth_mutex_);
+            currentDepthImage = backup_rgbd_depth;
+            synchronizeDepthWithTracking();  // Restore CoarseTracker depth
+        }
         
         lock.unlock();
         deliverTrackedFrame(fh, needNewKFAfter < 0);
@@ -1881,6 +1921,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		}
 		
 		if (!rgb_image.empty()) {
+			printf("DEBUG: FullSystem - RGB before ML submission: %dx%d channels=%d\n", 
+				   rgb_image.cols, rgb_image.rows, rgb_image.channels());
 			ml_request.rgb_image = rgb_image.clone();
 			
 			// Submit for processing
@@ -2126,7 +2168,18 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 	// =========================== add new Immature points & new residuals =========================
-	float* depthData = (!currentDepthImage.empty()) ? (float*)currentDepthImage.data : nullptr;
+	// Ensure we only use RGB-D depth (never ML depth) for makeNewTraces
+	float* depthData = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(rgbd_depth_mutex_);
+		if(!currentDepthImage.empty() && currentDepthImage.type() == CV_32FC1) {
+			depthData = (float*)currentDepthImage.data;
+			if(!setting_debugout_runquiet) {
+				printf("makeNewTraces: Using RGB-D depth (%dx%d)\n", 
+				       currentDepthImage.cols, currentDepthImage.rows);
+			}
+		}
+	}
 	makeNewTraces(fh, depthData);
 
 
@@ -3363,29 +3416,32 @@ void FullSystem::updateCoarseTrackerDepth()
     }
     
     // Ensure depth synchronization with tracking
-    if(!currentDepthImage.empty()) {
-        // Validate depth image format before setting
-        if(currentDepthImage.type() == CV_32FC1) {
-            // Update main coarse tracker
-            coarseTracker->setExternalDepthImage(currentDepthImage);
-            
-            // Update coarse tracker for new keyframes
-            coarseTracker_forNewKF->setExternalDepthImage(currentDepthImage);
+    {
+        std::lock_guard<std::mutex> lock(rgbd_depth_mutex_);
+        if(!currentDepthImage.empty()) {
+            // Validate depth image format before setting
+            if(currentDepthImage.type() == CV_32FC1) {
+                // Update main coarse tracker
+                coarseTracker->setExternalDepthImage(currentDepthImage);
+                
+                // Update coarse tracker for new keyframes
+                coarseTracker_forNewKF->setExternalDepthImage(currentDepthImage);
             
             if(!setting_debugout_runquiet) {
                 printf("FullSystem: Updated CoarseTracker instances with depth image (%dx%d)\n", 
                        currentDepthImage.cols, currentDepthImage.rows);
             }
+            } else {
+                printf("WARNING: Invalid depth image format for CoarseTracker integration\n");
+            }
         } else {
-            printf("WARNING: Invalid depth image format for CoarseTracker integration\n");
-        }
-    } else {
-        // Clear depth from both trackers if no depth available
-        coarseTracker->clearExternalDepthImage();
-        coarseTracker_forNewKF->clearExternalDepthImage();
-        
-        if(!setting_debugout_runquiet) {
-            printf("FullSystem: Cleared depth from CoarseTracker instances\n");
+            // Clear depth from both trackers if no depth available
+            coarseTracker->clearExternalDepthImage();
+            coarseTracker_forNewKF->clearExternalDepthImage();
+            
+            if(!setting_debugout_runquiet) {
+                printf("FullSystem: Cleared depth from CoarseTracker instances\n");
+            }
         }
     }
 }
@@ -3445,8 +3501,12 @@ bool FullSystem::initializeMLDepthService(const MLConfig& config,
         ml_config.gpu_device_id = config.gpu_device_id;
         ml_config.gpu_memory_limit = config.gpu_memory_limit_mb * 1024 * 1024;  // Convert MB to bytes
         
-        ml_config.input_width = 256;   // Optimized for performance (was 518)
-        ml_config.input_height = 256;  // Optimized for performance (was 518)
+        ml_config.input_width = 518;   // Metric3D model requirement for quality inference
+        ml_config.input_height = 518;  // Metric3D model requirement for quality inference
+        
+        // Debug: Verify configuration values
+        printf("DEBUG: FullSystem - ML config created with dimensions %dx%d\n", 
+               ml_config.input_width, ml_config.input_height);
         ml_config.normalize_input = true;
         ml_config.depth_scale = 1.0f;
         ml_config.min_depth = config.min_depth;
