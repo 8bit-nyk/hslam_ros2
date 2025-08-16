@@ -32,7 +32,7 @@ class Output3DWrapper;
 namespace ML
 {
 class MLInference;
-class MLDepthService;
+class MLDepthProcessor;
 }
 
 class PixelSelector;
@@ -206,12 +206,12 @@ public:
 	cv::Mat currentDepthImage;     // RGB-D sensor depth for direct component
 	cv::Mat currentMLDepthImage;   // Dedicated ML depth storage (NEW)
 
-	// ML Depth integration support (Phase 2)
-	std::unique_ptr<ML::MLDepthService> ml_depth_service_;
+	// ML Depth integration support
+	std::unique_ptr<ML::MLDepthProcessor> ml_processor_;
 	cv::Mat current_ml_depth_image_;
-	cv::Mat last_bgr_frame_;  // Store last BGR frame for keyframe ML submissions
+	cv::Mat last_bgr_frame_;  // Store last BGR frame for ML processing
 	mutable std::mutex ml_depth_mutex_;
-	mutable std::mutex rgbd_depth_mutex_;  // NEW: Protect RGB-D depth access
+	mutable std::mutex rgbd_depth_mutex_;  // Protect RGB-D depth access
 	bool ml_depth_enabled_ = false;
 	
 	// ML performance tracking
@@ -224,13 +224,8 @@ public:
 	};
 	MLMetrics ml_metrics_;
 	
-	// Phase 2.5: ML Service Persistence State
-	bool ml_service_persistent_;
-	bool slam_restart_in_progress_;
-	std::chrono::steady_clock::time_point slam_last_restart_;
-	int slam_restart_count_;
 	
-	// ML Depth Service Management (Phase 2 additions)
+	// ML Depth Processor Management
 public:
 	// Simple ML configuration struct to avoid forward declaration issues
 	struct MLConfig {
@@ -250,39 +245,17 @@ public:
 		bool benchmark_enabled = false;
 	};
 	
+	                              
 	/**
-	 * @brief Initialize ML depth service with asynchronous processing
+	 * @brief Initialize simplified ML depth processor for synchronous processing
 	 * @param config ML inference configuration
-	 * @param strategy Initial inference strategy
-	 * @param snapshot_interval Frames between inference in snapshot mode
 	 * @return Initialization success status
 	 */
-	bool initializeMLDepthService(const MLConfig& config,
-	                              const std::string& strategy_name = "every_frame",
-	                              int snapshot_interval = 5);
+	bool initializeMLDepthProcessor(const MLConfig& config);
+	
 	
 	/**
-	 * @brief Stop and cleanup ML depth service
-	 */
-	void shutdownMLDepthService();
-	
-	/**
-	 * @brief Wait for ML warm-up completion with timeout
-	 * @param timeout_ms Maximum wait time in milliseconds
-	 * @return True if warm-up completed, false if timeout
-	 */
-	bool waitForMLWarmup(int timeout_ms = 5000);
-	
-	/**
-	 * @brief Change ML inference strategy during runtime
-	 * @param strategy_name Strategy name ("every_frame", "keyframe_only", "snapshot_mode")
-	 * @param snapshot_interval Interval for snapshot mode
-	 * @return Success status
-	 */
-	bool setMLInferenceStrategy(const std::string& strategy_name, int snapshot_interval = 5);
-	
-	/**
-	 * @brief Get current ML depth service performance statistics
+	 * @brief Get current ML depth processor performance statistics
 	 * @return Performance statistics structure
 	 */
 	MLMetrics getMLMetrics() const;

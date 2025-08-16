@@ -75,7 +75,9 @@
 #include <chrono>
 #include <thread>
 #include "ML/MLInference.h"
-#include "ML/MLDepthService.h"
+#include "ML/MLDepthProcessor.h"
+
+// MLDepthProcessor integration (former feature flag removed - using simplified processor only)
 
 namespace HSLAM
 {
@@ -261,16 +263,7 @@ FullSystem::~FullSystem()
 	delete pixelSelector;
 	delete ef;
 	
-	// Phase 2: Thread-safe shutdown sequence - shutdown ML depth service BEFORE cleaning up frames
-	// This prevents ML service from accessing frames during destruction
-	if (ml_depth_service_) {
-		// First pause processing to prevent new ML operations
-		if (ml_depth_service_->isActive()) {
-			ml_depth_service_->pauseProcessing();
-		}
-		// Then shutdown the service completely
-		shutdownMLDepthService();
-	}
+	// Phase 2: Thread-safe shutdown sequence for ML components
 	
 	loopCloser.reset();
 	matcher.reset();
@@ -452,12 +445,6 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 		SE3 slast_2_sprelast;
 		SE3 lastF_2_slast;
 		{	// lock on global pose consistency!
-			// CRITICAL FIX: Ensure ML service is not accessing frame data during critical mutex section
-			// This check is essential for frames >91 where ML integration is high
-			if (ml_depth_enabled_ && ml_depth_service_ && ml_depth_service_->isActive()) {
-				// Brief pause to ensure ML service has released any frame references
-				std::this_thread::sleep_for(std::chrono::microseconds(100));
-			}
 			boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
 			slast_2_sprelast = sprelast->getPose().inverse() * slast->getPose();
 			lastF_2_slast = slast->getPose().inverse() * lastF->shell->getPose();
@@ -536,12 +523,6 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 	int tryIterations=0;
 
 	// ===Hypothesis Evaluation Loop===
-	// CRITICAL FIX: Pause ML service during tracking failure recovery to prevent race conditions
-	bool ml_service_was_paused = false;
-	if (lastF_2_fh_tries.size() > 1 && ml_depth_enabled_ && ml_depth_service_) {
-		ml_depth_service_->pauseProcessing();
-		ml_service_was_paused = true;
-	}
 	
 	for(unsigned int i=0;i<lastF_2_fh_tries.size();i++) // Try tracking for all poses in lastF_2_fh_tries
 	{
@@ -611,11 +592,6 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 		flowVecs = Vec3(0,0,0);
 		aff_g2l = aff_last_2_l;
 		lastF_2_fh = lastF_2_fh_tries[0];
-	}
-	
-	// CRITICAL FIX: Resume ML service after tracking attempt completion
-	if (ml_service_was_paused) {
-		ml_depth_service_->resumeProcessing();
 	}
 	
 	// NUMERICAL STABILITY FIX: Clamp extreme affine parameters to prevent Sophus scale exceptions
@@ -1293,27 +1269,7 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
                ml_frame_counter, initialized ? "YES" : "NO");
     }
     
-    // Submit current frame for future ML processing if enabled
-    // Skip submission for KEYFRAME_ONLY strategy to prevent frame ID conflicts
-    if(ml_depth_enabled_ && ml_depth_service_ && ml_depth_service_->isActive()) {
-        auto current_strategy = ml_depth_service_->getCurrentStrategy();
-        
-        if(current_strategy != ML::MLDepthService::KEYFRAME_ONLY) {
-            ML::MLDepthService::FrameRequest request(
-                rgb_img, timestamp, ml_frame_counter, shouldCreateKeyframe());
-            ml_depth_service_->submitFrame(request);
-            
-            printf("TrackMonocularWithML: Submitted frame %d (timestamp=%.3f, strategy=%d)\n",
-                   ml_frame_counter, timestamp, (int)current_strategy);
-        } else {
-            printf("TrackMonocularWithML: Skipped frame %d submission (KEYFRAME_ONLY strategy)\n",
-                   ml_frame_counter);
-        }
-        
-        // Update performance statistics from service
-        auto perf_stats = ml_depth_service_->getPerformanceStats();
-        ml_metrics_.frames_skipped = perf_stats.frames_skipped;
-    }
+    // Update frame counter for ML processing synchronization
     
     // Update ML utilization rate
     ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
@@ -1886,98 +1842,39 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	fh->shell->KfId = allKeyFramesHistory.back()->KfId + 1;
 	fh->frameID = allKeyFramesHistory.size();
 	
-	// =================== ML DEPTH INTEGRATION (Phase 2.7) ===================
-	// Submit current keyframe for ML depth processing using frame index
-	if (ml_depth_enabled_ && ml_depth_service_ && ml_depth_service_->isActive()) {
-		
-		// Set frame index for ML synchronization
-		fh->ml_request_frame_id_ = fh->frameID;
-		fh->setMLPending(true);
-		
-		// Create ML request with frame index
-		ML::MLDepthService::FrameRequest ml_request;
-		ml_request.frame_id = fh->frameID;  // Use frameID for tracking
-		ml_request.timestamp = fh->shell->timestamp;
-		ml_request.is_keyframe = true;
-		
-		// Use stored BGR frame for keyframe ML submissions (Fix #1)
+
+	// =================== ML DEPTH PROCESSOR INTEGRATION ===================
+	// Direct synchronous ML depth processing for current keyframe
+	if (ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady()) {
 		cv::Mat rgb_image;
 		{
 			std::lock_guard<std::mutex> lock(ml_depth_mutex_);
 			if (!last_bgr_frame_.empty()) {
 				rgb_image = last_bgr_frame_.clone();
 			} else {
-				// Fallback: Extract RGB from frame derivatives (original broken method)
-				printf("WARNING: No stored BGR frame available, using fallback grayscale conversion\n");
-				cv::Mat grayscale_img(hG[0], wG[0], CV_32FC1, fh->dI);
-				if(grayscale_img.type() == CV_32FC1) {
-					cv::Mat gray_8u;
-					grayscale_img.convertTo(gray_8u, CV_8UC1, 255.0);
-					cv::cvtColor(gray_8u, rgb_image, cv::COLOR_GRAY2RGB);
-				} else {
-					cv::cvtColor(grayscale_img, rgb_image, cv::COLOR_GRAY2RGB);
-				}
+				printf("makeKeyFrame: Warning - no BGR frame available for ML processing\n");
 			}
 		}
 		
 		if (!rgb_image.empty()) {
-			printf("DEBUG: FullSystem - RGB before ML submission: %dx%d channels=%d\n", 
-				   rgb_image.cols, rgb_image.rows, rgb_image.channels());
-			ml_request.rgb_image = rgb_image.clone();
+			printf("makeKeyFrame: Processing keyframe %d with ML processor...\n", fh->frameID);
 			
-			// Submit for processing
-			ml_depth_service_->submitFrame(ml_request);
+			auto start_time = std::chrono::high_resolution_clock::now();
+			auto ml_result = ml_processor_->processKeyframeDetailed(rgb_image);
+			auto end_time = std::chrono::high_resolution_clock::now();
+			auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 			
-			printf("makeKeyFrame: Submitted keyframe %d for ML depth processing (timestamp=%.3f, frame_id=%d)\n", 
-				   fh->frameID, ml_request.timestamp, ml_request.frame_id);
-		}
-	}
-
-	// =================== BUFFERED ML DEPTH RETRIEVAL (PHASE 3) ===================
-	// Check multiple previous frames for completed ML results
-	if (ml_depth_enabled_ && ml_depth_service_ && frameHessians.size() >= 2) {
-		
-		// Expanded lookback window: check up to 10 frames back for available results
-		int max_lookback = std::min(10, (int)frameHessians.size());
-		bool found_ml_result = false;
-		
-		printf("makeKeyFrame: Checking for ML depth results from %d previous frames...\n", max_lookback-1);
-		
-		for (int lookback = 1; lookback < max_lookback; lookback++) {
-			FrameHessian* target_frame = frameHessians[frameHessians.size() - 1 - lookback];
-			
-			// CRITICAL FIX: Remove isMLPending() gate - check for results even if pending flag is stale
-			if (!target_frame || target_frame->hasMLDepth()) {
-				continue; // Skip if frame invalid or already has ML depth
-			}
-			
-			printf("makeKeyFrame: Checking frame %d (lookback %d, pending: YES, has_depth: NO, request_id: %d, timestamp: %.3f)\n",
-				   target_frame->frameID, lookback, target_frame->ml_request_frame_id_, target_frame->shell->timestamp);
-			
-			// Try to retrieve ML depth result by frame index first
-			auto depth_result = ml_depth_service_->getDepthResultByFrameIndex(
-				target_frame->ml_request_frame_id_);
+			if (ml_result.success && !ml_result.depth_map.empty()) {
+				fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
+				fh->setMLPending(false);  // Clear pending flag
 				
-			// If frame index lookup fails, try timestamp fallback with expanded tolerance
-			if (!depth_result || !depth_result->valid) {
-				printf("makeKeyFrame: Frame index lookup failed for request_id %d, trying timestamp fallback...\n",
-					   target_frame->ml_request_frame_id_);
-				depth_result = ml_depth_service_->getDepthResult(target_frame->shell->timestamp, 150.0); // 150ms tolerance
-			}
-			
-			if (depth_result && depth_result->valid) {
-				target_frame->setMLDepth(depth_result->depth_map, 
-										depth_result->confidence,
-										depth_result->inference_time_ms);
-										
-				// Check if this was retrieved by frame index or timestamp fallback
-				auto frame_index_result = ml_depth_service_->getDepthResultByFrameIndex(target_frame->ml_request_frame_id_);
-				bool retrieved_by_timestamp = (!frame_index_result || !frame_index_result->valid);
+				printf("makeKeyFrame: ✅ ML processing successful for frame %d (%.1fms inference, conf=%.2f, total=%.1fms)\n",
+					   fh->frameID, ml_result.inference_time_ms, ml_result.confidence, (float)processing_time);
 				
-				printf("makeKeyFrame: ✅ Retrieved ML depth for frame %d (%.1fms inference, conf=%.2f, lookback=%d, method=%s)\n",
-					   target_frame->frameID, depth_result->inference_time_ms, 
-					   depth_result->confidence, lookback, 
-					   retrieved_by_timestamp ? "timestamp_fallback" : "frame_index");
+				// Update metrics
+				ml_metrics_.total_frames++;
+				ml_metrics_.frames_with_ml_depth++;
+				ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
 				
 				// DEBUG: Save ML depth maps for visual inspection (when --save flag is enabled)
 				if (debugSaveImages) {
@@ -1989,26 +1886,20 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 							// Create filename for colorized depth visualization
 							char depth_file[256];
 							snprintf(depth_file, 256, "images_out/ml_depth_%05d_%02d.png", 
-									 target_frame->frameID, ml_depth_saved_count);
+									 fh->frameID, ml_depth_saved_count);
 							
 							// Normalize depth for visualization (0-255)
 							cv::Mat depth_viz;
-							cv::normalize(depth_result->depth_map, depth_viz, 0, 255, cv::NORM_MINMAX, CV_8U);
+							cv::normalize(ml_result.depth_map, depth_viz, 0, 255, cv::NORM_MINMAX, CV_8U);
 							
 							// Apply JET colormap for better depth visualization
 							cv::Mat depth_colored;
 							cv::applyColorMap(depth_viz, depth_colored, cv::COLORMAP_JET);
 							cv::imwrite(depth_file, depth_colored);
 							
-							// Save raw depth values in EXR format for analysis
-							char depth_raw_file[256];
-							snprintf(depth_raw_file, 256, "images_out/ml_depth_raw_%05d_%02d.exr", 
-									 target_frame->frameID, ml_depth_saved_count);
-							cv::imwrite(depth_raw_file, depth_result->depth_map);
-							
 							// Get depth range for diagnostic info
 							double min_depth, max_depth;
-							cv::minMaxLoc(depth_result->depth_map, &min_depth, &max_depth);
+							cv::minMaxLoc(ml_result.depth_map, &min_depth, &max_depth);
 							
 							printf("makeKeyFrame: 💾 Saved ML depth sample %d: %s (depth range: %.2f-%.2f)\n", 
 								   ml_depth_saved_count, depth_file, min_depth, max_depth);
@@ -2019,19 +1910,11 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						}
 					}
 				}
-				
-				// TODO: Consider triggering refinement/re-optimization for this frame
-				found_ml_result = true;
-				break; // Found one result, that's enough for this keyframe cycle
+			} else {
+				printf("makeKeyFrame: ❌ ML processing failed for frame %d: %s\n", 
+					   fh->frameID, ml_result.error_message.c_str());
+				fh->setMLPending(false);  // Clear pending flag on failure
 			}
-		}
-		
-		if (!found_ml_result) {
-			printf("makeKeyFrame: ✗ No ML depth results found from previous %d frames\n", max_lookback-1);
-			
-			// Print diagnostic information about cache contents
-			printf("makeKeyFrame: Cache diagnostic - attempting lookup for non-existent frame to trigger cache dump...\n");
-			ml_depth_service_->getDepthResultByFrameIndex(-1); // This will trigger cache contents printing
 		}
 	}
 
@@ -2080,8 +1963,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 	// =========================== Figure Out if INITIALIZATION FAILED =========================
-	// Phase 2A: ML-aware initialization failure detection
-	bool use_ml_tolerant_thresholds = ml_depth_enabled_ && ml_depth_service_ && ml_depth_service_->isActive();
+	// ML-aware initialization failure detection
+	bool use_ml_tolerant_thresholds = ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady();
 	int max_keyframes = use_ml_tolerant_thresholds ? 6 : 4; // Allow more keyframes with ML
 	
 	if(allKeyFramesHistory.size() <= max_keyframes)
@@ -3484,166 +3367,15 @@ void FullSystem::synchronizeDepthWithTracking()
 
 // =================== ML DEPTH SERVICE INTEGRATION (Phase 2) ===================
 
-bool FullSystem::initializeMLDepthService(const MLConfig& config,
-                                          const std::string& strategy_name,
-                                          int snapshot_interval)
-{
-    try {
-        // Convert FullSystem::MLConfig to ML::MLInference::InferenceConfig
-        ML::MLInference::InferenceConfig ml_config;
-        ml_config.model_path = config.model_path;
-        ml_config.model_type = ML::MLInference::METRIC3D_V2;
-        ml_config.enable_gpu = config.enable_gpu;
-        ml_config.num_threads = config.num_threads;
-        
-        // GPU-specific parameters
-        ml_config.enable_fp16 = config.enable_fp16;
-        ml_config.gpu_device_id = config.gpu_device_id;
-        ml_config.gpu_memory_limit = config.gpu_memory_limit_mb * 1024 * 1024;  // Convert MB to bytes
-        
-        ml_config.input_width = 518;   // Metric3D model requirement for quality inference
-        ml_config.input_height = 518;  // Metric3D model requirement for quality inference
-        
-        // Debug: Verify configuration values
-        printf("DEBUG: FullSystem - ML config created with dimensions %dx%d\n", 
-               ml_config.input_width, ml_config.input_height);
-        ml_config.normalize_input = true;
-        ml_config.depth_scale = 1.0f;
-        ml_config.min_depth = config.min_depth;
-        ml_config.max_depth = config.max_depth;
-        ml_config.benchmark_enabled = config.benchmark_enabled;
-        
-        // Parse strategy name
-        ML::MLDepthService::InferenceStrategy strategy = ML::MLDepthService::EVERY_FRAME;
-        if (strategy_name == "keyframe_only") {
-            strategy = ML::MLDepthService::KEYFRAME_ONLY;
-        } else if (strategy_name == "snapshot_mode") {
-            strategy = ML::MLDepthService::SNAPSHOT_MODE;
-        } else if (strategy_name != "every_frame") {
-            printf("Warning: Unknown ML strategy '%s', using every_frame\n", strategy_name.c_str());
-        }
-        
-        // Create ML depth service
-        ml_depth_service_ = std::make_unique<ML::MLDepthService>(ml_config, strategy, snapshot_interval);
-        
-        // Start asynchronous processing
-        if (!ml_depth_service_->start()) {
-            printf("Failed to start ML depth service\n");
-            ml_depth_service_.reset();
-            return false;
-        }
-        
-        ml_depth_enabled_ = true;
-        
-        printf("FullSystem: ML depth service initialized successfully\n");
-        printf("  Strategy: %s\n", strategy_name.c_str());
-        if (strategy == ML::MLDepthService::SNAPSHOT_MODE) {
-            printf("  Snapshot interval: %d frames\n", snapshot_interval);
-        }
-        
-        return true;
-        
-    } catch (const std::exception& e) {
-        printf("ERROR: FullSystem ML depth service initialization failed: %s\n", e.what());
-        printf("  Model path provided: %s\n", config.model_path.c_str());
-        printf("  GPU enabled: %s\n", config.enable_gpu ? "Yes" : "No");
-        printf("  GPU device: %d\n", config.gpu_device_id);
-        printf("  Memory limit: %lu MB\n", config.gpu_memory_limit_mb);
-        ml_depth_enabled_ = false;
-        ml_depth_service_.reset();
-        return false;
-    }
-}
 
-void FullSystem::shutdownMLDepthService()
-{
-    if (ml_depth_service_) {
-        printf("FullSystem: Shutting down ML depth service...\n");
-        ml_depth_service_->stop();
-        ml_depth_service_.reset();
-    }
-    
-    ml_depth_enabled_ = false;
-    
-    // Clear ML depth image
-    {
-        std::lock_guard<std::mutex> lock(ml_depth_mutex_);
-        current_ml_depth_image_ = cv::Mat();
-    }
-    
-    printf("FullSystem: ML depth service shutdown complete\n");
-}
 
-bool FullSystem::waitForMLWarmup(int timeout_ms)
-{
-    if (!ml_depth_service_ || !ml_depth_enabled_) {
-        return true; // No ML service or disabled, consider "warmed up"
-    }
-    
-    printf("FullSystem: Waiting for ML warm-up completion (timeout: %dms)...\n", timeout_ms);
-    
-    auto start_time = std::chrono::steady_clock::now();
-    const auto timeout = std::chrono::milliseconds(timeout_ms);
-    
-    // Poll ML service for warm-up completion
-    while (std::chrono::steady_clock::now() - start_time < timeout) {
-        // Check if ML service has completed initial processing
-        if (ml_depth_service_->isActive()) {
-            // Simple heuristic: check if service has processed at least one frame or has low queue
-            auto stats = ml_depth_service_->getPerformanceStats();
-            if (stats.successful_inferences > 0 || stats.queue_size == 0) {
-                printf("FullSystem: ML warm-up detected as complete (%d inferences, queue: %zu)\n", 
-                       stats.successful_inferences, stats.queue_size);
-                return true;
-            }
-        }
-        
-        // Sleep briefly before next check
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    
-    printf("FullSystem: ML warm-up timeout reached\n");
-    return false;
-}
 
-bool FullSystem::setMLInferenceStrategy(const std::string& strategy_name, int snapshot_interval)
-{
-    if (!ml_depth_service_) {
-        printf("FullSystem: ML depth service not initialized\n");
-        return false;
-    }
-    
-    // Parse strategy name
-    ML::MLDepthService::InferenceStrategy strategy = ML::MLDepthService::EVERY_FRAME;
-    if (strategy_name == "keyframe_only") {
-        strategy = ML::MLDepthService::KEYFRAME_ONLY;
-    } else if (strategy_name == "snapshot_mode") {
-        strategy = ML::MLDepthService::SNAPSHOT_MODE;
-    } else if (strategy_name != "every_frame") {
-        printf("FullSystem: Unknown ML strategy '%s', using every_frame\n", strategy_name.c_str());
-    }
-    
-    // Update strategy
-    ml_depth_service_->setStrategy(strategy, snapshot_interval);
-    
-    printf("FullSystem: ML inference strategy changed to %s\n", strategy_name.c_str());
-    if (strategy == ML::MLDepthService::SNAPSHOT_MODE) {
-        printf("FullSystem: Snapshot interval set to %d frames\n", snapshot_interval);
-    }
-    
-    return true;
-}
 
 FullSystem::MLMetrics FullSystem::getMLMetrics() const
 {
     MLMetrics metrics = ml_metrics_;
     
-    // Update with performance statistics from ML depth service
-    if (ml_depth_service_) {
-        auto perf_stats = ml_depth_service_->getPerformanceStats();
-        metrics.avg_ml_inference_time_ms = perf_stats.avg_inference_time_ms;
-        metrics.frames_skipped = perf_stats.frames_skipped;
-    }
+    // ML processor statistics are directly maintained in ml_metrics_
     
     return metrics;
 }
@@ -3716,6 +3448,64 @@ void FullSystem::printKeyframeStats() const
 		(*numsLog) << "KEYFRAME_STATS " << keyframeCount << " " << totalFrameCount 
 				   << " " << std::fixed << std::setprecision(4) << keyframeRatio << "\n";
 		numsLog->flush();
+	}
+}
+
+// =================== MLDepthProcessor Initialization ===================
+bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
+{
+	try {
+		// Convert FullSystem::MLConfig to ML::MLInference::InferenceConfig
+		ML::MLInference::InferenceConfig ml_config;
+		ml_config.model_path = config.model_path;
+		ml_config.model_type = ML::MLInference::METRIC3D_V2;
+		ml_config.enable_gpu = config.enable_gpu;
+		ml_config.num_threads = config.num_threads;
+		
+		// GPU-specific parameters
+		ml_config.enable_fp16 = config.enable_fp16;
+		ml_config.gpu_device_id = config.gpu_device_id;
+		ml_config.gpu_memory_limit = config.gpu_memory_limit_mb * 1024 * 1024;  // Convert MB to bytes
+		
+		ml_config.input_width = 518;   // Metric3D model requirement for quality inference
+		ml_config.input_height = 518;  // Metric3D model requirement for quality inference
+		ml_config.min_depth = config.min_depth;
+		ml_config.max_depth = config.max_depth;
+		ml_config.benchmark_enabled = config.benchmark_enabled;
+		
+		printf("initializeMLDepthProcessor: Initializing simplified ML processor...\n");
+		printf("  Model path: %s\n", ml_config.model_path.c_str());
+		printf("  GPU enabled: %s\n", ml_config.enable_gpu ? "YES" : "NO");
+		printf("  Input resolution: %dx%d\n", ml_config.input_width, ml_config.input_height);
+		printf("  Depth range: %.2f - %.2f\n", ml_config.min_depth, ml_config.max_depth);
+		
+		// Create MLDepthProcessor instance
+		ml_processor_ = std::make_unique<ML::MLDepthProcessor>(ml_config);
+		
+		// Initialize the processor
+		if (!ml_processor_->initialize()) {
+			printf("initializeMLDepthProcessor: ❌ Failed to initialize ML processor\n");
+			ml_processor_.reset();
+			return false;
+		}
+		
+		printf("initializeMLDepthProcessor: ✅ MLDepthProcessor initialized successfully\n");
+		
+		// CRITICAL: Enable ML depth processing flag
+		ml_depth_enabled_ = true;
+		
+		return true;
+		
+	} catch (const std::exception& e) {
+		printf("initializeMLDepthProcessor: ❌ Exception during initialization: %s\n", e.what());
+		ml_processor_.reset();
+		ml_depth_enabled_ = false;
+		return false;
+	} catch (...) {
+		printf("initializeMLDepthProcessor: ❌ Unknown exception during initialization\n");
+		ml_processor_.reset();
+		ml_depth_enabled_ = false;
+		return false;
 	}
 }
 

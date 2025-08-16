@@ -312,23 +312,14 @@ int main(int argc, char **argv)
 			printf("  GPU Acceleration: Disabled (CPU mode)\n");
 		}
 		
-		// Initialize ML depth service (asynchronous)
-		if(!fullSystem->initializeMLDepthService(ml_config, ml_strategy, ml_snapshot_interval)) {
-			printf("ERROR: Failed to initialize ML depth service\n");
+		// Initialize MLDepthProcessor (synchronous processing)
+		if(!fullSystem->initializeMLDepthProcessor(ml_config)) {
+			printf("ERROR: Failed to initialize ML depth processor\n");
 			return -1;
 		}
+		printf("ML Depth Processor initialized successfully\n");
 		
-		printf("ML Depth Service (Phase 2) initialized successfully\n");
-		
-		// Phase 1A: Wait for ML warm-up to complete before starting SLAM
-		if(ml_gpu_enabled) {
-			printf("Waiting for ML GPU warm-up to complete...\n");
-			if (fullSystem->waitForMLWarmup(10000)) {  // 10 second timeout
-				printf("ML GPU warm-up completed successfully\n");
-			} else {
-				printf("WARNING: ML warm-up timeout, continuing with degraded performance\n");
-			}
-		}
+		// ML processor is ready immediately (synchronous initialization)
 		
 		// Extract dataset name from source path for results directory
 		std::string dataset_name = "unknown";
@@ -555,10 +546,11 @@ int main(int argc, char **argv)
                             ml_config.max_depth = 10.0f;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
                             
-                            if(!fullSystem->initializeMLDepthService(ml_config, ml_strategy, ml_snapshot_interval)) {
-                                printf("WARNING: Failed to reinitialize ML depth service after reset\n");
+                            // Reinitialize MLDepthProcessor
+                            if(!fullSystem->initializeMLDepthProcessor(ml_config)) {
+                                printf("WARNING: Failed to reinitialize ML depth processor after reset\n");
                             } else {
-                                printf("ML depth service reinitialized successfully\n");
+                                printf("ML depth processor reinitialized successfully\n");
                             }
                         }
                         
@@ -712,10 +704,11 @@ int main(int argc, char **argv)
                             ml_config.max_depth = 10.0f;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
                             
-                            if(!fullSystem->initializeMLDepthService(ml_config, ml_strategy, ml_snapshot_interval)) {
-                                printf("WARNING: Failed to reinitialize ML depth service after reset\n");
+                            // Reinitialize MLDepthProcessor
+                            if(!fullSystem->initializeMLDepthProcessor(ml_config)) {
+                                printf("WARNING: Failed to reinitialize ML depth processor after reset\n");
                             } else {
-                                printf("ML depth service reinitialized successfully\n");
+                                printf("ML depth processor reinitialized successfully\n");
                             }
                         }
 

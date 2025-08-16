@@ -109,7 +109,7 @@ set(SOURCE_FILES
   ${PROJECT_SOURCE_DIR}/src/util/DepthLogger.cpp
   ${PROJECT_SOURCE_DIR}/src/util/FPSLogger.cpp
   ${PROJECT_SOURCE_DIR}/src/ML/MLInference.cpp
-  ${PROJECT_SOURCE_DIR}/src/ML/MLDepthService.cpp
+  ${PROJECT_SOURCE_DIR}/src/ML/MLDepthProcessor.cpp
   ${PROJECT_SOURCE_DIR}/src/Indirect/Frame.cpp
   ${PROJECT_SOURCE_DIR}/src/Indirect/Detector.cpp
   ${PROJECT_SOURCE_DIR}/src/Indirect/MapPoint.cpp
