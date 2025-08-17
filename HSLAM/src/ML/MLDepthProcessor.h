@@ -79,6 +79,7 @@ public:
      */
     bool isReady() const;
     
+    
     /**
      * @brief Get simple processing statistics
      * @return Basic performance metrics

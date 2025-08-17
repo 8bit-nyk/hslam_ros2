@@ -156,11 +156,15 @@ public:
 	// ML Depth tracking method - enhanced monocular tracking with ML depth
 	void TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& rgb_img, double timestamp);
 	
-	// Core ML-enhanced SLAM tracking method - uses ML depth for enhanced tracking
-	void TrackFrameWithMLDepth(const cv::Mat& rgb_img, const cv::Mat& ml_depth, double timestamp);
 
 	// Phase 2.5: ML service persistence through SLAM resets
 	void restartSLAMSystem();
+	
+	// ML Reference Frame Management (CoarseTracker-style thread safety)
+	void setMLReference(int frame_id, const cv::Mat& depth, float confidence, double inference_time);
+	bool hasMLReference() const;
+	cv::Mat getMLReferenceDepth() const;
+	int getMLReferenceFrameId() const;
 
 	// =================== COARSE TRACKER DEPTH INTEGRATION ===================
 	/**
@@ -210,9 +214,22 @@ public:
 	std::unique_ptr<ML::MLDepthProcessor> ml_processor_;
 	cv::Mat current_ml_depth_image_;
 	cv::Mat last_bgr_frame_;  // Store last BGR frame for ML processing
-	mutable std::mutex ml_depth_mutex_;
-	mutable std::mutex rgbd_depth_mutex_;  // Protect RGB-D depth access
+	mutable boost::mutex ml_depth_mutex_;
+	mutable boost::mutex rgbd_depth_mutex_;  // Protect RGB-D depth access
 	bool ml_depth_enabled_ = false;
+	
+	// ML Reference Frame (CoarseTracker-style pattern for thread safety)
+	cv::Mat ml_reference_depth_;         // Copy of ML depth map
+	int ml_reference_frame_id_ = -1;     // Frame ID for reference
+	float ml_reference_confidence_ = 0;  // Confidence score
+	double ml_reference_time_ = 0;       // Inference time
+	int ml_frame_counter_ = 0;           // Frame counter for ML processing
+	mutable boost::mutex ml_reference_mutex_; // Thread safety
+	
+	// ML processing synchronization (temporary debugging solution)
+	mutable boost::mutex ml_processing_mutex_;
+	bool ml_processing_active_ = false;
+	boost::condition_variable ml_processing_done_;
 	
 	// ML performance tracking
 	struct MLMetrics {

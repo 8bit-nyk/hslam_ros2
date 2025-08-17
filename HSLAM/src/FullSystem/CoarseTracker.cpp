@@ -1226,7 +1226,10 @@ void CoarseTracker::makeCoarseDepthL0Enhanced(std::vector<FrameHessian*> frameHe
         pc_n[lvl] = lpc_n;
     }
     
-    // Step 8: Calculate final integration statistics
+    // Step 8: Add ML vs HSLAM depth comparison debugging (TEMPORARY - for debugging only)
+    debugCompareMLvsHSLAMDepth();
+    
+    // Step 9: Calculate final integration statistics
     last_stats.total_valid_pixels = pc_n[0];
     if(last_stats.total_valid_pixels > 0) {
         last_stats.integration_rate = (float)last_stats.pixels_from_external_depth / 
@@ -1621,6 +1624,106 @@ void CoarseDistanceMap::makeK(CalibHessian* HCalib)
 		cxi[level] = Ki[level](0,2);
 		cyi[level] = Ki[level](1,2);
 	}
+}
+
+/**
+ * @brief DEBUG FUNCTION: Compare ML depth vs HSLAM predicted depth at sparse high-gradient pixels
+ * 
+ * This function leverages HSLAM's existing sparse pixel structure (pc_u, pc_v, pc_idepth)
+ * to efficiently compare depth values only at photometrically significant pixels.
+ * This approach is computationally efficient and follows HSLAM's architectural patterns.
+ */
+void CoarseTracker::debugCompareMLvsHSLAMDepth()
+{
+    // Only debug when external depth is available and we have sparse pixels
+    if (!hasExternalDepth() || pc_n[0] <= 0) {
+        return;
+    }
+    
+    static int debug_call_count = 0;
+    debug_call_count++;
+    
+    // Limit debugging output to avoid spam (only first 5 calls)
+    if (debug_call_count > 5) {
+        return;
+    }
+    
+    printf("\n=== DEBUG: ML vs HSLAM Depth Comparison (Call #%d) ===\n", debug_call_count);
+    printf("Comparing at %d sparse high-gradient pixels (level 0)\n", pc_n[0]);
+    
+    // Get sparse pixel arrays for level 0 (highest resolution)
+    float* lpc_u = pc_u[0];        // x coordinates of high-gradient pixels
+    float* lpc_v = pc_v[0];        // y coordinates of high-gradient pixels  
+    float* lpc_idepth = pc_idepth[0];  // HSLAM predicted inverse depths
+    
+    // Statistics for comparison
+    int valid_comparisons = 0;
+    int ml_available_count = 0;
+    float total_depth_diff = 0.0f;
+    float max_depth_diff = 0.0f;
+    float total_hslam_depth = 0.0f;
+    float total_ml_depth = 0.0f;
+    
+    // Sample a subset of pixels for detailed output (every 50th pixel)
+    int detailed_samples = 0;
+    const int max_detailed_samples = 10;
+    
+    for (int i = 0; i < pc_n[0]; i++) {
+        int x = (int)(lpc_u[i] + 0.5f);
+        int y = (int)(lpc_v[i] + 0.5f);
+        float hslam_idepth = lpc_idepth[i];
+        
+        // Convert HSLAM inverse depth to absolute depth
+        float hslam_depth = (hslam_idepth > 0) ? (1.0f / hslam_idepth) : -1.0f;
+        
+        // Check bounds and get ML depth value
+        if (x >= 0 && x < external_depth_image.cols && 
+            y >= 0 && y < external_depth_image.rows && 
+            hslam_depth > 0) {
+            
+            float ml_depth = external_depth_image.at<float>(y, x);
+            
+            if (ml_depth > 0.1f && ml_depth < 10.0f && !std::isnan(ml_depth)) {
+                ml_available_count++;
+                
+                // Calculate depth difference  
+                float depth_diff = std::abs(hslam_depth - ml_depth);
+                total_depth_diff += depth_diff;
+                max_depth_diff = std::max(max_depth_diff, depth_diff);
+                total_hslam_depth += hslam_depth;
+                total_ml_depth += ml_depth;
+                valid_comparisons++;
+                
+                // Detailed sample output
+                if (detailed_samples < max_detailed_samples && (i % 50 == 0)) {
+                    printf("  Sample %d: Pixel(%d,%d) HSLAM=%.3fm ML=%.3fm diff=%.3fm\n",
+                           detailed_samples, x, y, hslam_depth, ml_depth, depth_diff);
+                    detailed_samples++;
+                }
+            }
+        }
+    }
+    
+    // Print summary statistics
+    if (valid_comparisons > 0) {
+        float avg_hslam_depth = total_hslam_depth / valid_comparisons;
+        float avg_ml_depth = total_ml_depth / valid_comparisons;
+        float avg_depth_diff = total_depth_diff / valid_comparisons;
+        
+        printf("Statistics:\n");
+        printf("  Valid comparisons: %d/%d pixels (%.1f%%)\n", 
+               valid_comparisons, pc_n[0], 100.0f * valid_comparisons / pc_n[0]);
+        printf("  Average HSLAM depth: %.3fm\n", avg_hslam_depth);
+        printf("  Average ML depth: %.3fm\n", avg_ml_depth);
+        printf("  Average depth difference: %.3fm\n", avg_depth_diff);
+        printf("  Maximum depth difference: %.3fm\n", max_depth_diff);
+        printf("  Depth ratio (ML/HSLAM): %.3f\n", avg_ml_depth / avg_hslam_depth);
+    } else {
+        printf("  No valid depth comparisons found\n");
+        printf("  ML depth available at: %d/%d pixels\n", ml_available_count, pc_n[0]);
+    }
+    
+    printf("=== End Debug Comparison ===\n\n");
 }
 
 }

@@ -153,21 +153,54 @@ bool MLInference::initialize() {
 }
 
 MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image) {
+    // === DEBUG_ML_PHASE1: MLInference entry point ===
+    printf("DEBUG_ML_PHASE1: MLInference::inferDepth() entry\n");
+    printf("DEBUG_ML_PHASE1: Input validation - size: %dx%d, channels: %d, type: %d\n",
+           input_image.cols, input_image.rows, input_image.channels(), input_image.type());
+    printf("DEBUG_ML_PHASE1: Initialized state: %s\n", initialized_.load() ? "true" : "false");
+    printf("DEBUG_ML_PHASE1: Session pointer: %p\n", onnx_session_.get());
+    // === END DEBUG_ML_PHASE1 ===
+    
     InferenceResult result;
     result.success = false;
     
     if (!initialized_.load()) {
+        printf("DEBUG_ML_PHASE1: ERROR - MLInference not initialized!\n");
         result.error_message = "MLInference not initialized";
         return result;
     }
     
     if (input_image.empty()) {
+        printf("DEBUG_ML_PHASE1: ERROR - Input image is empty!\n");
         result.error_message = "Input image is empty";
         return result;
     }
     
-    printf("DEBUG: MLInference.inferDepth - Input RGB: %dx%d channels=%d\n", 
-           input_image.cols, input_image.rows, input_image.channels());
+    printf("DEBUG_ML_PHASE1: Basic validation passed, proceeding with preprocessing...\n");
+    
+    // Additional validation checks
+    if (input_image.cols <= 0 || input_image.rows <= 0) {
+        result.error_message = "Input image has invalid dimensions";
+        return result;
+    }
+    
+    if (input_image.channels() != 3) {
+        result.error_message = "Input image must have 3 channels (RGB)";
+        return result;
+    }
+    
+    if (input_image.type() != CV_8UC3) {
+        result.error_message = "Input image must be CV_8UC3 format";
+        return result;
+    }
+    
+    if (!input_image.data) {
+        result.error_message = "Input image data pointer is null";
+        return result;
+    }
+    
+    printf("DEBUG: MLInference.inferDepth - Input RGB: %dx%d channels=%d type=%d\n", 
+           input_image.cols, input_image.rows, input_image.channels(), input_image.type());
 
 #ifdef HAS_ONNXRUNTIME
     std::lock_guard<std::mutex> lock(mutex_);
@@ -214,10 +247,21 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
         
         // Use memory pool for GPU optimization (Sprint 2)
         std::vector<Ort::Value> output_tensors;
+        
+        printf("DEBUG: MLInference - Checking memory pool: enable_gpu=%s, memory_pool_=%s, initialized_=%s\n",
+               config_.enable_gpu ? "true" : "false",
+               memory_pool_ ? "present" : "null",
+               (memory_pool_ && memory_pool_->initialized_) ? "true" : "false");
+        
         if (config_.enable_gpu && memory_pool_ && memory_pool_->initialized_) {
+            printf("DEBUG: MLInference - Using IoBinding GPU path\n");
             // Use IoBinding for GPU memory pool
             try {
                 auto& io_binding = *memory_pool_->io_binding_;
+                
+                // CRITICAL FIX: Clear previous bindings to prevent state corruption
+                io_binding.ClearBoundInputs();
+                io_binding.ClearBoundOutputs();
                 
                 // Bind input tensor to GPU memory
                 Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
@@ -227,33 +271,76 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                 io_binding.BindInput(input_names_[0], input_tensor);
                 io_binding.BindOutput(output_names_[0], *memory_info_);
                 
+                printf("DEBUG: MLInference - IoBinding configured, running session...\n");
+                
                 // Run with IoBinding (GPU optimized)
                 onnx_session_->Run(Ort::RunOptions{nullptr}, io_binding);
                 output_tensors = io_binding.GetOutputValues();
+                
+                printf("DEBUG: MLInference - Session run completed successfully\n");
                 
                 // Update memory pool statistics
                 memory_pool_->reuse_count_++;
                 
             } catch (const std::exception& e) {
-                // Fallback to regular inference on memory pool failure
-                printf("MLInference: Memory pool failed, falling back: %s\n", e.what());
+                // Fallback to regular inference on IoBinding failure
+                printf("MLInference: IoBinding failed, falling back to regular inference: %s\n", e.what());
+                
+                try {
+                    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+                        *memory_info_, input_tensor_values.data(), input_tensor_size, 
+                        input_shape.data(), input_shape.size());
+                    
+                    printf("DEBUG: MLInference - Fallback: Running session with regular inference...\n");
+                    
+                    output_tensors = onnx_session_->Run(Ort::RunOptions{nullptr}, 
+                                                       input_names_.data(), &input_tensor, 1,
+                                                       output_names_.data(), output_names_.size());
+                                                       
+                    printf("DEBUG: MLInference - Fallback completed successfully\n");
+                    
+                } catch (const std::exception& fallback_e) {
+                    result.error_message = "Both IoBinding and regular inference failed: " + std::string(fallback_e.what());
+                    return result;
+                }
+            }
+        } else {
+            // Regular inference (CPU or GPU without memory pool)
+            printf("DEBUG: MLInference - Using regular inference path\n");
+            
+            try {
+                // CRITICAL FIX: Validate session state before execution
+                if (!onnx_session_) {
+                    result.error_message = "ONNX session is null";
+                    return result;
+                }
+                
                 Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
                     *memory_info_, input_tensor_values.data(), input_tensor_size, 
                     input_shape.data(), input_shape.size());
                 
-                output_tensors = onnx_session_->Run(Ort::RunOptions{nullptr}, 
+                printf("DEBUG: MLInference - About to run session (tensor size: %zu)...\n", input_tensor_size);
+                
+                // CRITICAL FIX: Use safer RunOptions with explicit configuration
+                Ort::RunOptions run_options;
+                run_options.SetRunLogVerbosityLevel(0);  // Disable verbose logging
+                run_options.SetRunTag("ml_inference");   // Add run tag for debugging
+                
+                output_tensors = onnx_session_->Run(run_options, 
                                                    input_names_.data(), &input_tensor, 1,
                                                    output_names_.data(), output_names_.size());
+                                                   
+                printf("DEBUG: MLInference - Session run completed successfully\n");
+                
+            } catch (const Ort::Exception& ort_e) {
+                result.error_message = "ONNX Runtime exception: " + std::string(ort_e.what());
+                printf("ERROR: MLInference - ONNX Runtime exception: %s\n", ort_e.what());
+                return result;
+            } catch (const std::exception& e) {
+                result.error_message = "Exception during regular inference: " + std::string(e.what());
+                printf("ERROR: MLInference - Exception during inference: %s\n", e.what());
+                return result;
             }
-        } else {
-            // Regular inference (CPU or GPU without memory pool)
-            Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-                *memory_info_, input_tensor_values.data(), input_tensor_size, 
-                input_shape.data(), input_shape.size());
-            
-            output_tensors = onnx_session_->Run(Ort::RunOptions{nullptr}, 
-                                               input_names_.data(), &input_tensor, 1,
-                                               output_names_.data(), output_names_.size());
         }
         
         // Extract output tensor
@@ -402,11 +489,36 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     
     printf("DEBUG: After aspect-ratio resize: %dx%d\n", resized.cols, resized.rows);
     
+    // CRITICAL FIX: Validate configuration state before padding calculation
+    if (config_.input_height <= 0 || config_.input_width <= 0) {
+        printf("ERROR: Invalid config dimensions: %dx%d\n", config_.input_width, config_.input_height);
+        throw std::runtime_error("Invalid configuration dimensions");
+    }
+    
+    if (new_height > config_.input_height || new_width > config_.input_width) {
+        printf("ERROR: Resized image larger than target: %dx%d > %dx%d\n", 
+               new_width, new_height, config_.input_width, config_.input_height);
+        throw std::runtime_error("Resized image larger than target");
+    }
+    
+    printf("DEBUG: Computing padding for target %dx%d from resized %dx%d\n",
+           config_.input_width, config_.input_height, new_width, new_height);
+    
     // Calculate padding to reach target size
     int pad_top = (config_.input_height - new_height) / 2;
     int pad_bottom = config_.input_height - new_height - pad_top;
     int pad_left = (config_.input_width - new_width) / 2;
     int pad_right = config_.input_width - new_width - pad_left;
+    
+    printf("DEBUG: Computed padding: top=%d, bottom=%d, left=%d, right=%d\n",
+           pad_top, pad_bottom, pad_left, pad_right);
+    
+    // Validate padding values
+    if (pad_top < 0 || pad_bottom < 0 || pad_left < 0 || pad_right < 0) {
+        printf("ERROR: Negative padding values: top=%d, bottom=%d, left=%d, right=%d\n",
+               pad_top, pad_bottom, pad_left, pad_right);
+        throw std::runtime_error("Negative padding values");
+    }
     
     // Store padding info for postprocessing
     current_padding_.top = pad_top;

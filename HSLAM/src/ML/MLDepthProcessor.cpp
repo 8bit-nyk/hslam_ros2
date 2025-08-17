@@ -28,10 +28,6 @@ bool MLDepthProcessor::initialize() {
         printf("  - GPU enabled: %s\n", config_.enable_gpu ? "Yes" : "No");
         printf("  - Processing mode: Synchronous (no background threads)\n");
         
-        // Start background warm-up if GPU enabled (preserves existing optimization)
-        if (config_.enable_gpu) {
-            ml_inference_->startBackgroundWarmup(true);
-        }
     } else {
         printf("ERROR: MLDepthProcessor - Failed to initialize ML inference\n");
     }
@@ -98,10 +94,19 @@ MLDepthProcessor::ProcessingResult MLDepthProcessor::processKeyframeDetailed(con
         return detailed_result;
     }
     
+    // === DEBUG_ML_PHASE1: MLDepthProcessor pre-inference ===
+    printf("DEBUG_ML_PHASE1: MLDepthProcessor::processKeyframeDetailed() entry\n");
+    printf("DEBUG_ML_PHASE1: Input image - size: %dx%d, channels: %d, type: %d\n",
+           rgb_image.cols, rgb_image.rows, rgb_image.channels(), rgb_image.type());
+    printf("DEBUG_ML_PHASE1: ml_inference_ pointer: %p\n", ml_inference_.get());
+    // === END DEBUG_ML_PHASE1 ===
+    
     // Perform synchronous ML inference with detailed timing
     auto start_time = std::chrono::high_resolution_clock::now();
     
+    printf("DEBUG_ML_PHASE1: About to call ml_inference_->inferDepth()...\n");
     MLInference::InferenceResult result = ml_inference_->inferDepth(rgb_image);
+    printf("DEBUG_ML_PHASE1: ml_inference_->inferDepth() returned successfully!\n");
     
     auto end_time = std::chrono::high_resolution_clock::now();
     detailed_result.inference_time_ms = std::chrono::duration<float, std::milli>(end_time - start_time).count();
@@ -143,6 +148,7 @@ MLDepthProcessor::ProcessingResult MLDepthProcessor::processKeyframeDetailed(con
 bool MLDepthProcessor::isReady() const {
     return ml_inference_ && ml_inference_->isInitialized();
 }
+
 
 MLDepthProcessor::SimpleStats MLDepthProcessor::getStats() const {
     SimpleStats stats;

@@ -36,6 +36,8 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/locks.hpp>
 #include <opencv2/opencv.hpp>
 #include "util/NumType.h"
 #include "FullSystem/Residuals.h"
@@ -159,7 +161,7 @@ struct FrameHessian
 	int ml_request_frame_id_ = -1;					// Tracks ML request by absolute frame ID
 	std::atomic<float> ml_confidence_{0.0f};			// ML depth confidence score (thread-safe)
 	std::atomic<double> ml_inference_time_ms_{0.0};	// ML inference timing for metrics (thread-safe)
-	mutable std::mutex ml_mutex_;					// Mutex for shared_ptr protection
+	mutable boost::mutex ml_mutex_;					// Mutex for shared_ptr protection
 
 	Mat66 nullspaces_pose;
 	Mat42 nullspaces_affine;
@@ -329,14 +331,14 @@ struct FrameHessian
 	}
 
 	inline std::shared_ptr<cv::Mat> getMLDepth() const {
-		std::lock_guard<std::mutex> lock(ml_mutex_);
+		boost::unique_lock<boost::mutex> lock(ml_mutex_);
 		return has_ml_depth_.load() ? ml_depth_map_ : nullptr;
 	}
 
 	inline void setMLDepth(const cv::Mat& depth, float confidence, double inference_time) {
 		if (!depth.empty()) {
 			{
-				std::lock_guard<std::mutex> lock(ml_mutex_);
+				boost::unique_lock<boost::mutex> lock(ml_mutex_);
 				ml_depth_map_ = std::make_shared<cv::Mat>(depth.clone());
 			}
 			ml_confidence_.store(confidence);
@@ -348,7 +350,7 @@ struct FrameHessian
 
 	inline void clearMLDepth() {
 		{
-			std::lock_guard<std::mutex> lock(ml_mutex_);
+			boost::unique_lock<boost::mutex> lock(ml_mutex_);
 			ml_depth_map_.reset();
 		}
 		has_ml_depth_.store(false);

@@ -41,6 +41,7 @@ HSLAM/results/
 HSLAM/models/
 HSLAM/logs
 HSLAM/mats
+HSLAM/images_out
 HSLAM/docs
 HSLAM/tests/
 HSLAM/scripts/

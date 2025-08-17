@@ -194,6 +194,14 @@ FullSystem::FullSystem()
 	currentMinActDist=2;
 	initialized=false;
 
+	// Initialize ML reference variables to prevent uninitialized access
+	ml_reference_depth_ = cv::Mat(0, 0, CV_32F);  // Explicitly create empty Mat with 0 rows/cols
+	ml_reference_frame_id_ = -1;      // Already initialized in header, but be explicit
+	ml_reference_confidence_ = 0.0f;
+	ml_reference_time_ = 0.0;
+	
+	printf("DEBUG: FullSystem constructor - ML reference initialized: empty=%d, frame_id=%d\n",
+	       ml_reference_depth_.empty(), ml_reference_frame_id_);
 
 	ef = new EnergyFunctional();
 	ef->red = &this->treadReduce;
@@ -424,6 +432,15 @@ void FullSystem::printPC(std::string file)
  */
 Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 {
+	// TEMPORARY DEBUG: Block if ML processing is active
+	if (ml_depth_enabled_) {
+		boost::unique_lock<boost::mutex> lock(ml_processing_mutex_);
+		if (ml_processing_active_) {
+			printf("DEBUG: Frame %d waiting for ML processing to complete...\n", fh->frameID);
+			ml_processing_done_.wait(lock, [this]{ return !ml_processing_active_; });
+			printf("DEBUG: Frame %d resuming after ML processing done\n", fh->frameID);
+		}
+	}
 
 	assert(allFrameHistory.size() > 0);
 	// If there is at least one frame in history, set pose initialization.
@@ -1141,13 +1158,13 @@ void FullSystem::TrackRGBD(const cv::Mat& rgb_color, const cv::Mat& rgb_image, c
     
     // Store depth image for use in makeNewTraces (thread-safe)
     {
-        std::lock_guard<std::mutex> lock(rgbd_depth_mutex_);
+        boost::unique_lock<boost::mutex> lock(rgbd_depth_mutex_);
         currentDepthImage = depth_image.clone();
     }
     
     // Store RGB color for ML keyframe submissions (thread-safe)
     {
-        std::lock_guard<std::mutex> lock(ml_depth_mutex_);
+        boost::unique_lock<boost::mutex> lock(ml_depth_mutex_);
         last_bgr_frame_ = rgb_color.clone();  // Store actual RGB for ML
     }
     
@@ -1190,7 +1207,7 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
     
     // Store RGB color frame for keyframe ML submissions
     {
-        std::lock_guard<std::mutex> lock(ml_depth_mutex_);
+        boost::unique_lock<boost::mutex> lock(ml_depth_mutex_);
         if (!rgb_color.empty() && rgb_color.channels() == 3) {
             last_bgr_frame_ = rgb_color.clone();  // Store actual RGB for ML
             printf("DEBUG: Stored RGB for ML %dx%d channels=%d\n", 
@@ -1212,61 +1229,89 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
     cv::Mat ml_depth_image;
     bool ml_depth_available = false;
     
-    // Phase 2: Frame-based ML depth processing
-    static int ml_frame_counter = 0;
-    ml_frame_counter++;
+    // Phase 2: Frame-based ML depth processing  
+    ml_frame_counter_++;
     
-    // CRITICAL FIX: Protect frameHessians access with mapMutex to prevent race condition
-    if (ml_depth_enabled_ && frameHessians.size() >= 2) {
-        // Snapshot ML data while holding lock to prevent use-after-free
-        std::shared_ptr<cv::Mat> ml_depth_ptr;
+    // FIXED: Single atomic access to ML reference data (thread-safe)
+    if (ml_depth_enabled_) {
         float ml_confidence = 0.0f;
         double ml_inference_time = 0.0;
-        int prev_frame_id = -1;
+        int ref_frame_id = -1;
         
+        // Single atomic access to ML reference with minimal cloning
         {
-            boost::unique_lock<boost::mutex> lock(mapMutex);
-            // Re-check size after acquiring lock
-            if (frameHessians.size() >= 2) {
-                FrameHessian* prev_frame = frameHessians[frameHessians.size()-2];
-                if (prev_frame && prev_frame->hasMLDepth()) {
-                    // Copy data while locked to avoid accessing deleted frame
-                    ml_depth_ptr = prev_frame->getMLDepth();
-                    ml_confidence = prev_frame->getMLConfidence();
-                    ml_inference_time = prev_frame->getMLInferenceTime();
-                    prev_frame_id = prev_frame->frameID;
-                }
+            boost::unique_lock<boost::mutex> lock(ml_reference_mutex_);
+            
+            // DEBUG: Log variable values to understand why defensive checks pass
+            printf("DEBUG: Frame %d - Checking ML reference: frame_id=%d, depth.empty=%d, depth.data=%p, rows=%d, cols=%d\n",
+                   ml_frame_counter_, ml_reference_frame_id_, ml_reference_depth_.empty(), 
+                   ml_reference_depth_.data, ml_reference_depth_.rows, ml_reference_depth_.cols);
+            
+            // Force ml_reference to be invalid if frame_id is negative (safety check)
+            if (ml_reference_frame_id_ < 0) {
+                ml_reference_depth_ = cv::Mat();  // Force empty
+                printf("DEBUG: Frame %d - Forced ML reference to empty (frame_id < 0)\n", ml_frame_counter_);
             }
-        } // Release lock before using copied data
+            
+            // Defensive checks: ensure ML reference is valid and not corrupted
+            if (!ml_reference_depth_.empty() && 
+                ml_reference_depth_.data != nullptr &&
+                ml_reference_frame_id_ >= 0 && 
+                ml_reference_frame_id_ < ml_frame_counter_ &&
+                ml_reference_depth_.rows > 0 && 
+                ml_reference_depth_.cols > 0) {
+                
+                // Single clone operation with all data accessed atomically
+                ml_depth_image = ml_reference_depth_.clone();
+                ref_frame_id = ml_reference_frame_id_;
+                ml_confidence = ml_reference_confidence_;
+                ml_inference_time = ml_reference_time_;
+                ml_depth_available = true;
+            }
+        } // Release lock early
         
-        // Use snapshotted data outside lock to avoid holding lock during processing
-        if (ml_depth_ptr && !ml_depth_ptr->empty()) {
-            ml_depth_image = *ml_depth_ptr;  // Dereference shared_ptr (safe now)
-            ml_depth_available = true;
+        if (ml_depth_available) {
             
             // Update metrics
             ml_metrics_.frames_with_ml_depth++;
             ml_metrics_.avg_ml_inference_time_ms = ml_inference_time;
             
-            // Store ML depth for other components
+            // Store ML depth for other components (direct assignment, no redundant clone)
             {
-                std::lock_guard<std::mutex> lock(ml_depth_mutex_);
-                current_ml_depth_image_ = ml_depth_image.clone();
+                boost::unique_lock<boost::mutex> lock(ml_depth_mutex_);
+                current_ml_depth_image_ = ml_depth_image;
             }
             
-            printf("DEBUG: Frame %d - ML available: YES (from frame %d), SLAM initialized: %s\n",
-                   ml_frame_counter, prev_frame_id,
-                   initialized ? "YES" : "NO");
-            
-            printf("TrackMonocularWithML: Using ML depth from keyframe %d (%.1fms), size %dx%d, conf=%.2f\n", 
-                   prev_frame_id, ml_inference_time, 
-                   ml_depth_image.cols, ml_depth_image.rows, ml_confidence);
+            // Comprehensive validation before printf to prevent crash from corrupted data
+            if (ref_frame_id < 0 || ref_frame_id > 100000) {
+                printf("ERROR: Invalid ref_frame_id=%d at Frame %d\n", ref_frame_id, ml_frame_counter_);
+                ml_depth_available = false;
+            } else if (ml_frame_counter_ < 0 || ml_frame_counter_ > 100000) {
+                printf("ERROR: Invalid ml_frame_counter=%d\n", ml_frame_counter_);
+                ml_depth_available = false;
+            } else if (!ml_depth_image.data || ml_depth_image.empty()) {
+                printf("ERROR: Invalid ml_depth_image at Frame %d\n", ml_frame_counter_);
+                ml_depth_available = false;
+            } else if (ml_depth_image.rows <= 0 || ml_depth_image.cols <= 0) {
+                printf("ERROR: Invalid ml_depth_image dimensions %dx%d at Frame %d\n", 
+                       ml_depth_image.cols, ml_depth_image.rows, ml_frame_counter_);
+                ml_depth_available = false;
+            } else {
+                // Safe to print - all variables validated
+                printf("DEBUG: Frame %d - ML available: YES (from frame %d), SLAM initialized: %s\n",
+                       ml_frame_counter_, ref_frame_id,
+                       initialized ? "YES" : "NO");
+                
+                printf("TrackMonocularWithML: Using ML depth from keyframe %d (%.1fms), size %dx%d, conf=%.2f\n", 
+                       ref_frame_id, ml_inference_time, 
+                       ml_depth_image.cols, ml_depth_image.rows, ml_confidence);
+            }
         }
     }
 
     if (!ml_depth_available) {
         printf("DEBUG: Frame %d - ML available: NO, SLAM initialized: %s\n",
-               ml_frame_counter, initialized ? "YES" : "NO");
+               ml_frame_counter_, initialized ? "YES" : "NO");
     }
     
     // Update frame counter for ML processing synchronization
@@ -1274,55 +1319,20 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
     // Update ML utilization rate
     ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
     
-    // Process frame with ML depth enhancement
+    // Store ML depth if available for unified pipeline
     if(ml_depth_available) {
-        // Store ML depth for point creation
-        currentMLDepthImage = ml_depth_image.clone();
-        printf("TrackMonocularWithML: Using ML depth for enhanced SLAM tracking\n");
-        
-        // Use ML-enhanced tracking
-        TrackFrameWithMLDepth(rgb_img, ml_depth_image, timestamp);
+        currentMLDepthImage = ml_depth_image;
+        printf("DEBUG: ML depth available, storing for unified pipeline\n");
     } else {
-        // Phase 2B: Graceful degradation - continue with pure monocular SLAM
+        // Clear any existing ML depth for pure monocular
+        currentMLDepthImage = cv::Mat();
         printf("DEBUG: No ML depth available, using pure monocular tracking\n");
-        
-        // Clear any existing depth to use pure monocular
-        currentDepthImage = cv::Mat();
-        
-        // Convert RGB to HSLAM format for standard tracking
-        cv::Mat gray_image;
-        if(rgb_img.channels() == 3) {
-            cv::cvtColor(rgb_img, gray_image, cv::COLOR_BGR2GRAY);
-        } else {
-            gray_image = rgb_img;
-        }
-        
-        // Convert to float if needed
-        cv::Mat float_image;
-        if(gray_image.type() != CV_32FC1) {
-            gray_image.convertTo(float_image, CV_32FC1);
-        } else {
-            float_image = gray_image;
-        }
-        
-        // Create ImageAndExposure for standard HSLAM pipeline
-        ImageAndExposure* img = new ImageAndExposure(float_image.cols, float_image.rows, timestamp);
-        std::memcpy(img->image, float_image.ptr<float>(), float_image.cols * float_image.rows * sizeof(float));
-        
-        // Fallback to standard monocular tracking
-        static int frame_id_tracking = 0;
-        addActiveFrame(img, frame_id_tracking++);
-        
-        delete img;
     }
-}
-
-void FullSystem::TrackFrameWithMLDepth(const cv::Mat& rgb_img, 
-                                       const cv::Mat& ml_depth, 
-                                       double timestamp) {
-    if(isLost) return;
     
-    // Convert RGB to HSLAM format
+    // Clear any existing RGB-D depth to use pure monocular/ML approach
+    currentDepthImage = cv::Mat();
+    
+    // Convert RGB to HSLAM format for unified pipeline
     cv::Mat gray_image;
     if(rgb_img.channels() == 3) {
         cv::cvtColor(rgb_img, gray_image, cv::COLOR_BGR2GRAY);
@@ -1338,110 +1348,100 @@ void FullSystem::TrackFrameWithMLDepth(const cv::Mat& rgb_img,
         float_image = gray_image;
     }
     
-    // Create ImageAndExposure for HSLAM pipeline
+    // Create ImageAndExposure for unified HSLAM pipeline
     ImageAndExposure* img = new ImageAndExposure(float_image.cols, float_image.rows, timestamp);
     std::memcpy(img->image, float_image.ptr<float>(), float_image.cols * float_image.rows * sizeof(float));
     
-    // Store ML depth for point creation
-    {
-        std::lock_guard<std::mutex> lock(ml_depth_mutex_);
-        current_ml_depth_image_ = ml_depth.clone();
-    }
-    currentMLDepthImage = ml_depth.clone();
-    
-    // Debug: Verify no contamination between ML and RGB-D depth
-    if(!setting_debugout_runquiet) {
-        std::lock_guard<std::mutex> lock(rgbd_depth_mutex_);
-        if(!currentDepthImage.empty()) {
-            printf("WARNING: RGB-D depth still present during ML tracking - will be cleared\n");
-        }
-    }
-    
-    // Enhanced tracking with ML depth context
-    boost::unique_lock<boost::mutex> lock(trackMutex);
-    
-    // Create frame with ML depth context
-    FrameHessian* fh = new FrameHessian();
-    FrameShell* shell = new FrameShell();
-    fh->ab_exposure = img->exposure_time;
-    fh->makeImages(img->image, &Hcalib);
-    
-    // Indirect: Create indirect frame with ML depth available
-    shell->frame = std::make_shared<Frame>(img->image, detector, &Hcalib, fh, shell, globalMap);
-    
-    fh->shell = shell;
-    shell->setPose(SE3());  // Initialize pose using proper accessor
-    shell->aff_g2l = AffLight(0,0);
-    shell->marginalizedAt = shell->id = allFrameHistory.size();
-    shell->timestamp = timestamp;
-    shell->incoming_id = static_cast<int>(ml_metrics_.total_frames);
-    allFrameHistory.push_back(shell);
-    
-    if(!initialized) {
-        // Initialize with ML depth assistance
-        if(coarseInitializer->frameID < 0) {
-            coarseInitializer->setFirst(&Hcalib, fh);
-        } else if(coarseInitializer->trackFrame(fh, outputWrapper)) {
-            initializeFromInitializer(fh);
-            lock.unlock();
-            deliverTrackedFrame(fh, true);
-        } else {
-            // If tracking fails, delete frame
-            delete fh;
-            delete img;
-            return;
-        }
-    } else {
-        // CRITICAL: Clear RGB-D depth to prevent contamination of ML pipeline
-        cv::Mat backup_rgbd_depth;
-        {
-            std::lock_guard<std::mutex> depth_lock(rgbd_depth_mutex_);
-            backup_rgbd_depth = currentDepthImage.clone();
-            currentDepthImage = cv::Mat();  // Clear RGB-D depth for ML tracking
-        }
-        synchronizeDepthWithTracking(); // This now clears CoarseTracker depth
-        
-        // Track with ML depth enhancement
-        Vec5 tres = trackNewCoarse(fh);
-        
-        // Use ML depth in point creation - this is the key enhancement!
-        if(!setting_debugout_runquiet) {
-            printf("TrackFrameWithMLDepth: Creating new traces with ML depth\n");
-        }
-        
-        // Call enhanced makeNewTracesWithMLDepth method
-        makeNewTracesWithMLDepth(fh, currentMLDepthImage);
-        
-        // Standard frame processing
-        for(IOWrap::Output3DWrapper* ow : outputWrapper) {
-            ow->publishGraph(ef->connectivityMap);
-            ow->publishKeyframes(frameHessians, false, &Hcalib);
-            ow->publishGlobalMap(globalMap);
-        }
-        
-        // Marginalization
-        for (unsigned int i = 0; i < frameHessians.size(); i++)
-            if (frameHessians[i]->flaggedForMarginalization) {
-                marginalizeFrame(frameHessians[i]);
-                i = 0;
-            }
-        
-        // Restore RGB-D depth for subsequent RGB-D tracking calls
-        if(!backup_rgbd_depth.empty()) {
-            std::lock_guard<std::mutex> depth_lock(rgbd_depth_mutex_);
-            currentDepthImage = backup_rgbd_depth;
-            synchronizeDepthWithTracking();  // Restore CoarseTracker depth
-        }
-        
-        lock.unlock();
-        deliverTrackedFrame(fh, needNewKFAfter < 0);
-    }
+    // Use unified pipeline for both ML and non-ML cases
+    static int frame_id_tracking = 0;
+    addActiveFrame(img, frame_id_tracking++);
     
     delete img;
 }
 
+
 void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 {
+	// GPU warmup on absolute first frame - before ANY SLAM processing
+	static bool ml_gpu_initialized = false;
+	
+	if (ml_depth_enabled_ && ml_processor_ && !ml_gpu_initialized) {
+		printf("🔥 Initializing ML processor (one-time warmup)...\n");
+		auto start = std::chrono::high_resolution_clock::now();
+		
+		try {
+			// Validate input image first
+			if (!image || !image->image || image->w <= 0 || image->h <= 0) {
+				printf("ERROR: Invalid input image for ML warmup - skipping ML depth\n");
+				ml_depth_enabled_ = false;
+				return;
+			}
+			
+			printf("DEBUG: ML warmup - converting image %dx%d\n", image->w, image->h);
+			
+			// Convert float array to cv::Mat then to RGB for warmup with validation
+			cv::Mat gray_image(image->h, image->w, CV_32FC1, image->image);
+			if (gray_image.empty()) {
+				printf("ERROR: Failed to create gray image for ML warmup\n");
+				ml_depth_enabled_ = false;
+				return;
+			}
+			
+			cv::Mat gray_8u;
+			gray_image.convertTo(gray_8u, CV_8UC1);
+			if (gray_8u.empty()) {
+				printf("ERROR: Failed to convert to 8-bit gray for ML warmup\n");
+				ml_depth_enabled_ = false;
+				return;
+			}
+			
+			cv::Mat rgb_image;
+			cv::cvtColor(gray_8u, rgb_image, cv::COLOR_GRAY2RGB);
+			if (rgb_image.empty()) {
+				printf("ERROR: Failed to convert to RGB for ML warmup\n");
+				ml_depth_enabled_ = false;
+				return;
+			}
+			
+			printf("DEBUG: ML warmup - RGB image ready %dx%d channels=%d\n", 
+				   rgb_image.cols, rgb_image.rows, rgb_image.channels());
+			
+			// Validate ML processor state
+			if (!ml_processor_->isReady()) {
+				printf("ERROR: ML processor not ready for warmup\n");
+				ml_depth_enabled_ = false;
+				return;
+			}
+			
+			// Single warmup inference (result discarded)
+			auto warmup_result = ml_processor_->processKeyframe(rgb_image);
+			
+			auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::high_resolution_clock::now() - start).count();
+			
+			if (warmup_result.has_value() && !warmup_result->empty()) {
+				printf("✅ ML processor initialized in %ldms - ready for processing\n", duration);
+				ml_gpu_initialized = true;
+			} else {
+				printf("ERROR: ML warmup failed - disabling ML depth\n");
+				ml_depth_enabled_ = false;
+				return;
+			}
+			
+		} catch (const cv::Exception& e) {
+			printf("ERROR: OpenCV exception during ML warmup: %s\n", e.what());
+			ml_depth_enabled_ = false;
+			return;
+		} catch (const std::exception& e) {
+			printf("ERROR: Exception during ML warmup: %s\n", e.what());
+			ml_depth_enabled_ = false;
+			return;
+		} catch (...) {
+			printf("ERROR: Unknown exception during ML warmup - disabling ML depth\n");
+			ml_depth_enabled_ = false;
+			return;
+		}
+	}
 
     if(isLost) return;
 	boost::unique_lock<boost::mutex> lock(trackMutex);
@@ -1846,9 +1846,15 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	// =================== ML DEPTH PROCESSOR INTEGRATION ===================
 	// Direct synchronous ML depth processing for current keyframe
 	if (ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady()) {
+		// Signal that ML processing is starting
+		{
+			boost::unique_lock<boost::mutex> lock(ml_processing_mutex_);
+			ml_processing_active_ = true;
+			printf("DEBUG: ML processing STARTED for keyframe %d\n", fh->frameID);
+		}
 		cv::Mat rgb_image;
 		{
-			std::lock_guard<std::mutex> lock(ml_depth_mutex_);
+			boost::unique_lock<boost::mutex> lock(ml_depth_mutex_);
 			if (!last_bgr_frame_.empty()) {
 				rgb_image = last_bgr_frame_.clone();
 			} else {
@@ -1858,29 +1864,66 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		
 		if (!rgb_image.empty()) {
 			printf("makeKeyFrame: Processing keyframe %d with ML processor...\n", fh->frameID);
+			printf("DEBUG: makeKeyFrame - RGB image %dx%d channels=%d\n", 
+				   rgb_image.cols, rgb_image.rows, rgb_image.channels());
+		
+			// Validate inputs before ML processing
+			if (!fh) {
+				printf("ERROR: makeKeyFrame - FrameHessian is null, skipping ML processing\n");
+				return;
+			}
 			
-			auto start_time = std::chrono::high_resolution_clock::now();
-			auto ml_result = ml_processor_->processKeyframeDetailed(rgb_image);
-			auto end_time = std::chrono::high_resolution_clock::now();
-			auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+			if (rgb_image.cols <= 0 || rgb_image.rows <= 0 || rgb_image.channels() != 3) {
+				printf("ERROR: makeKeyFrame - Invalid RGB image dimensions %dx%d channels=%d\n",
+					   rgb_image.cols, rgb_image.rows, rgb_image.channels());
+				return;
+			}
 			
-			if (ml_result.success && !ml_result.depth_map.empty()) {
-				fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
-				fh->setMLPending(false);  // Clear pending flag
+			if (!ml_processor_->isReady()) {
+				printf("ERROR: makeKeyFrame - ML processor not ready\n");
+				return;
+			}
+			
+			// === DEBUG_ML_PHASE1: Pre-inference validation ===
+			printf("DEBUG_ML_PHASE1: About to call second ML inference (keyframe processing)\n");
+			printf("DEBUG_ML_PHASE1: RGB image validation - size: %dx%d, channels: %d, type: %d\n", 
+				   rgb_image.cols, rgb_image.rows, rgb_image.channels(), rgb_image.type());
+			printf("DEBUG_ML_PHASE1: ML processor state - isReady: %s\n", 
+				   ml_processor_->isReady() ? "true" : "false");
+			// === END DEBUG_ML_PHASE1 ===
+			
+			try {
+				auto start_time = std::chrono::high_resolution_clock::now();
+				printf("DEBUG_ML_PHASE1: Calling ml_processor_->processKeyframeDetailed()...\n");
+				auto ml_result = ml_processor_->processKeyframeDetailed(rgb_image);
+				auto end_time = std::chrono::high_resolution_clock::now();
+				auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 				
-				printf("makeKeyFrame: ✅ ML processing successful for frame %d (%.1fms inference, conf=%.2f, total=%.1fms)\n",
-					   fh->frameID, ml_result.inference_time_ms, ml_result.confidence, (float)processing_time);
+				printf("DEBUG_ML_PHASE1: ml_processor_->processKeyframeDetailed() returned successfully!\n");
+				printf("DEBUG: makeKeyFrame - ML processing completed, success=%s\n", 
+					   ml_result.success ? "true" : "false");
+					   
+				// Continue with ML result processing if successful
+				if (ml_result.success && !ml_result.depth_map.empty()) {
+					fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
+					fh->setMLPending(false);  // Clear pending flag
+					
+					// NEW: Set as ML reference for tracking (CoarseTracker-style pattern)
+					setMLReference(fh->frameID, ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
 				
-				// Update metrics
-				ml_metrics_.total_frames++;
-				ml_metrics_.frames_with_ml_depth++;
-				ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
-				
+					printf("makeKeyFrame: ✅ ML processing successful for frame %d (%.1fms inference, conf=%.2f, total=%.1fms)\n",
+						   fh->frameID, ml_result.inference_time_ms, ml_result.confidence, (float)processing_time);
+					
+					// Update metrics
+					ml_metrics_.total_frames++;
+					ml_metrics_.frames_with_ml_depth++;
+					ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
+			
 				// DEBUG: Save ML depth maps for visual inspection (when --save flag is enabled)
 				if (debugSaveImages) {
 					static int ml_depth_saved_count = 0;
 					const int max_saves = 10; // Save first 10 samples to avoid disk space issues
-					
+				
 					if (ml_depth_saved_count < max_saves) {
 						try {
 							// Create filename for colorized depth visualization
@@ -1910,11 +1953,27 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						}
 					}
 				}
-			} else {
-				printf("makeKeyFrame: ❌ ML processing failed for frame %d: %s\n", 
-					   fh->frameID, ml_result.error_message.c_str());
-				fh->setMLPending(false);  // Clear pending flag on failure
+				} else {
+					printf("makeKeyFrame: ❌ ML processing failed for frame %d: %s\n", 
+						   fh->frameID, ml_result.error_message.c_str());
+					fh->setMLPending(false);  // Clear pending flag on failure
+				}
+				
+			} catch (const cv::Exception& e) {
+				printf("ERROR: makeKeyFrame - OpenCV exception during ML processing: %s\n", e.what());
+			} catch (const std::exception& e) {
+				printf("ERROR: makeKeyFrame - Exception during ML processing: %s\n", e.what());
+			} catch (...) {
+				printf("ERROR: makeKeyFrame - Unknown exception during ML processing\n");
 			}
+		}
+		
+		// Signal that ML processing is completed
+		{
+			boost::unique_lock<boost::mutex> lock(ml_processing_mutex_);
+			ml_processing_active_ = false;
+			ml_processing_done_.notify_all();
+			printf("DEBUG: ML processing COMPLETED for keyframe %d\n", fh->frameID);
 		}
 	}
 
@@ -2051,19 +2110,34 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 	// =========================== add new Immature points & new residuals =========================
-	// Ensure we only use RGB-D depth (never ML depth) for makeNewTraces
-	float* depthData = nullptr;
-	{
-		std::lock_guard<std::mutex> lock(rgbd_depth_mutex_);
-		if(!currentDepthImage.empty() && currentDepthImage.type() == CV_32FC1) {
-			depthData = (float*)currentDepthImage.data;
-			if(!setting_debugout_runquiet) {
-				printf("makeNewTraces: Using RGB-D depth (%dx%d)\n", 
-				       currentDepthImage.cols, currentDepthImage.rows);
+	// Unified depth handling: Check for ML depth first, then RGB-D depth
+	if(!currentMLDepthImage.empty() && initialized) {
+		// Use ML depth for enhanced point creation
+		if(!setting_debugout_runquiet) {
+			printf("makeNewTraces: Using ML depth (%dx%d) for enhanced tracking\n", 
+			       currentMLDepthImage.cols, currentMLDepthImage.rows);
+		}
+		makeNewTracesWithMLDepth(fh, currentMLDepthImage);
+		
+		// Clear ML depth after use
+		currentMLDepthImage = cv::Mat();
+	} else {
+		// Use RGB-D depth if available, otherwise pure monocular
+		float* depthData = nullptr;
+		{
+			boost::unique_lock<boost::mutex> lock(rgbd_depth_mutex_);
+			if(!currentDepthImage.empty() && currentDepthImage.type() == CV_32FC1) {
+				depthData = (float*)currentDepthImage.data;
+				if(!setting_debugout_runquiet) {
+					printf("makeNewTraces: Using RGB-D depth (%dx%d)\n", 
+					       currentDepthImage.cols, currentDepthImage.rows);
+				}
+			} else if(!setting_debugout_runquiet) {
+				printf("makeNewTraces: Using pure monocular (no depth available)\n");
 			}
 		}
+		makeNewTraces(fh, depthData);
 	}
-	makeNewTraces(fh, depthData);
 
 
 
@@ -3300,7 +3374,7 @@ void FullSystem::updateCoarseTrackerDepth()
     
     // Ensure depth synchronization with tracking
     {
-        std::lock_guard<std::mutex> lock(rgbd_depth_mutex_);
+        boost::unique_lock<boost::mutex> lock(rgbd_depth_mutex_);
         if(!currentDepthImage.empty()) {
             // Validate depth image format before setting
             if(currentDepthImage.type() == CV_32FC1) {
@@ -3507,6 +3581,36 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 		ml_depth_enabled_ = false;
 		return false;
 	}
+}
+
+// ML Reference Frame Management (CoarseTracker-style thread safety)
+void FullSystem::setMLReference(int frame_id, const cv::Mat& depth, float confidence, double inference_time) {
+	boost::unique_lock<boost::mutex> lock(ml_reference_mutex_);
+	
+	if (!depth.empty()) {
+		ml_reference_depth_ = depth.clone();  // Safe copy like CoarseTracker
+		ml_reference_frame_id_ = frame_id;
+		ml_reference_confidence_ = confidence;
+		ml_reference_time_ = inference_time;
+	}
+}
+
+bool FullSystem::hasMLReference() const {
+	boost::unique_lock<boost::mutex> lock(ml_reference_mutex_);
+	return !ml_reference_depth_.empty() && ml_reference_frame_id_ >= 0;
+}
+
+cv::Mat FullSystem::getMLReferenceDepth() const {
+	boost::unique_lock<boost::mutex> lock(ml_reference_mutex_);
+	if (!ml_reference_depth_.empty()) {
+		return ml_reference_depth_.clone();  // SAFE: deep copy following RGB-D pattern
+	}
+	return cv::Mat();  // Return empty Mat if no depth available
+}
+
+int FullSystem::getMLReferenceFrameId() const {
+	boost::unique_lock<boost::mutex> lock(ml_reference_mutex_);
+	return ml_reference_frame_id_;
 }
 
 }

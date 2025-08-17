@@ -110,6 +110,11 @@ public:
 	 */
 	bool hasExternalDepth() const;
 
+	/**
+	 * @brief DEBUG FUNCTION: Compare ML depth vs HSLAM predicted depth at sparse pixels (TEMPORARY)
+	 */
+	void debugCompareMLvsHSLAMDepth();
+
 	bool debugPrint, debugPlot;
 
 	Mat33f K[PYR_LEVELS];
