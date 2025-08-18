@@ -1321,8 +1321,18 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
     
     // Store ML depth if available for unified pipeline
     if(ml_depth_available) {
-        currentMLDepthImage = ml_depth_image;
-        printf("DEBUG: ML depth available, storing for unified pipeline\n");
+        // Fix Resolution Mismatch Issue: Adapt ML depth to HSLAM processing resolution
+        if(ml_depth_image.cols != wG[0] || ml_depth_image.rows != hG[0]) {
+            cv::Mat resized_ml_depth;
+            cv::resize(ml_depth_image, resized_ml_depth, 
+                      cv::Size(wG[0], hG[0]), 0, 0, cv::INTER_LINEAR);
+            currentMLDepthImage = resized_ml_depth;
+            printf("DEBUG: ML Depth: Resized from %dx%d to %dx%d for HSLAM compatibility\n",
+                   ml_depth_image.cols, ml_depth_image.rows, wG[0], hG[0]);
+        } else {
+            currentMLDepthImage = ml_depth_image;
+            printf("DEBUG: ML depth available, resolution matches HSLAM (%dx%d)\n", wG[0], hG[0]);
+        }
     } else {
         // Clear any existing ML depth for pure monocular
         currentMLDepthImage = cv::Mat();
@@ -2439,11 +2449,22 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                 
                 if(depth > 0.1f && depth < 10.0f && !std::isnan(depth)) {
                     float idepth = 1.0f / depth;
-                    float uncertainty = 0.08f + 0.1f * depth;  // Uncertainty increases with distance
+                    // BACK TO ORIGINAL: The debug document may have misdiagnosed the issue
+                    // The resolution fix was the main issue, uncertainty may have been acceptable
+                    // Testing if original uncertainty + resolution fix solves the problem
+                    float uncertainty = 0.08f + 0.1f * depth;  // Original ML uncertainty model
                     
                     impt->idepth_min = std::max(0.0f, idepth - uncertainty);
                     impt->idepth_max = idepth + uncertainty;
                     impt->idepth_GT = idepth;  // Store ML estimate as GT for validation
+                    
+                    // Debug-only logging for ML depth-integrated point details
+                    static int mlDepthPointCount = 0;
+                    if (mlDepthPointCount < 20) {  // Log first 20 ML depth points for comparison
+                        HSLAM::DepthLogger::logDepthPoint(mlDepthPointCount + 1000, x, y, depth, 
+                                                          idepth, impt->idepth_min, impt->idepth_max);
+                        mlDepthPointCount++;
+                    }
                     
                     ml_depth_points++;
                 }
