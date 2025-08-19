@@ -37,14 +37,27 @@ public:
                                   double fps, const std::string& component);
     
     /**
-     * @brief Log ML inference performance statistics
+     * @brief Log SLAM performance with keyframe count information
      * 
-     * @param total_inferences Total ML inferences performed
-     * @param successful_inferences Number of successful inferences
+     * @param processed_frames Total number of frames processed
+     * @param keyframes Number of keyframes created
+     * @param avg_ms_per_frame Average processing time per frame
+     * @param fps Frames per second
+     * @param component Pipeline component name
+     */
+    static void logSlamPerformance(int processed_frames, int keyframes, 
+                                  double avg_ms_per_frame, double fps, 
+                                  const std::string& component);
+    
+    /**
+     * @brief Log ML keyframe performance statistics
+     * 
+     * @param total_keyframes Total keyframes processed 
+     * @param successful_keyframes Number of keyframes with successful ML depth
      * @param avg_inference_time_ms Average ML inference time in milliseconds
      * @param ml_utilization ML depth utilization rate (0.0-1.0)
      */
-    static void logMLPerformance(int total_inferences, int successful_inferences,
+    static void logMLPerformance(int total_keyframes, int successful_keyframes,
                                 float avg_inference_time_ms, float ml_utilization);
     
     /**

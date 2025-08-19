@@ -70,6 +70,13 @@ include(ProcessorCount)
 ProcessorCount(NUMTHREADS)
 add_definitions("-DThreadCount=${NUMTHREADS}")
 
+# DEPTH_DEBUG: Optional debugging flag for ML depth integration (TEMPORARY)
+option(ENABLE_DEPTH_DEBUG "Enable comprehensive ML depth debugging (temporary)" OFF)
+if(ENABLE_DEPTH_DEBUG)
+    add_definitions(-DENABLE_DEPTH_DEBUG=1)
+    message(STATUS "DEPTH_DEBUG: ML depth debugging enabled (temporary)")
+endif()
+
 set(CMAKE_GENERATOR "Unix Makefiles")
 set(CMAKE_CXX_FLAGS
    "${SSE_FLAGS} -O3 -g -std=c++14 -march=native -Wno-deprecated -Wno-deprecated-declarations" #-fopenmp is added if g2o is compiled with openmp capabilities

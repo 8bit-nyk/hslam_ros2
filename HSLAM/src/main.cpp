@@ -337,6 +337,14 @@ int main(int argc, char **argv)
 		if (ml_benchmark_enabled) {
 			printf("ML performance benchmarking enabled - metrics will be collected during operation\n");
 		}
+
+		// DEPTH_DEBUG: Initialize DepthLogger for ML depth debugging (TEMPORARY - for debugging only)
+		#ifdef ENABLE_DEPTH_DEBUG
+		printf("DEPTH_DEBUG: Initializing DepthLogger for ML depth debugging...\n");
+		HSLAM::DepthLogger::initialize("results", dataset_name);
+		HSLAM::DepthLogger::setDebugMode(true); // Enable detailed debug logging
+		printf("DEPTH_DEBUG: DepthLogger initialized for dataset: %s\n", dataset_name.c_str());
+		#endif
 	} else {
 		printf("ML depth system disabled\n");
 		fullSystem->ml_depth_enabled_ = false;
@@ -640,7 +648,7 @@ int main(int argc, char **argv)
                         if (!imagefile.empty()) {
                             rgb_color = cv::imread(imagefile, cv::IMREAD_COLOR);
                             if (!rgb_color.empty()) {
-                                printf("DEBUG: Loaded RGB from file %dx%d\n", rgb_color.cols, rgb_color.rows);
+                                // DEBUG: Loaded RGB from file %dx%d\n", rgb_color.cols, rgb_color.rows);
                                 cv::cvtColor(rgb_color, rgb_color, cv::COLOR_BGR2RGB);
                             }
                         }
@@ -762,15 +770,16 @@ int main(int argc, char **argv)
             // Determine pipeline type for logging
             std::string pipeline_type = (ml_depth_enabled && fullSystem->ml_depth_enabled_) ? "ML_Enhanced" : "Monocular";
             
-            // Log SLAM performance
-            HSLAM::FPSLogger::logSlamPerformance(numFramesProcessed, avg_ms_per_frame, fps, pipeline_type);
+            // Log SLAM performance with total keyframes created (not just active sliding window)
+            int keyframes = static_cast<int>(fullSystem->allKeyFramesHistory.size());
+            HSLAM::FPSLogger::logSlamPerformance(numFramesProcessed, keyframes, avg_ms_per_frame, fps, pipeline_type);
             
             // Log ML performance if enabled
             if (ml_depth_enabled && fullSystem->ml_depth_enabled_) {
                 auto ml_metrics = fullSystem->ml_metrics_;
                 HSLAM::FPSLogger::logMLPerformance(
-                    ml_metrics.total_frames,
-                    ml_metrics.frames_with_ml_depth,
+                    ml_metrics.ml_keyframes_attempted,
+                    ml_metrics.ml_keyframes_successful,
                     ml_metrics.avg_ml_inference_time_ms,
                     ml_metrics.ml_depth_utilization
                 );

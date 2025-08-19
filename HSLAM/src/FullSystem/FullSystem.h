@@ -165,6 +165,12 @@ public:
 	bool hasMLReference() const;
 	cv::Mat getMLReferenceDepth() const;
 	int getMLReferenceFrameId() const;
+	
+	// Performance monitoring
+	int getKeyframeCount() const { return static_cast<int>(frameHessians.size()); }
+	
+	// Keyframe history for performance metrics
+	std::vector<FrameShell*> allKeyFramesHistory;
 
 	// =================== COARSE TRACKER DEPTH INTEGRATION ===================
 	/**
@@ -233,8 +239,8 @@ public:
 	
 	// ML performance tracking
 	struct MLMetrics {
-		size_t total_frames = 0;
-		size_t frames_with_ml_depth = 0;
+		size_t ml_keyframes_attempted = 0;
+		size_t ml_keyframes_successful = 0;
 		float ml_depth_utilization = 0.0f;
 		float avg_ml_inference_time_ms = 0.0f;
 		size_t frames_skipped = 0;  // Added for strategy tracking
@@ -283,7 +289,6 @@ public:
 	
 	// Keyframe statistics methods
 	float getKeyframeRatio() const;
-	size_t getKeyframeCount() const;
 	size_t getTotalFrameCount() const;
 	void printKeyframeStats() const;
 	
@@ -298,7 +303,6 @@ private:
 	std::shared_ptr<Map> globalMap;
 	std::vector<FrameHessian*> frameHessians;	// ONLY changed in marginalizeFrame and addFrame.
 	EnergyFunctional* ef;
-	std::vector<FrameShell*> allKeyFramesHistory;
 	std::unordered_map<unsigned long, PC_output> allMargPointsHistory;
 	mutable boost::mutex trackMutex;
 	void BAatExit();
@@ -321,6 +325,9 @@ private:
 	void flagPointsForRemoval();
 	void makeNewTraces(FrameHessian* newFrame, float* gtDepth);
 	void makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth);
+	#ifdef ENABLE_DEPTH_DEBUG
+	void debugMLDepthComparison(FrameHessian* newFrame, const cv::Mat& ml_depth);  // DEPTH_DEBUG: TEMPORARY
+	#endif
 	void initializeFromInitializer(FrameHessian* newFrame);
 	void flagFramesForMarginalization(FrameHessian* newFH);
 

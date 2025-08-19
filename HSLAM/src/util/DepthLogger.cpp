@@ -207,4 +207,23 @@ std::string DepthLogger::formatRate(float rate) {
     return ss.str();
 }
 
+void DepthLogger::logMLvsHSLAMComparison(float pixel_x, float pixel_y,
+                                        float ml_depth, float hslam_depth,
+                                        float absolute_error, float relative_error) {
+    if (!log_file.is_open()) {
+        return;
+    }
+    
+    log_file << "[" << getTimestamp() << "] ML_vs_HSLAM_COMPARISON: "
+             << "pixel=(" << std::fixed << std::setprecision(1) << pixel_x << "," << pixel_y << ") "
+             << "ML=" << std::setprecision(3) << ml_depth << "m "
+             << "HSLAM=" << hslam_depth << "m "
+             << "abs_err=" << absolute_error << "m "
+             << "rel_err=" << std::setprecision(1) << relative_error << "%"
+             << std::endl;
+             
+    // Console output removed to reduce verbosity - detailed comparisons logged to file only
+    // Note: debug_mode still enables file logging with detailed timestamps
+}
+
 } // namespace HSLAM 

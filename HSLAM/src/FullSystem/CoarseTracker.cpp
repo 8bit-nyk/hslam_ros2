@@ -1226,10 +1226,8 @@ void CoarseTracker::makeCoarseDepthL0Enhanced(std::vector<FrameHessian*> frameHe
         pc_n[lvl] = lpc_n;
     }
     
-    // Step 8: Add ML vs HSLAM depth comparison debugging (TEMPORARY - for debugging only)
-    debugCompareMLvsHSLAMDepth();
-    
-    // Step 9: Calculate final integration statistics
+    // Step 8: Calculate final integration statistics
+    // NOTE: ML depth comparison moved to makeNewTracesWithMLDepth() in FullSystem.cpp
     last_stats.total_valid_pixels = pc_n[0];
     if(last_stats.total_valid_pixels > 0) {
         last_stats.integration_rate = (float)last_stats.pixels_from_external_depth / 
@@ -1635,6 +1633,16 @@ void CoarseDistanceMap::makeK(CalibHessian* HCalib)
  */
 void CoarseTracker::debugCompareMLvsHSLAMDepth()
 {
+    // DEPTH_DEBUG: Add detailed condition checking (TEMPORARY)
+    #ifdef ENABLE_DEPTH_DEBUG
+    static int call_count = 0;
+    call_count++;
+    if(call_count <= 10) {  // Debug first 10 calls
+        printf("DEPTH_DEBUG: debugCompareMLvsHSLAMDepth() call #%d - hasExternalDepth()=%d, pc_n[0]=%d\n", 
+               call_count, hasExternalDepth() ? 1 : 0, pc_n[0]);
+    }
+    #endif
+    
     // Only debug when external depth is available and we have sparse pixels
     if (!hasExternalDepth() || pc_n[0] <= 0) {
         return;

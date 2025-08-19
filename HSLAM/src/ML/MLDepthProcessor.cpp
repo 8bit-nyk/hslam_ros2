@@ -95,18 +95,18 @@ MLDepthProcessor::ProcessingResult MLDepthProcessor::processKeyframeDetailed(con
     }
     
     // === DEBUG_ML_PHASE1: MLDepthProcessor pre-inference ===
-    printf("DEBUG_ML_PHASE1: MLDepthProcessor::processKeyframeDetailed() entry\n");
-    printf("DEBUG_ML_PHASE1: Input image - size: %dx%d, channels: %d, type: %d\n",
-           rgb_image.cols, rgb_image.rows, rgb_image.channels(), rgb_image.type());
-    printf("DEBUG_ML_PHASE1: ml_inference_ pointer: %p\n", ml_inference_.get());
+    // printf("DEBUG_ML_PHASE1: MLDepthProcessor::processKeyframeDetailed() entry\n");
+    // printf("DEBUG_ML_PHASE1: Input image - size: %dx%d, channels: %d, type: %d\n",
+    //        rgb_image.cols, rgb_image.rows, rgb_image.channels(), rgb_image.type());
+    // printf("DEBUG_ML_PHASE1: ml_inference_ pointer: %p\n", ml_inference_.get());
     // === END DEBUG_ML_PHASE1 ===
     
     // Perform synchronous ML inference with detailed timing
     auto start_time = std::chrono::high_resolution_clock::now();
     
-    printf("DEBUG_ML_PHASE1: About to call ml_inference_->inferDepth()...\n");
+    // printf("DEBUG_ML_PHASE1: About to call ml_inference_->inferDepth()...\n");
     MLInference::InferenceResult result = ml_inference_->inferDepth(rgb_image);
-    printf("DEBUG_ML_PHASE1: ml_inference_->inferDepth() returned successfully!\n");
+    // printf("DEBUG_ML_PHASE1: ml_inference_->inferDepth() returned successfully!\n");
     
     auto end_time = std::chrono::high_resolution_clock::now();
     detailed_result.inference_time_ms = std::chrono::duration<float, std::milli>(end_time - start_time).count();

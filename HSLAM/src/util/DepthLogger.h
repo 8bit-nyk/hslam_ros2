@@ -116,6 +116,20 @@ public:
      * @return Log file path
      */
     static std::string getLogFilePath();
+    
+    /**
+     * @brief Log ML vs HSLAM depth comparison data
+     * 
+     * @param pixel_x X coordinate
+     * @param pixel_y Y coordinate  
+     * @param ml_depth ML depth value
+     * @param hslam_depth HSLAM depth value
+     * @param absolute_error Absolute error between depths
+     * @param relative_error Relative error percentage
+     */
+    static void logMLvsHSLAMComparison(float pixel_x, float pixel_y,
+                                      float ml_depth, float hslam_depth,
+                                      float absolute_error, float relative_error);
 
 private:
     static std::ofstream log_file;

@@ -154,29 +154,29 @@ bool MLInference::initialize() {
 
 MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image) {
     // === DEBUG_ML_PHASE1: MLInference entry point ===
-    printf("DEBUG_ML_PHASE1: MLInference::inferDepth() entry\n");
-    printf("DEBUG_ML_PHASE1: Input validation - size: %dx%d, channels: %d, type: %d\n",
-           input_image.cols, input_image.rows, input_image.channels(), input_image.type());
-    printf("DEBUG_ML_PHASE1: Initialized state: %s\n", initialized_.load() ? "true" : "false");
-    printf("DEBUG_ML_PHASE1: Session pointer: %p\n", onnx_session_.get());
+    // printf("DEBUG_ML_PHASE1: MLInference::inferDepth() entry\n");
+    // printf("DEBUG_ML_PHASE1: Input validation - size: %dx%d, channels: %d, type: %d\n",
+    //        input_image.cols, input_image.rows, input_image.channels(), input_image.type());
+    // printf("DEBUG_ML_PHASE1: Initialized state: %s\n", initialized_.load() ? "true" : "false");
+    // printf("DEBUG_ML_PHASE1: Session pointer: %p\n", onnx_session_.get());
     // === END DEBUG_ML_PHASE1 ===
     
     InferenceResult result;
     result.success = false;
     
     if (!initialized_.load()) {
-        printf("DEBUG_ML_PHASE1: ERROR - MLInference not initialized!\n");
+        // printf("DEBUG_ML_PHASE1: ERROR - MLInference not initialized!\n");
         result.error_message = "MLInference not initialized";
         return result;
     }
     
     if (input_image.empty()) {
-        printf("DEBUG_ML_PHASE1: ERROR - Input image is empty!\n");
+        // printf("DEBUG_ML_PHASE1: ERROR - Input image is empty!\n");
         result.error_message = "Input image is empty";
         return result;
     }
     
-    printf("DEBUG_ML_PHASE1: Basic validation passed, proceeding with preprocessing...\n");
+    // printf("DEBUG_ML_PHASE1: Basic validation passed, proceeding with preprocessing...\n");
     
     // Additional validation checks
     if (input_image.cols <= 0 || input_image.rows <= 0) {
@@ -199,8 +199,8 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
         return result;
     }
     
-    printf("DEBUG: MLInference.inferDepth - Input RGB: %dx%d channels=%d type=%d\n", 
-           input_image.cols, input_image.rows, input_image.channels(), input_image.type());
+    // DEBUG: MLInference.inferDepth - Input RGB: %dx%d channels=%d type=%d\n", 
+    //        input_image.cols, input_image.rows, input_image.channels(), input_image.type());
 
 #ifdef HAS_ONNXRUNTIME
     std::lock_guard<std::mutex> lock(mutex_);
@@ -248,13 +248,13 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
         // Use memory pool for GPU optimization (Sprint 2)
         std::vector<Ort::Value> output_tensors;
         
-        printf("DEBUG: MLInference - Checking memory pool: enable_gpu=%s, memory_pool_=%s, initialized_=%s\n",
-               config_.enable_gpu ? "true" : "false",
-               memory_pool_ ? "present" : "null",
-               (memory_pool_ && memory_pool_->initialized_) ? "true" : "false");
+        // printf("DEBUG: MLInference - Checking memory pool: enable_gpu=%s, memory_pool_=%s, initialized_=%s\n",
+        //        config_.enable_gpu ? "true" : "false",
+        //        memory_pool_ ? "present" : "null",
+        //        (memory_pool_ && memory_pool_->initialized_) ? "true" : "false");
         
         if (config_.enable_gpu && memory_pool_ && memory_pool_->initialized_) {
-            printf("DEBUG: MLInference - Using IoBinding GPU path\n");
+            // printf("DEBUG: MLInference - Using IoBinding GPU path\n");
             // Use IoBinding for GPU memory pool
             try {
                 auto& io_binding = *memory_pool_->io_binding_;
@@ -271,13 +271,13 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                 io_binding.BindInput(input_names_[0], input_tensor);
                 io_binding.BindOutput(output_names_[0], *memory_info_);
                 
-                printf("DEBUG: MLInference - IoBinding configured, running session...\n");
+                // printf("DEBUG: MLInference - IoBinding configured, running session...\n");
                 
                 // Run with IoBinding (GPU optimized)
                 onnx_session_->Run(Ort::RunOptions{nullptr}, io_binding);
                 output_tensors = io_binding.GetOutputValues();
                 
-                printf("DEBUG: MLInference - Session run completed successfully\n");
+                // printf("DEBUG: MLInference - Session run completed successfully\n");
                 
                 // Update memory pool statistics
                 memory_pool_->reuse_count_++;
@@ -291,13 +291,13 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                         *memory_info_, input_tensor_values.data(), input_tensor_size, 
                         input_shape.data(), input_shape.size());
                     
-                    printf("DEBUG: MLInference - Fallback: Running session with regular inference...\n");
+                    // printf("DEBUG: MLInference - Fallback: Running session with regular inference...\n");
                     
                     output_tensors = onnx_session_->Run(Ort::RunOptions{nullptr}, 
                                                        input_names_.data(), &input_tensor, 1,
                                                        output_names_.data(), output_names_.size());
                                                        
-                    printf("DEBUG: MLInference - Fallback completed successfully\n");
+                    // printf("DEBUG: MLInference - Fallback completed successfully\n");
                     
                 } catch (const std::exception& fallback_e) {
                     result.error_message = "Both IoBinding and regular inference failed: " + std::string(fallback_e.what());
@@ -306,7 +306,7 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             }
         } else {
             // Regular inference (CPU or GPU without memory pool)
-            printf("DEBUG: MLInference - Using regular inference path\n");
+            // printf("DEBUG: MLInference - Using regular inference path\n");
             
             try {
                 // CRITICAL FIX: Validate session state before execution
@@ -319,7 +319,7 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                     *memory_info_, input_tensor_values.data(), input_tensor_size, 
                     input_shape.data(), input_shape.size());
                 
-                printf("DEBUG: MLInference - About to run session (tensor size: %zu)...\n", input_tensor_size);
+                // printf("DEBUG: MLInference - About to run session (tensor size: %zu)...\n", input_tensor_size);
                 
                 // CRITICAL FIX: Use safer RunOptions with explicit configuration
                 Ort::RunOptions run_options;
@@ -330,7 +330,7 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                                                    input_names_.data(), &input_tensor, 1,
                                                    output_names_.data(), output_names_.size());
                                                    
-                printf("DEBUG: MLInference - Session run completed successfully\n");
+                // printf("DEBUG: MLInference - Session run completed successfully\n");
                 
             } catch (const Ort::Exception& ort_e) {
                 result.error_message = "ONNX Runtime exception: " + std::string(ort_e.what());
@@ -349,19 +349,19 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             return result;
         }
         
-        // Debug: Check all output shapes for Metric3D
-        if(config_.model_type == METRIC3D_V2) {
-            printf("MLInference: Metric3D model has %zu outputs:\n", output_tensors.size());
-            for(size_t i = 0; i < output_tensors.size(); i++) {
-                auto shape = output_tensors[i].GetTensorTypeAndShapeInfo().GetShape();
-                printf("  Output[%zu] shape: [", i);
-                for(size_t j = 0; j < shape.size(); j++) {
-                    printf("%lld", shape[j]);
-                    if(j < shape.size()-1) printf(", ");
-                }
-                printf("]\n");
-            }
-        }
+        // Debug: Check all output shapes for Metric3D (commented out to reduce verbosity)
+        // if(config_.model_type == METRIC3D_V2) {
+        //     printf("MLInference: Metric3D model has %zu outputs:\n", output_tensors.size());
+        //     for(size_t i = 0; i < output_tensors.size(); i++) {
+        //         auto shape = output_tensors[i].GetTensorTypeAndShapeInfo().GetShape();
+        //         printf("  Output[%zu] shape: [", i);
+        //         for(size_t j = 0; j < shape.size(); j++) {
+        //             printf("%lld", shape[j]);
+        //             if(j < shape.size()-1) printf(", ");
+        //         }
+        //         printf("]\n");
+        //     }
+        // }
         
         // Use appropriate output for Metric3D (typically the depth output is at index 1 or 2)
         size_t depth_output_index = 0;
@@ -374,7 +374,7 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                    (shape.size() == 3 && shape[0] == 1) ||
                    (shape.size() == 2)) {  // 2D height x width
                     depth_output_index = i;
-                    printf("MLInference: Using output[%zu] as depth map\n", i);
+                    // printf("MLInference: Using output[%zu] as depth map\n", i);
                     break;
                 }
             }
@@ -478,8 +478,8 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
         (float)config_.input_width / processed.cols
     );
     
-    printf("DEBUG: Preprocessing - Input %dx%d, scale=%.3f for target %dx%d\n", 
-           processed.cols, processed.rows, scale, config_.input_width, config_.input_height);
+    // DEBUG: Preprocessing - Input %dx%d, scale=%.3f for target %dx%d\n", 
+    //        processed.cols, processed.rows, scale, config_.input_width, config_.input_height);
     
     // Resize preserving aspect ratio
     cv::Mat resized;
@@ -487,7 +487,7 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     int new_height = (int)(processed.rows * scale);
     cv::resize(processed, resized, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
     
-    printf("DEBUG: After aspect-ratio resize: %dx%d\n", resized.cols, resized.rows);
+    // DEBUG: After aspect-ratio resize: %dx%d\n", resized.cols, resized.rows);
     
     // CRITICAL FIX: Validate configuration state before padding calculation
     if (config_.input_height <= 0 || config_.input_width <= 0) {
@@ -501,8 +501,8 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
         throw std::runtime_error("Resized image larger than target");
     }
     
-    printf("DEBUG: Computing padding for target %dx%d from resized %dx%d\n",
-           config_.input_width, config_.input_height, new_width, new_height);
+    // printf("DEBUG: Computing padding for target %dx%d from resized %dx%d\n",
+    //        config_.input_width, config_.input_height, new_width, new_height);
     
     // Calculate padding to reach target size
     int pad_top = (config_.input_height - new_height) / 2;
@@ -510,8 +510,8 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     int pad_left = (config_.input_width - new_width) / 2;
     int pad_right = config_.input_width - new_width - pad_left;
     
-    printf("DEBUG: Computed padding: top=%d, bottom=%d, left=%d, right=%d\n",
-           pad_top, pad_bottom, pad_left, pad_right);
+    // printf("DEBUG: Computed padding: top=%d, bottom=%d, left=%d, right=%d\n",
+    //        pad_top, pad_bottom, pad_left, pad_right);
     
     // Validate padding values
     if (pad_top < 0 || pad_bottom < 0 || pad_left < 0 || pad_right < 0) {
@@ -526,15 +526,15 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     current_padding_.left = pad_left;
     current_padding_.right = pad_right;
     
-    printf("DEBUG: Padding - top:%d, bottom:%d, left:%d, right:%d\n", 
-           pad_top, pad_bottom, pad_left, pad_right);
+    // DEBUG: Padding - top:%d, bottom:%d, left:%d, right:%d\n", 
+    //        pad_top, pad_bottom, pad_left, pad_right);
     
     // Pad with ImageNet mean values (RGB: 123.675, 116.28, 103.53)
     cv::Mat padded;
     cv::copyMakeBorder(resized, padded, pad_top, pad_bottom, pad_left, pad_right,
                        cv::BORDER_CONSTANT, cv::Scalar(123.675, 116.28, 103.53));
     
-    printf("DEBUG: After padding: %dx%d\n", padded.cols, padded.rows);
+    // DEBUG: After padding: %dx%d\n", padded.cols, padded.rows);
     
     // Convert to float32 WITHOUT normalization (keep [0,255] range)
     cv::Mat result;
@@ -543,11 +543,12 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     // Debug: Check final values
     cv::Scalar mean, stddev;
     cv::meanStdDev(result, mean, stddev);
-    printf("DEBUG: Final values - mean=[%.1f,%.1f,%.1f], std=[%.1f,%.1f,%.1f]\n",
-           mean[0], mean[1], mean[2], stddev[0], stddev[1], stddev[2]);
+    // printf("DEBUG: Final values - mean=[%.1f,%.1f,%.1f], std=[%.1f,%.1f,%.1f]\n",
+    //        mean[0], mean[1], mean[2], stddev[0], stddev[1], stddev[2]);
     
-    printf("MLInference: preprocessMetric3D - RGB %dx%d → Model input %dx%d (aspect ratio preserved)\n", 
-           input_image.cols, input_image.rows, config_.input_width, config_.input_height);
+    // Reduce verbosity - preprocessing message commented out after initial testing
+    // printf("MLInference: preprocessMetric3D - RGB %dx%d → Model input %dx%d (aspect ratio preserved)\n", 
+    //        input_image.cols, input_image.rows, config_.input_width, config_.input_height);
     
     return result;
 }
@@ -584,7 +585,7 @@ cv::Mat MLInference::preprocessMiDaS(const cv::Mat& input_image) const {
 
 cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, int width, int height, int target_width, int target_height) const {
     // Debug: Model output analysis
-    printf("DEBUG: Model output - dimensions %dx%d, total elements: %zu\n", width, height, raw_output.size());
+    // DEBUG: Model output - dimensions %dx%d, total elements: %zu\n", width, height, raw_output.size());
     
     // Validate input dimensions
     size_t expected_size = static_cast<size_t>(width * height);
@@ -604,8 +605,8 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
         int unpadded_height = height - current_padding_.top - current_padding_.bottom;
         int unpadded_width = width - current_padding_.left - current_padding_.right;
         
-        printf("DEBUG: Removing padding - original %dx%d, unpadded %dx%d\n", 
-               width, height, unpadded_width, unpadded_height);
+        // printf("DEBUG: Removing padding - original %dx%d, unpadded %dx%d\n", 
+        //        width, height, unpadded_width, unpadded_height);
         
         if (unpadded_height > 0 && unpadded_width > 0 && 
             current_padding_.top + unpadded_height <= height &&
@@ -614,8 +615,8 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
             cv::Rect crop_region(current_padding_.left, current_padding_.top, 
                                  unpadded_width, unpadded_height);
             unpadded_depth = depth_map(crop_region).clone();
-            printf("DEBUG: Padding removed - depth map now %dx%d\n", 
-                   unpadded_depth.cols, unpadded_depth.rows);
+            // DEBUG: Padding removed - depth map now %dx%d\n", 
+            //        unpadded_depth.cols, unpadded_depth.rows);
         } else {
             printf("WARNING: Invalid padding info, using full depth map\n");
             unpadded_depth = depth_map;
@@ -630,8 +631,8 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
     if (target_width > 0 && target_height > 0 && 
         (target_width != unpadded_depth.cols || target_height != unpadded_depth.rows)) {
         cv::resize(unpadded_depth, final_depth, cv::Size(target_width, target_height), 0, 0, cv::INTER_LINEAR);
-        printf("ML depth postprocess: %dx%d → %dx%d (after padding removal)\n", 
-               unpadded_depth.cols, unpadded_depth.rows, target_width, target_height);
+        // printf("ML depth postprocess: %dx%d → %dx%d (after padding removal)\n", 
+        //        unpadded_depth.cols, unpadded_depth.rows, target_width, target_height);
     } else {
         final_depth = unpadded_depth;
     }

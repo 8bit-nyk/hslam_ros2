@@ -442,6 +442,15 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 		}
 	}
 
+	// DEPTH_DEBUG: Pass ML depth to CoarseTracker for debugging comparison (TEMPORARY)
+	#ifdef ENABLE_DEPTH_DEBUG
+	if(!currentMLDepthImage.empty() && initialized) {
+		coarseTracker->setExternalDepthImage(currentMLDepthImage);
+		// printf("DEPTH_DEBUG: Passed ML depth (%dx%d) to CoarseTracker for comparison\n", 
+		//        currentMLDepthImage.cols, currentMLDepthImage.rows);
+	}
+	#endif
+
 	assert(allFrameHistory.size() > 0);
 	// If there is at least one frame in history, set pose initialization.
 	FrameHessian* lastF = coarseTracker->lastRef;
@@ -995,6 +1004,12 @@ void FullSystem::activatePointsMT()
 		}
 	}
 
+#ifdef ENABLE_DEPTH_DEBUG
+    // DEPTH_DEBUG: ML vs HSLAM depth comparison after point activation (Better timing!)
+    if (!currentMLDepthImage.empty() && frameHessians.size() > 0) {
+        debugMLDepthComparison(frameHessians.back(), currentMLDepthImage);
+    }
+#endif
 
 }
 
@@ -1197,8 +1212,6 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
 {
     if(isLost) return;
     
-    ml_metrics_.total_frames++;
-    
     // Validate input images
     if(rgb_img.empty()) {
         printf("ERROR: Empty grayscale image in TrackMonocularWithML\n");
@@ -1210,8 +1223,8 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
         boost::unique_lock<boost::mutex> lock(ml_depth_mutex_);
         if (!rgb_color.empty() && rgb_color.channels() == 3) {
             last_bgr_frame_ = rgb_color.clone();  // Store actual RGB for ML
-            printf("DEBUG: Stored RGB for ML %dx%d channels=%d\n", 
-                   rgb_color.cols, rgb_color.rows, rgb_color.channels());
+            // DEBUG: Stored RGB for ML %dx%d channels=%d\n", 
+            //        rgb_color.cols, rgb_color.rows, rgb_color.channels());
         } else {
             // Fallback: convert grayscale to RGB
             printf("WARNING: No RGB color available, using grayscale->RGB conversion %dx%d\n",
@@ -1222,7 +1235,7 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
     
     // Bounds checking: Skip ML depth retrieval if not enough frames (but keep ML enabled for future)
     if (frameHessians.size() < 2) {
-        printf("DEBUG: Not enough frames for ML retrieval (%zu), skipping ML for this frame only\n", frameHessians.size());
+        // DEBUG: Not enough frames for ML retrieval (%zu), skipping ML for this frame only\n", frameHessians.size());
         // NOTE: ml_depth_enabled_ stays true - we just skip this frame, don't permanently disable ML
     }
     
@@ -1243,14 +1256,14 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
             boost::unique_lock<boost::mutex> lock(ml_reference_mutex_);
             
             // DEBUG: Log variable values to understand why defensive checks pass
-            printf("DEBUG: Frame %d - Checking ML reference: frame_id=%d, depth.empty=%d, depth.data=%p, rows=%d, cols=%d\n",
-                   ml_frame_counter_, ml_reference_frame_id_, ml_reference_depth_.empty(), 
-                   ml_reference_depth_.data, ml_reference_depth_.rows, ml_reference_depth_.cols);
+            // DEBUG: Frame %d - Checking ML reference: frame_id=%d, depth.empty=%d, depth.data=%p, rows=%d, cols=%d\n",
+            //        ml_frame_counter_, ml_reference_frame_id_, ml_reference_depth_.empty(), 
+            //        ml_reference_depth_.data, ml_reference_depth_.rows, ml_reference_depth_.cols());
             
             // Force ml_reference to be invalid if frame_id is negative (safety check)
             if (ml_reference_frame_id_ < 0) {
                 ml_reference_depth_ = cv::Mat();  // Force empty
-                printf("DEBUG: Frame %d - Forced ML reference to empty (frame_id < 0)\n", ml_frame_counter_);
+                // DEBUG: Frame %d - Forced ML reference to empty (frame_id < 0)\n", ml_frame_counter_);
             }
             
             // Defensive checks: ensure ML reference is valid and not corrupted
@@ -1273,7 +1286,6 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
         if (ml_depth_available) {
             
             // Update metrics
-            ml_metrics_.frames_with_ml_depth++;
             ml_metrics_.avg_ml_inference_time_ms = ml_inference_time;
             
             // Store ML depth for other components (direct assignment, no redundant clone)
@@ -1298,26 +1310,28 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
                 ml_depth_available = false;
             } else {
                 // Safe to print - all variables validated
-                printf("DEBUG: Frame %d - ML available: YES (from frame %d), SLAM initialized: %s\n",
-                       ml_frame_counter_, ref_frame_id,
-                       initialized ? "YES" : "NO");
+                // DEBUG: Frame %d - ML available: YES (from frame %d), SLAM initialized: %s\n",
+                //        ml_frame_counter_, ref_frame_id,
+                //        initialized ? "YES" : "NO");
                 
-                printf("TrackMonocularWithML: Using ML depth from keyframe %d (%.1fms), size %dx%d, conf=%.2f\n", 
-                       ref_frame_id, ml_inference_time, 
-                       ml_depth_image.cols, ml_depth_image.rows, ml_confidence);
+                // printf("TrackMonocularWithML: Using ML depth from keyframe %d (%.1fms), size %dx%d, conf=%.2f\n", 
+                //        ref_frame_id, ml_inference_time, 
+                //        ml_depth_image.cols, ml_depth_image.rows, ml_confidence);
             }
         }
     }
 
     if (!ml_depth_available) {
-        printf("DEBUG: Frame %d - ML available: NO, SLAM initialized: %s\n",
-               ml_frame_counter_, initialized ? "YES" : "NO");
+        // DEBUG: Frame %d - ML available: NO, SLAM initialized: %s\n",
+        //        ml_frame_counter_, initialized ? "YES" : "NO");
     }
     
     // Update frame counter for ML processing synchronization
     
     // Update ML utilization rate
-    ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
+    if (!allKeyFramesHistory.empty()) {
+        ml_metrics_.ml_depth_utilization = (float)ml_metrics_.ml_keyframes_successful / allKeyFramesHistory.size();
+    }
     
     // Store ML depth if available for unified pipeline
     if(ml_depth_available) {
@@ -1331,12 +1345,12 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
                    ml_depth_image.cols, ml_depth_image.rows, wG[0], hG[0]);
         } else {
             currentMLDepthImage = ml_depth_image;
-            printf("DEBUG: ML depth available, resolution matches HSLAM (%dx%d)\n", wG[0], hG[0]);
+            // printf("DEBUG: ML depth available, resolution matches HSLAM (%dx%d)\n", wG[0], hG[0]);
         }
     } else {
         // Clear any existing ML depth for pure monocular
         currentMLDepthImage = cv::Mat();
-        printf("DEBUG: No ML depth available, using pure monocular tracking\n");
+        // DEBUG: No ML depth available, using pure monocular tracking\n");
     }
     
     // Clear any existing RGB-D depth to use pure monocular/ML approach
@@ -1387,7 +1401,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 				return;
 			}
 			
-			printf("DEBUG: ML warmup - converting image %dx%d\n", image->w, image->h);
+			// DEBUG: ML warmup - converting image %dx%d\n", image->w, image->h);
 			
 			// Convert float array to cv::Mat then to RGB for warmup with validation
 			cv::Mat gray_image(image->h, image->w, CV_32FC1, image->image);
@@ -1413,8 +1427,8 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 				return;
 			}
 			
-			printf("DEBUG: ML warmup - RGB image ready %dx%d channels=%d\n", 
-				   rgb_image.cols, rgb_image.rows, rgb_image.channels());
+			// DEBUG: ML warmup - RGB image ready %dx%d channels=%d\n", 
+			//        rgb_image.cols, rgb_image.rows, rgb_image.channels());
 			
 			// Validate ML processor state
 			if (!ml_processor_->isReady()) {
@@ -1860,7 +1874,7 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		{
 			boost::unique_lock<boost::mutex> lock(ml_processing_mutex_);
 			ml_processing_active_ = true;
-			printf("DEBUG: ML processing STARTED for keyframe %d\n", fh->frameID);
+			// DEBUG: ML processing STARTED for keyframe %d\n", fh->frameID);
 		}
 		cv::Mat rgb_image;
 		{
@@ -1874,8 +1888,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		
 		if (!rgb_image.empty()) {
 			printf("makeKeyFrame: Processing keyframe %d with ML processor...\n", fh->frameID);
-			printf("DEBUG: makeKeyFrame - RGB image %dx%d channels=%d\n", 
-				   rgb_image.cols, rgb_image.rows, rgb_image.channels());
+			// DEBUG: makeKeyFrame - RGB image %dx%d channels=%d\n", 
+			//        rgb_image.cols, rgb_image.rows, rgb_image.channels());
 		
 			// Validate inputs before ML processing
 			if (!fh) {
@@ -1895,23 +1909,26 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 			}
 			
 			// === DEBUG_ML_PHASE1: Pre-inference validation ===
-			printf("DEBUG_ML_PHASE1: About to call second ML inference (keyframe processing)\n");
-			printf("DEBUG_ML_PHASE1: RGB image validation - size: %dx%d, channels: %d, type: %d\n", 
-				   rgb_image.cols, rgb_image.rows, rgb_image.channels(), rgb_image.type());
-			printf("DEBUG_ML_PHASE1: ML processor state - isReady: %s\n", 
-				   ml_processor_->isReady() ? "true" : "false");
+			// printf("DEBUG_ML_PHASE1: About to call second ML inference (keyframe processing)\n");
+			// printf("DEBUG_ML_PHASE1: RGB image validation - size: %dx%d, channels: %d, type: %d\n", 
+			//        rgb_image.cols, rgb_image.rows, rgb_image.channels(), rgb_image.type());
+			// printf("DEBUG_ML_PHASE1: ML processor state - isReady: %s\n", 
+			//        ml_processor_->isReady() ? "true" : "false");
 			// === END DEBUG_ML_PHASE1 ===
+			
+			// Count this as an attempted keyframe (after validation passes)
+			ml_metrics_.ml_keyframes_attempted++;
 			
 			try {
 				auto start_time = std::chrono::high_resolution_clock::now();
-				printf("DEBUG_ML_PHASE1: Calling ml_processor_->processKeyframeDetailed()...\n");
+				// printf("DEBUG_ML_PHASE1: Calling ml_processor_->processKeyframeDetailed()...\n");
 				auto ml_result = ml_processor_->processKeyframeDetailed(rgb_image);
 				auto end_time = std::chrono::high_resolution_clock::now();
 				auto processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 				
-				printf("DEBUG_ML_PHASE1: ml_processor_->processKeyframeDetailed() returned successfully!\n");
-				printf("DEBUG: makeKeyFrame - ML processing completed, success=%s\n", 
-					   ml_result.success ? "true" : "false");
+				// printf("DEBUG_ML_PHASE1: ml_processor_->processKeyframeDetailed() returned successfully!\n");
+				// printf("DEBUG: makeKeyFrame - ML processing completed, success=%s\n", 
+				//        ml_result.success ? "true" : "false");
 					   
 				// Continue with ML result processing if successful
 				if (ml_result.success && !ml_result.depth_map.empty()) {
@@ -1925,9 +1942,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						   fh->frameID, ml_result.inference_time_ms, ml_result.confidence, (float)processing_time);
 					
 					// Update metrics
-					ml_metrics_.total_frames++;
-					ml_metrics_.frames_with_ml_depth++;
-					ml_metrics_.ml_depth_utilization = (float)ml_metrics_.frames_with_ml_depth / ml_metrics_.total_frames;
+					ml_metrics_.ml_keyframes_successful++;
+					ml_metrics_.ml_depth_utilization = (float)ml_metrics_.ml_keyframes_successful / allKeyFramesHistory.size();
 			
 				// DEBUG: Save ML depth maps for visual inspection (when --save flag is enabled)
 				if (debugSaveImages) {
@@ -1983,7 +1999,7 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 			boost::unique_lock<boost::mutex> lock(ml_processing_mutex_);
 			ml_processing_active_ = false;
 			ml_processing_done_.notify_all();
-			printf("DEBUG: ML processing COMPLETED for keyframe %d\n", fh->frameID);
+			// DEBUG: ML processing COMPLETED for keyframe %d\n", fh->frameID);
 		}
 	}
 
@@ -2458,13 +2474,7 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                     impt->idepth_max = idepth + uncertainty;
                     impt->idepth_GT = idepth;  // Store ML estimate as GT for validation
                     
-                    // Debug-only logging for ML depth-integrated point details
-                    static int mlDepthPointCount = 0;
-                    if (mlDepthPointCount < 20) {  // Log first 20 ML depth points for comparison
-                        HSLAM::DepthLogger::logDepthPoint(mlDepthPointCount + 1000, x, y, depth, 
-                                                          idepth, impt->idepth_min, impt->idepth_max);
-                        mlDepthPointCount++;
-                    }
+                    // DEPTH_DEBUG: ML point logging removed - better comparison available in activatePointsMT()
                     
                     ml_depth_points++;
                 }
@@ -2496,16 +2506,141 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
         }
     }
     
-    // Log ML integration statistics
+    // Log ML integration statistics (essential for current debugging focus)
     if(ml_depth_points > 0) {
         printf("ML Depth Integration: %d/%d points (%.1f%%)\n",
                ml_depth_points, total_points, 
                100.0f * ml_depth_points / total_points);
     }
     
+    // DEPTH_DEBUG: Comprehensive ML depth integration logging (TEMPORARY)
+    #ifdef ENABLE_DEPTH_DEBUG
+    if(ml_depth_points > 0) {
+        HSLAM::DepthLogger::logIntegrationStats(ml_depth_points, ml_depth_points, 
+                                               total_points, 
+                                               100.0f * ml_depth_points / total_points, 
+                                               "ML_Depth_Point_Creation");
+        printf("DEPTH_DEBUG: Logged ML depth integration statistics (%d points)\n", ml_depth_points);
+        
+        // DEPTH_DEBUG: ML vs HSLAM depth comparison moved to activatePointsMT() for better timing
+    } else {
+        printf("DEPTH_DEBUG: WARNING - No ML depth points integrated despite ML depth available\n");
+    }
+    #endif
+    
     // Log using existing depth logger
     HSLAM::DepthLogger::logPointCreation(total_points, ml_depth_points);
 }
+
+#ifdef ENABLE_DEPTH_DEBUG
+/**
+ * @brief DEPTH_DEBUG: Compare ML depth values with mature HSLAM points after activation
+ * 
+ * @param newFrame Frame being processed
+ * @param ml_depth ML depth map
+ */
+void FullSystem::debugMLDepthComparison(FrameHessian* newFrame, const cv::Mat& ml_depth) {
+    static int debug_call_count = 0;
+    debug_call_count++;
+    
+    // Show first 10 comparisons for initial analysis, then every 5th for periodic monitoring
+    if (debug_call_count > 10 && debug_call_count % 5 != 0) {
+        return;
+    }
+    
+    printf("\n=== DEPTH_DEBUG: ML vs HSLAM Depth Comparison (Call #%d) ===\n", debug_call_count);
+    
+    // Count mature PointHessian objects across all frames
+    size_t total_mature_points = 0;
+    int ml_vs_hslam_comparisons = 0;
+    float ml_depth_sum = 0.0f;
+    float hslam_depth_sum = 0.0f;
+    float total_absolute_error = 0.0f;
+    float total_relative_error = 0.0f;
+    float min_ml_depth = std::numeric_limits<float>::max();
+    float max_ml_depth = 0.0f;
+    float min_hslam_depth = std::numeric_limits<float>::max();
+    float max_hslam_depth = 0.0f;
+    
+    // Compare ML depth with mature HSLAM points from all frames
+    for(FrameHessian* fh : frameHessians) {
+        total_mature_points += fh->pointHessians.size();
+        
+        for(PointHessian* ph : fh->pointHessians) {
+            // Get pixel coordinates of the point
+            float u = ph->u;
+            float v = ph->v;
+            
+            // Check bounds and get ML depth at this location
+            if(u >= 0 && v >= 0 && u < ml_depth.cols && v < ml_depth.rows) {
+                float ml_depth_val = ml_depth.at<float>((int)v, (int)u);
+                
+                if(ml_depth_val > 0.1f && ml_depth_val < 10.0f && !std::isnan(ml_depth_val)) {
+                    // Get HSLAM depth (convert from inverse depth)
+                    float hslam_depth = 1.0f / ph->idepth;
+                    
+                    if(hslam_depth > 0.1f && hslam_depth < 10.0f) {
+                        ml_depth_sum += ml_depth_val;
+                        hslam_depth_sum += hslam_depth;
+                        
+                        min_ml_depth = std::min(min_ml_depth, ml_depth_val);
+                        max_ml_depth = std::max(max_ml_depth, ml_depth_val);
+                        min_hslam_depth = std::min(min_hslam_depth, hslam_depth);
+                        max_hslam_depth = std::max(max_hslam_depth, hslam_depth);
+                        
+                        float abs_error = std::abs(ml_depth_val - hslam_depth);
+                        float rel_error = abs_error / hslam_depth * 100.0f;
+                        
+                        total_absolute_error += abs_error;
+                        total_relative_error += rel_error;
+                        
+                        ml_vs_hslam_comparisons++;
+                        
+                        // Sample points for detailed logging to avoid massive log files (every ~100th point)
+                        int sample_interval = std::max(1, (int)(total_mature_points / 20));  // Target ~20 samples per comparison
+                        if (ml_vs_hslam_comparisons % sample_interval == 0) {
+                            HSLAM::DepthLogger::logMLvsHSLAMComparison(u, v, ml_depth_val, hslam_depth, abs_error, rel_error);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Print comprehensive comparison statistics
+    printf("DEPTH_DEBUG: Mature Points Analysis:\n");
+    printf("  Total mature PointHessian objects: %zu\n", total_mature_points);
+    printf("  Successful ML vs HSLAM comparisons: %d\n", ml_vs_hslam_comparisons);
+    
+    if(ml_vs_hslam_comparisons > 0) {
+        float avg_ml_depth = ml_depth_sum / ml_vs_hslam_comparisons;
+        float avg_hslam_depth = hslam_depth_sum / ml_vs_hslam_comparisons;
+        float avg_abs_error = total_absolute_error / ml_vs_hslam_comparisons;
+        float avg_rel_error = total_relative_error / ml_vs_hslam_comparisons;
+        
+        printf("DEPTH_DEBUG: ML Depth - Range: [%.3f, %.3f]m, Avg: %.3fm\n",
+               min_ml_depth, max_ml_depth, avg_ml_depth);
+        printf("DEPTH_DEBUG: HSLAM Depth - Range: [%.3f, %.3f]m, Avg: %.3fm\n",
+               min_hslam_depth, max_hslam_depth, avg_hslam_depth);
+        printf("DEPTH_DEBUG: Error Analysis - Avg Abs: %.3fm, Avg Rel: %.1f%%\n",
+               avg_abs_error, avg_rel_error);
+        
+        // Log structured comparison to DepthLogger for detailed analysis
+        HSLAM::DepthLogger::logIntegrationStats(
+            ml_vs_hslam_comparisons, 
+            0,  // fused_pixels 
+            total_mature_points, 
+            (float)ml_vs_hslam_comparisons / total_mature_points * 100.0f,
+            "ML_vs_HSLAM_Comparison");
+            
+    } else {
+        printf("DEPTH_DEBUG: No successful ML vs HSLAM depth comparisons found\n");
+        printf("DEPTH_DEBUG: This may indicate timing issues or coordinate mismatches\n");
+    }
+    
+    printf("=== End ML vs HSLAM Depth Comparison ===\n\n");
+}
+#endif
 
 /**
  * @brief Sets pre-calculation values for the active frames
@@ -3514,11 +3649,6 @@ float FullSystem::getKeyframeRatio() const
 	return static_cast<float>(keyframeCount) / static_cast<float>(totalFrameCount);
 }
 
-size_t FullSystem::getKeyframeCount() const
-{
-	boost::lock_guard<boost::mutex> lock(trackMutex);
-	return allKeyFramesHistory.size();
-}
 
 size_t FullSystem::getTotalFrameCount() const
 {

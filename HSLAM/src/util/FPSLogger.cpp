@@ -68,23 +68,46 @@ void FPSLogger::logSlamPerformance(int processed_frames, double avg_ms_per_frame
     }
 }
 
-void FPSLogger::logMLPerformance(int total_inferences, int successful_inferences,
+void FPSLogger::logSlamPerformance(int processed_frames, int keyframes,
+                                  double avg_ms_per_frame, double fps, 
+                                  const std::string& component) {
+    std::string timestamp = getTimestamp();
+    
+    // Console output with keyframe information
+    printf("SLAM Performance [%s]: %d frames, %d keyframes, %.2fms/frame, %.1f fps\n",
+           component.c_str(), processed_frames, keyframes, avg_ms_per_frame, fps);
+    
+    // File logging (detailed)
+    if (log_file.is_open()) {
+        log_file << "[" << timestamp << "] " << component << " SLAM Performance:" << std::endl;
+        log_file << "  Processed Frames: " << processed_frames << std::endl;
+        log_file << "  Keyframes Created: " << keyframes << std::endl;
+        log_file << "  Average Time per Frame: " << std::fixed << std::setprecision(2) 
+                 << avg_ms_per_frame << " ms" << std::endl;
+        log_file << "  Frames per Second: " << std::fixed << std::setprecision(1) 
+                 << fps << " fps" << std::endl;
+        log_file << std::endl;
+        log_file.flush();
+    }
+}
+
+void FPSLogger::logMLPerformance(int total_keyframes, int successful_keyframes,
                                 float avg_inference_time_ms, float ml_utilization) {
     std::string timestamp = getTimestamp();
     std::string utilization_str = formatRate(ml_utilization);
-    float success_rate = (total_inferences > 0) ? 
-        (100.0f * successful_inferences / total_inferences) : 0.0f;
+    float success_rate = (total_keyframes > 0) ? 
+        (100.0f * successful_keyframes / total_keyframes) : 0.0f;
     
     // Console output (essential statistics)
-    printf("ML Performance: %d/%d inferences (%.1f%%), %.2fms avg, %s utilization\n",
-           successful_inferences, total_inferences, success_rate, 
+    printf("ML Performance: %d/%d keyframes with ML depth (%.1f%%), %.2fms avg, %s utilization\n",
+           successful_keyframes, total_keyframes, success_rate, 
            avg_inference_time_ms, utilization_str.c_str());
     
     // File logging (detailed)
     if (log_file.is_open()) {
-        log_file << "[" << timestamp << "] ML Inference Performance:" << std::endl;
-        log_file << "  Total Inferences: " << total_inferences << std::endl;
-        log_file << "  Successful Inferences: " << successful_inferences << std::endl;
+        log_file << "[" << timestamp << "] ML Keyframe Performance:" << std::endl;
+        log_file << "  Total Keyframes: " << total_keyframes << std::endl;
+        log_file << "  Successful Keyframes: " << successful_keyframes << std::endl;
         log_file << "  Success Rate: " << std::fixed << std::setprecision(1) 
                  << success_rate << "%" << std::endl;
         log_file << "  Average Inference Time: " << std::fixed << std::setprecision(2) 
