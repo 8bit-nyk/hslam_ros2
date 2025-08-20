@@ -2464,19 +2464,19 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                 float depth = ml_depth.at<float>(y, x);
                 
                 if(depth > 0.1f && depth < 10.0f && !std::isnan(depth)) {
-                    float idepth = 1.0f / depth;
-                    // BACK TO ORIGINAL: The debug document may have misdiagnosed the issue
-                    // The resolution fix was the main issue, uncertainty may have been acceptable
-                    // Testing if original uncertainty + resolution fix solves the problem
-                    float uncertainty = 0.08f + 0.1f * depth;  // Original ML uncertainty model
-                    
-                    impt->idepth_min = std::max(0.0f, idepth - uncertainty);
-                    impt->idepth_max = idepth + uncertainty;
-                    impt->idepth_GT = idepth;  // Store ML estimate as GT for validation
+                    const float u = 0.08f + 0.1f * depth;    // metres – existing model
+
+                    const float idepth        = 1.0f / depth;             // m⁻¹
+                    const float idepth_min_ml = 1.0f / (depth + u);       // m⁻¹
+                    const float idepth_max_ml = 1.0f / std::max(0.05f, depth - u); // m⁻¹ (ε avoids /0)
+
+                    impt->idepth_min = idepth_min_ml;
+                    impt->idepth_max = idepth_max_ml;
+                    impt->idepth_GT  = idepth;            // unchanged
                     
                     // DEPTH_DEBUG: ML point logging removed - better comparison available in activatePointsMT()
                     
-                    ml_depth_points++;
+                    ml_depth_points++;                    // unchanged
                 }
             }
             

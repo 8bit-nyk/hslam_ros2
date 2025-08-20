@@ -203,7 +203,7 @@ std::string DepthLogger::getTimestamp() {
 
 std::string DepthLogger::formatRate(float rate) {
     std::stringstream ss;
-    ss << std::fixed << std::setprecision(1) << (rate * 100.0f) << "%";
+    ss << std::fixed << std::setprecision(1) << rate << "%";
     return ss.str();
 }
 

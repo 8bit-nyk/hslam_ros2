@@ -408,6 +408,29 @@ double EnergyFunctional::calcLEnergyF_MT()
 
 	}
 	E += cDeltaF.cwiseProduct(cPriorF).dot(cDeltaF);
+	
+	// PHASE 2: Add ML depth constraints to bundle adjustment energy
+	// This constrains pose optimization to be consistent with ML depths
+	double ml_energy = 0;
+	int ml_constraints = 0;
+	for(EFFrame* f : frames) {
+		for(EFPoint* p : f->points) {
+			// Add ML depth residual if point has ML depth prior
+			if(p->data->hasDepthPrior && setting_mlDepthWeight > 0) {
+				float ml_residual = p->deltaF;  // p->deltaF = current_idepth - idepth_zero (ML depth)
+				float ml_weight = setting_mlDepthWeight;
+				ml_energy += ml_weight * ml_residual * ml_residual;
+				ml_constraints++;
+			}
+		}
+	}
+	E += ml_energy;
+	
+	static int debug_counter = 0;
+	if(debug_counter++ % 100 == 0 && ml_constraints > 0) {
+		printf("BUNDLE_ADJUSTMENT: Added %d ML depth constraints, energy=%.6f\n", 
+			   ml_constraints, ml_energy);
+	}
 
 	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,
 			this, _1, _2, _3, _4), 0, allPoints.size(), 50);

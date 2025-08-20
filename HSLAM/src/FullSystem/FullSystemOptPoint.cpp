@@ -86,7 +86,16 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 	float lastEnergy = 0;
 	float lastHdd=0;
 	float lastbd=0;
-	float currentIdepth=(point->idepth_max+point->idepth_min)*0.5f; // Initial depth from immature point
+	
+	// ML Depth Integration: Use ML depth as optimization starting point if available
+	float currentIdepth;
+	if(point->idepth_GT > 0) {
+		currentIdepth = point->idepth_GT;  // Start from accurate ML depth estimate
+		if(print) printf("USING ML DEPTH as starting point: %.3f (vs midpoint %.3f)\n", 
+						 currentIdepth, (point->idepth_max+point->idepth_min)*0.5f);
+	} else {
+		currentIdepth = (point->idepth_max+point->idepth_min)*0.5f; // Original fallback
+	}
 
 
 
@@ -118,6 +127,21 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 		H *= 1+lambda;
 		float step = (1.0/H) * lastbd;
 		float newIdepth = currentIdepth - step;
+		
+		// CRITICAL FIX: Enforce ML depth bounds during optimization
+		if(point->idepth_GT > 0 && setting_preserveMLDepthBounds) {
+			// Clamp optimization within ML depth bounds
+			if(newIdepth < point->idepth_min) {
+				newIdepth = point->idepth_min;
+				if(print) printf("OptPoint: Clamped to ML min bound %.3f (was %.3f)\n", 
+								newIdepth, currentIdepth - step);
+			}
+			if(newIdepth > point->idepth_max) {
+				newIdepth = point->idepth_max;
+				if(print) printf("OptPoint: Clamped to ML max bound %.3f (was %.3f)\n", 
+								newIdepth, currentIdepth - step);
+			}
+		}
 
 		float newHdd=0; float newbd=0; float newEnergy=0;
 		for(int i=0;i<nres;i++)

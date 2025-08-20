@@ -218,7 +218,9 @@ bool outputPC = false;
 bool setting_onlyLogKFPoses = true;
 bool setting_logStuff = true;
 
-
+// ML Depth Integration Settings
+bool setting_preserveMLDepthBounds = true;  // Preserve ML depth bounds during tracking
+float setting_mlDepthWeight = 1.0f;         // Weight for ML depth constraints in bundle adjustment
 
 bool goStepByStep = false;
 

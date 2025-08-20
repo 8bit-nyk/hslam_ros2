@@ -170,8 +170,9 @@ extern bool disableReconfigure;
 
 extern bool setting_onlyLogKFPoses;
 
-
-
+// ML Depth Integration Settings
+extern bool setting_preserveMLDepthBounds;
+extern float setting_mlDepthWeight;
 
 extern bool debugSaveImages;
 

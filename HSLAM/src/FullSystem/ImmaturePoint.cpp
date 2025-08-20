@@ -457,17 +457,33 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 
 
 	// ============== set new interval for idepth_min and idepth_max===================
-	if(dx*dx>dy*dy)
+	// CRITICAL FIX: Preserve ML depth bounds if available
+	if(idepth_GT > 0 && setting_preserveMLDepthBounds)
 	{
-		idepth_min = (pr[2]*(bestU-errorInPixel*dx) - pr[0]) / (hostToFrame_Kt[0] - hostToFrame_Kt[2]*(bestU-errorInPixel*dx));
-		idepth_max = (pr[2]*(bestU+errorInPixel*dx) - pr[0]) / (hostToFrame_Kt[0] - hostToFrame_Kt[2]*(bestU+errorInPixel*dx));
+		// Don't overwrite ML-based bounds - they are more accurate than photometric search
+		// Keep existing idepth_min and idepth_max which were set from ML depth
+		printf("PRESERVE_ML_BOUNDS: Keeping ML depth bounds [%.3f, %.3f] for GT depth %.3f\n", 
+			   idepth_min, idepth_max, idepth_GT);
+	}
+	else if(idepth_GT > 0)
+	{
+		printf("PRESERVE_ML_BOUNDS: ML depth GT=%.3f found but preservation DISABLED\n", idepth_GT);
 	}
 	else
 	{
-		idepth_min = (pr[2]*(bestV-errorInPixel*dy) - pr[1]) / (hostToFrame_Kt[1] - hostToFrame_Kt[2]*(bestV-errorInPixel*dy));
-		idepth_max = (pr[2]*(bestV+errorInPixel*dy) - pr[1]) / (hostToFrame_Kt[1] - hostToFrame_Kt[2]*(bestV+errorInPixel*dy));
+		// Standard photometric bounds for points without ML depth
+		if(dx*dx>dy*dy)
+		{
+			idepth_min = (pr[2]*(bestU-errorInPixel*dx) - pr[0]) / (hostToFrame_Kt[0] - hostToFrame_Kt[2]*(bestU-errorInPixel*dx));
+			idepth_max = (pr[2]*(bestU+errorInPixel*dx) - pr[0]) / (hostToFrame_Kt[0] - hostToFrame_Kt[2]*(bestU+errorInPixel*dx));
+		}
+		else
+		{
+			idepth_min = (pr[2]*(bestV-errorInPixel*dy) - pr[1]) / (hostToFrame_Kt[1] - hostToFrame_Kt[2]*(bestV-errorInPixel*dy));
+			idepth_max = (pr[2]*(bestV+errorInPixel*dy) - pr[1]) / (hostToFrame_Kt[1] - hostToFrame_Kt[2]*(bestV+errorInPixel*dy));
+		}
+		if(idepth_min > idepth_max) std::swap<float>(idepth_min, idepth_max);
 	}
-	if(idepth_min > idepth_max) std::swap<float>(idepth_min, idepth_max);
 
 
 	if(!std::isfinite(idepth_min) || !std::isfinite(idepth_max) || (idepth_max<0))

@@ -51,7 +51,9 @@ PointHessian::PointHessian(const ImmaturePoint* const rawPoint, CalibHessian* Hc
 	point_id = totalInstantCounter;
 	totalInstantCounter++;
 	host = rawPoint->host; // host frame
-	hasDepthPrior=false;
+	// ML Depth Integration: Transfer ML depth flag from ImmaturePoint
+	// hasDepthPrior=false;
+	hasDepthPrior = (rawPoint->idepth_GT > 0);  // ML depth available if GT depth set
 
 	idepth_hessian=0;
 	maxRelBaseline=0;
@@ -66,6 +68,7 @@ PointHessian::PointHessian(const ImmaturePoint* const rawPoint, CalibHessian* Hc
 	// my_type is block level where point was selected
 	my_type = rawPoint->my_type;
 
+	// Note: Depth is set in optimizeImmaturePoint, not here
 	setIdepthScaled((rawPoint->idepth_max + rawPoint->idepth_min)*0.5);
 	setPointStatus(PointHessian::INACTIVE);
 
