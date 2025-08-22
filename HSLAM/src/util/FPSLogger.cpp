@@ -4,6 +4,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <cmath>
 
 namespace HSLAM {
 
@@ -49,6 +50,18 @@ void FPSLogger::initialize(const std::string& results_dir, const std::string& da
 
 void FPSLogger::logSlamPerformance(int processed_frames, double avg_ms_per_frame, 
                                   double fps, const std::string& component) {
+    // Recompute if caller passed invalid metrics (e.g. INF / NAN → fps 0.0)
+    if (!std::isfinite(avg_ms_per_frame) || avg_ms_per_frame <= 0.0 ||
+        !std::isfinite(fps)              || fps              <= 0.0)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+        if (processed_frames > 0 && elapsed_ms > 0.0)
+        {
+            avg_ms_per_frame = elapsed_ms / processed_frames;
+            fps              = 1000.0 / avg_ms_per_frame;
+        }
+    }
     std::string timestamp = getTimestamp();
     
     // Console output (essential statistics)
@@ -71,6 +84,18 @@ void FPSLogger::logSlamPerformance(int processed_frames, double avg_ms_per_frame
 void FPSLogger::logSlamPerformance(int processed_frames, int keyframes,
                                   double avg_ms_per_frame, double fps, 
                                   const std::string& component) {
+    // Recompute if invalid values supplied
+    if (!std::isfinite(avg_ms_per_frame) || avg_ms_per_frame <= 0.0 ||
+        !std::isfinite(fps)              || fps              <= 0.0)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+        if (processed_frames > 0 && elapsed_ms > 0.0)
+        {
+            avg_ms_per_frame = elapsed_ms / processed_frames;
+            fps              = 1000.0 / avg_ms_per_frame;
+        }
+    }
     std::string timestamp = getTimestamp();
     
     // Console output with keyframe information
