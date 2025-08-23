@@ -1538,6 +1538,15 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 		{
 			boost::unique_lock<boost::mutex> crlock(coarseTrackerSwapMutex);
 			CoarseTracker* tmp = coarseTracker; coarseTracker=coarseTracker_forNewKF; coarseTracker_forNewKF=tmp;
+			
+			// Safety check: Ensure the swapped tracker is initialized
+			// This should not be needed anymore with Fix 1, but good to have as backup
+			if(coarseTracker->w[0] == 0 || coarseTracker->h[0] == 0) {
+				coarseTracker->makeK(&Hcalib);
+				if (!setting_debugout_runquiet) {
+					printf("CoarseTracker: Initialized swapped tracker with calibration data\n");
+				}
+			}
 		}
 
 		// Velocity = cumulativeForm();
@@ -2350,6 +2359,12 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		loopCloser->InsertKeyFrame(firstFrame->shell->frame, globalMap->GetMaxMPid());
 
 	initialized = true;
+	
+	// Initialize both CoarseTracker instances with calibration data
+	// This prevents dimension mismatch warnings when setting ML depth
+	coarseTracker->makeK(&Hcalib);
+	coarseTracker_forNewKF->makeK(&Hcalib);
+	
 	printf("INITIALIZE FROM INITIALIZER (%d pts)!\n", (int)firstFrame->pointHessians.size());
 }
 

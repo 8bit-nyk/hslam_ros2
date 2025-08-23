@@ -1011,6 +1011,15 @@ void CoarseTracker::setExternalDepthImage(const cv::Mat& depth_image)
         return;
     }
     
+    // Check if tracker is initialized (w[0] and h[0] are set by makeK())
+    if(w[0] == 0 || h[0] == 0) {
+        // Tracker not initialized yet with calibration data, skip depth setting
+        if (!setting_debugout_runquiet) {
+            printf("CoarseTracker: Skipping depth setting - tracker not initialized yet\n");
+        }
+        return;
+    }
+    
     // Validate dimensions
     if(depth_image.cols != w[0] || depth_image.rows != h[0]) {
         printf("WARNING: External depth image dimensions mismatch (%dx%d vs %dx%d)\n",
