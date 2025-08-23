@@ -2402,8 +2402,8 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 			{
 				float depth = gtDepth[i];  // Access depth at pixel (x, y)
 				
-				// Validate depth value (TUM RGB-D depth is scaled by 1/5000.0, values in meters)
-				if (depth > 0.1f && depth < 10.0f && std::isfinite(depth))
+				// Validate depth value - adaptive for any dataset range  
+				if (depth > 0.0f && std::isfinite(depth))
 				{
 					float idepth = 1.0f / depth;
 					float uncertainty = 0.01f * idepth;  // Small uncertainty for ground truth depth
@@ -2494,8 +2494,10 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
             if(!ml_depth.empty() && y < ml_depth.rows && x < ml_depth.cols) {
                 float depth = ml_depth.at<float>(y, x);
                 
-                if(depth > 0.1f && depth < 10.0f && !std::isnan(depth)) {
-                    const float u = 0.08f + 0.1f * depth;    // metres – existing model
+                if(depth > 0.0f && std::isfinite(depth)) {
+                    // Conservative uncertainty model: prevents ML drift while allowing reasonable constraints
+                    // Based on original model but capped for stability
+                    const float u = std::min(2.0f, 0.08f + 0.1f * depth);    // metres – conservative uncertainty, max 2m
 
                     const float idepth        = 1.0f / depth;             // m⁻¹
                     const float idepth_min_ml = 1.0f / (depth + u);       // m⁻¹
@@ -2606,11 +2608,11 @@ void FullSystem::debugMLDepthComparison(FrameHessian* newFrame, const cv::Mat& m
             if(u >= 0 && v >= 0 && u < ml_depth.cols && v < ml_depth.rows) {
                 float ml_depth_val = ml_depth.at<float>((int)v, (int)u);
                 
-                if(ml_depth_val > 0.1f && ml_depth_val < 10.0f && !std::isnan(ml_depth_val)) {
+                if(ml_depth_val > 0.0f && std::isfinite(ml_depth_val)) {
                     // Get HSLAM depth (convert from inverse depth)
                     float hslam_depth = 1.0f / ph->idepth;
                     
-                    if(hslam_depth > 0.1f && hslam_depth < 10.0f) {
+                    if(hslam_depth > 0.0f && std::isfinite(hslam_depth)) {
                         ml_depth_sum += ml_depth_val;
                         hslam_depth_sum += hslam_depth;
                         

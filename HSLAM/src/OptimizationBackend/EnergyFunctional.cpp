@@ -418,7 +418,21 @@ double EnergyFunctional::calcLEnergyF_MT()
 			// Add ML depth residual if point has ML depth prior
 			if(p->data->hasDepthPrior && setting_mlDepthWeight > 0) {
 				float ml_residual = p->deltaF;  // p->deltaF = current_idepth - idepth_zero (ML depth)
-				float ml_weight = setting_mlDepthWeight;
+				
+				// Conservative ML weighting: prevent systematic drift while using ML guidance
+				float current_idepth = p->data->idepth + p->deltaF;
+				float depth = (current_idepth > 1e-6f) ? (1.0f / current_idepth) : 1000.0f;
+				
+				// Distance factor: closer depths more reliable (as in CoarseTracker)
+				float distance_factor = 1.0f / (1.0f + depth * 0.1f);
+				
+				// Robust factor: down-weight outliers to prevent systematic bias accumulation
+				float abs_residual = std::abs(ml_residual);
+				float robust_factor = std::exp(-abs_residual * abs_residual * 2.0f); // Exponential down-weighting of outliers
+				
+				// Conservative base weight: ML guidance without overwhelming photometric tracking
+				float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor * 0.5f;
+				
 				ml_energy += ml_weight * ml_residual * ml_residual;
 				ml_constraints++;
 			}

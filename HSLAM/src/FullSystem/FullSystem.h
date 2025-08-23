@@ -263,8 +263,8 @@ public:
 		
 		int input_width = 518;
 		int input_height = 518;
-		float min_depth = 0.1f;
-		float max_depth = 10.0f;
+		float min_depth = 0.01f;  // Very permissive minimum (1cm)
+		float max_depth = 1000.0f; // Very permissive maximum (1km)
 		bool benchmark_enabled = false;
 	};
 	

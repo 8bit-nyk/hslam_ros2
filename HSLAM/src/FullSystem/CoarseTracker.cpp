@@ -1327,7 +1327,7 @@ void CoarseTracker::integrateExternalDepthL0()
 bool CoarseTracker::validateExternalDepth(float depth, int u, int v)
 {
     // Range validation
-    if(depth < 0.1f || depth > 10.0f) return false;
+    if(depth <= 0.0f || !std::isfinite(depth)) return false;
     
     // Finite validation
     if(!std::isfinite(depth)) return false;
@@ -1700,7 +1700,7 @@ void CoarseTracker::debugCompareMLvsHSLAMDepth()
             
             float ml_depth = external_depth_image.at<float>(y, x);
             
-            if (ml_depth > 0.1f && ml_depth < 10.0f && !std::isnan(ml_depth)) {
+            if (ml_depth > 0.0f && std::isfinite(ml_depth)) {
                 ml_available_count++;
                 
                 // Calculate depth difference  
