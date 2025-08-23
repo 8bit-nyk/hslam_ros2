@@ -1329,17 +1329,23 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
     
     // Store ML depth if available for unified pipeline
     if(ml_depth_available) {
-        // Fix Resolution Mismatch Issue: Adapt ML depth to HSLAM processing resolution
+        // Check resolution compatibility with HSLAM processing
         if(ml_depth_image.cols != wG[0] || ml_depth_image.rows != hG[0]) {
+            // Fallback: Resize ML depth if dimensions don't match (should be rare now)
             cv::Mat resized_ml_depth;
             cv::resize(ml_depth_image, resized_ml_depth, 
                       cv::Size(wG[0], hG[0]), 0, 0, cv::INTER_LINEAR);
             currentMLDepthImage = resized_ml_depth;
-            printf("DEBUG: ML Depth: Resized from %dx%d to %dx%d for HSLAM compatibility\n",
+            printf("WARNING: ML depth resolution mismatch - resized from %dx%d to %dx%d (consider using undistorted RGB input)\n",
                    ml_depth_image.cols, ml_depth_image.rows, wG[0], hG[0]);
         } else {
+            // Optimal case: Resolutions match, no resizing needed
             currentMLDepthImage = ml_depth_image;
-            // printf("DEBUG: ML depth available, resolution matches HSLAM (%dx%d)\n", wG[0], hG[0]);
+            static bool first_match_logged = false;
+            if (!first_match_logged) {
+                printf("✅ ML depth resolution matches HSLAM (%dx%d) - optimal pipeline\n", wG[0], hG[0]);
+                first_match_logged = true;
+            }
         }
     } else {
         // Clear any existing ML depth for pure monocular

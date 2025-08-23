@@ -648,14 +648,33 @@ int main(int argc, char **argv)
 
                 if (!skipFrame) {
                     if(ml_depth_enabled && fullSystem->ml_depth_enabled_) {
-                        // Load RGB version for ML depth processing
+                        // Use undistorted RGB if available, otherwise load original
                         cv::Mat rgb_color;
-                        std::string imagefile = reader->getFilename(i);
-                        if (!imagefile.empty()) {
-                            rgb_color = cv::imread(imagefile, cv::IMREAD_COLOR);
-                            if (!rgb_color.empty()) {
-                                // DEBUG: Loaded RGB from file %dx%d\n", rgb_color.cols, rgb_color.rows);
-                                cv::cvtColor(rgb_color, rgb_color, cv::COLOR_BGR2RGB);
+                        
+                        // Check if we have undistorted color channels available
+                        if (img->useColour && img->r_image != nullptr && img->g_image != nullptr && img->b_image != nullptr) {
+                            // Create RGB image from undistorted color channels at correct resolution (640x480)
+                            rgb_color = cv::Mat::zeros(img->h, img->w, CV_8UC3);
+                            
+                            // Convert float channels (0-256) to 8-bit RGB
+                            for (int y = 0; y < img->h; ++y) {
+                                for (int x = 0; x < img->w; ++x) {
+                                    int idx = y * img->w + x;
+                                    rgb_color.at<cv::Vec3b>(y, x)[0] = (unsigned char)std::min(255.0f, std::max(0.0f, img->r_image[idx]));
+                                    rgb_color.at<cv::Vec3b>(y, x)[1] = (unsigned char)std::min(255.0f, std::max(0.0f, img->g_image[idx])); 
+                                    rgb_color.at<cv::Vec3b>(y, x)[2] = (unsigned char)std::min(255.0f, std::max(0.0f, img->b_image[idx]));
+                                }
+                            }
+                        } else {
+                            // Fallback: Load original RGB from file (will need resizing in FullSystem)
+                            std::string imagefile = reader->getFilename(i);
+                            if (!imagefile.empty()) {
+                                rgb_color = cv::imread(imagefile, cv::IMREAD_COLOR);
+                                if (!rgb_color.empty()) {
+                                    cv::cvtColor(rgb_color, rgb_color, cv::COLOR_BGR2RGB);
+                                    printf("WARNING: Using original RGB file at %dx%d (will be resized to match HSLAM)\n", 
+                                           rgb_color.cols, rgb_color.rows);
+                                }
                             }
                         }
                         
