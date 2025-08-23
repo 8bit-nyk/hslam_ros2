@@ -68,7 +68,22 @@ inline int getdir (std::string dir, std::vector<std::string> &files)
     	std::string name = std::string(dirp->d_name);
 
     	if(name != "." && name != "..")
-    		files.push_back(name);
+    	{
+    		// Only add files with valid image extensions to prevent crashes on non-image files
+    		std::string lower_name = name;
+    		std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+    		
+    		if(lower_name.find(".png") != std::string::npos || 
+    		   lower_name.find(".jpg") != std::string::npos || 
+    		   lower_name.find(".jpeg") != std::string::npos)
+    		{
+    			files.push_back(name);
+    		}
+    		else
+    		{
+    			printf("Skipping non-image file: %s\n", name.c_str());
+    		}
+    	}
     }
     closedir(dp);
 
@@ -360,10 +375,33 @@ private:
 	MinimalImageB* getImageRaw_internal(int id, int unused)
 	{
 	    assert(!use16Bit);
+	    
+	    // Additional safety check for valid image files
+	    if(id >= (int)files.size() || id < 0) {
+	    	printf("Invalid image ID: %d (max: %d)\n", id, (int)files.size()-1);
+	    	return nullptr;
+	    }
+	    
+	    std::string filename = files[id];
+	    std::string lower_filename = filename;
+	    std::transform(lower_filename.begin(), lower_filename.end(), lower_filename.begin(), ::tolower);
+	    
+	    // Double-check file extension as safety net
+	    if(lower_filename.find(".png") == std::string::npos && 
+	       lower_filename.find(".jpg") == std::string::npos && 
+	       lower_filename.find(".jpeg") == std::string::npos) {
+	    	printf("Attempting to read non-image file: %s - skipping\n", filename.c_str());
+	    	return nullptr;
+	    }
+	    
 		if(!isZipped)
 		{
 			// CHANGE FOR ZIP FILE
-			return IOWrap::readImageBW_8U(files[id]);
+			MinimalImageB* result = IOWrap::readImageBW_8U(files[id]);
+			if(result == nullptr) {
+				printf("Failed to read image file: %s\n", files[id].c_str());
+			}
+			return result;
 		}
 		else
 		{
@@ -428,7 +466,10 @@ private:
 				exit(1);
 			} else {
 				MinimalImage<unsigned short>* minimg = IOWrap::readImageBW_16U(files[id]);
-				assert(minimg);
+				if(minimg == nullptr) {
+					printf("Failed to load 16-bit image at index %d, skipping frame\n", id);
+					return nullptr;
+				}
 				ImageAndExposure* ret2 = undistort->undistort<unsigned short>(
 						minimg,
 						(exposures.size() == 0 ? 1.0f : exposures[id]),
@@ -443,6 +484,11 @@ private:
 			if(useColour){
 				MinimalImageB* rimg; MinimalImageB* gimg; MinimalImageB* bimg;
 				MinimalImageB* minimg = getImageRaw3_internal(id, 0, rimg, gimg, bimg);
+				
+				if(minimg == nullptr) {
+					printf("Failed to load color image at index %d, skipping frame\n", id);
+					return nullptr;
+				}
 
 				ImageAndExposure* ret2 = undistort->undistort<unsigned char>(
 						minimg,
@@ -462,6 +508,10 @@ private:
 				return ret2;
 			} else {
 		MinimalImageB* minimg = getImageRaw_internal(id, 0);
+		if(minimg == nullptr) {
+			printf("Failed to load image at index %d, skipping frame\n", id);
+			return nullptr;
+		}
 		ImageAndExposure* ret2 = undistort->undistort<unsigned char>(
 				minimg,
 				(exposures.size() == 0 ? 1.0f : exposures[id]),

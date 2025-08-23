@@ -442,14 +442,8 @@ Vec5 FullSystem::trackNewCoarse(FrameHessian* fh, bool writePose)
 		}
 	}
 
-	// DEPTH_DEBUG: Pass ML depth to CoarseTracker for debugging comparison (TEMPORARY)
-	#ifdef ENABLE_DEPTH_DEBUG
-	if(!currentMLDepthImage.empty() && initialized) {
-		coarseTracker->setExternalDepthImage(currentMLDepthImage);
-		// printf("DEPTH_DEBUG: Passed ML depth (%dx%d) to CoarseTracker for comparison\n", 
-		//        currentMLDepthImage.cols, currentMLDepthImage.rows);
-	}
-	#endif
+	// ML depth forwarding moved to keyframe processing (makeKeyFrame) to avoid per-frame overhead
+	// and ensure proper dual-instance handling
 
 	assert(allFrameHistory.size() > 0);
 	// If there is at least one frame in history, set pose initialization.
@@ -1938,6 +1932,22 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					// NEW: Set as ML reference for tracking (CoarseTracker-style pattern)
 					setMLReference(fh->frameID, ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
 				
+					// PHASE 3: Forward ML depth to CoarseTracker for frame-to-frame tracking (KEYFRAMES ONLY)
+					if(initialized && !currentMLDepthImage.empty()) {
+						// Ensure ML depth dimensions match processing resolution
+						cv::Mat ml_depth_for_tracker;
+						if(currentMLDepthImage.cols != wG[0] || currentMLDepthImage.rows != hG[0]) {
+							cv::resize(currentMLDepthImage, ml_depth_for_tracker, 
+									  cv::Size(wG[0], hG[0]), 0, 0, cv::INTER_LINEAR);
+						} else {
+							ml_depth_for_tracker = currentMLDepthImage;
+						}
+						
+						// Forward to BOTH CoarseTracker instances (CRITICAL for trajectory quality)
+						coarseTracker->setExternalDepthImage(ml_depth_for_tracker);
+						coarseTracker_forNewKF->setExternalDepthImage(ml_depth_for_tracker);
+					}
+					
 					printf("makeKeyFrame: ✅ ML processing successful for frame %d (%.1fms inference, conf=%.2f, total=%.1fms)\n",
 						   fh->frameID, ml_result.inference_time_ms, ml_result.confidence, (float)processing_time);
 					
@@ -3548,13 +3558,22 @@ void FullSystem::updateCoarseTrackerDepth()
                 printf("WARNING: Invalid depth image format for CoarseTracker integration\n");
             }
         } else {
-            // Clear depth from both trackers if no depth available
-            coarseTracker->clearExternalDepthImage();
-            coarseTracker_forNewKF->clearExternalDepthImage();
+            // CRITICAL FIX for Phase 3: Don't clear ML depth when currentDepthImage is empty
+            // currentDepthImage is for RGB-D depth, but we might have ML depth
+            // Only clear if we know there's no depth source at all
+            bool main_has_ml_depth = coarseTracker->hasExternalDepth();
+            bool kf_has_ml_depth = coarseTracker_forNewKF->hasExternalDepth();
             
-            if(!setting_debugout_runquiet) {
-                printf("FullSystem: Cleared depth from CoarseTracker instances\n");
+            if(!main_has_ml_depth && !kf_has_ml_depth) {
+                // Only clear if neither tracker has any depth (ML or RGB-D)
+                coarseTracker->clearExternalDepthImage();
+                coarseTracker_forNewKF->clearExternalDepthImage();
+                
+                if(!setting_debugout_runquiet) {
+                    printf("FullSystem: Cleared depth from CoarseTracker instances\n");
+                }
             }
+            // Otherwise preserve ML depth that was set during keyframe processing
         }
     }
 }

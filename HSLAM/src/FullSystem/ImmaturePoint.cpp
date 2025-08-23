@@ -462,12 +462,14 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 	{
 		// Don't overwrite ML-based bounds - they are more accurate than photometric search
 		// Keep existing idepth_min and idepth_max which were set from ML depth
-		printf("PRESERVE_ML_BOUNDS: Keeping ML depth bounds [%.3f, %.3f] for GT depth %.3f\n", 
-			   idepth_min, idepth_max, idepth_GT);
+		// DEBUG: Console output commented out to reduce verbosity
+		// printf("PRESERVE_ML_BOUNDS: Keeping ML depth bounds [%.3f, %.3f] for GT depth %.3f\n", 
+		//        idepth_min, idepth_max, idepth_GT);
 	}
 	else if(idepth_GT > 0)
 	{
-		printf("PRESERVE_ML_BOUNDS: ML depth GT=%.3f found but preservation DISABLED\n", idepth_GT);
+		// DEBUG: Console output commented out to reduce verbosity
+		// printf("PRESERVE_ML_BOUNDS: ML depth GT=%.3f found but preservation DISABLED\n", idepth_GT);
 	}
 	else
 	{
