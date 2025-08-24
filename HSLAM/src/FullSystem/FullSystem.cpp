@@ -35,6 +35,7 @@
  
 #include "stdio.h"
 #include "util/globalFuncs.h"
+#include "util/FPSLogger.h"
 #include <Eigen/LU>
 #include <algorithm>
 #include "IOWrapper/ImageDisplay.h"
@@ -59,6 +60,7 @@
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/features2d.hpp>
+#include <opencv2/imgproc.hpp>
 #include <thread>  // For std::this_thread::sleep_for
 
 #include "OptimizationBackend/EnergyFunctional.h"
@@ -1509,13 +1511,87 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 		// =========================== Init using image if needed =========================
 		if(coarseInitializer->frameID<0)	// first frame set. fh is kept by coarseInitializer.
 		{
-
+			// Start initialization timing
+			init_start_time_ = std::chrono::high_resolution_clock::now();
+			printf("\n=== INITIALIZATION STARTED ===\n");
+			
 			coarseInitializer->setFirst(&Hcalib, fh);
+			
+			// Store RGB image for ML processing (leverage existing conversion pattern from warmup)
+			if (setting_useMLForInitialization && ml_depth_enabled_ && image && image->image) {
+				cv::Mat gray_image(image->h, image->w, CV_32FC1, image->image);
+				cv::Mat gray_8u;
+				gray_image.convertTo(gray_8u, CV_8UC1);
+				cv::cvtColor(gray_8u, first_frame_rgb_, cv::COLOR_GRAY2RGB);
+				
+				printf("Initialization: RGB image prepared for ML processing (%dx%d)\n",
+					   first_frame_rgb_.cols, first_frame_rgb_.rows);
+			}
+			
+			// Process ML depth synchronously for metric scale initialization
+			if (setting_useMLForInitialization && ml_depth_enabled_ && 
+				ml_processor_ && ml_processor_->isReady() && !first_frame_rgb_.empty()) {
+				
+				printf("Initialization: Processing ML depth for metric scale...\n");
+				auto ml_start = std::chrono::high_resolution_clock::now();
+				
+				try {
+					// Use existing ML processing pattern from makeKeyFrame
+					auto ml_result = ml_processor_->processKeyframeDetailed(first_frame_rgb_);
+					
+					auto ml_end = std::chrono::high_resolution_clock::now();
+					ml_init_processing_time_ms_ = std::chrono::duration<double, std::milli>(
+						ml_end - ml_start).count();
+					
+					if (ml_result.success && !ml_result.depth_map.empty()) {
+						// Store in CoarseInitializer using existing method
+						coarseInitializer->setMLDepth(ml_result.depth_map, ml_result.confidence);
+						printf("Initialization: ML depth processed successfully (%.1fms, conf=%.2f)\n",
+							   ml_init_processing_time_ms_, ml_result.confidence);
+					} else {
+						printf("Initialization: ML depth processing failed, will use photometric scale\n");
+						ml_init_processing_time_ms_ = 0.0; // Reset since it failed
+					}
+				} catch (const std::exception& e) {
+					printf("Initialization: ML processing exception: %s\n", e.what());
+					ml_init_processing_time_ms_ = 0.0;
+				}
+			}
+			
+			// Check if ML depth was already available from background processing (fallback)
+			else if (fh->has_ml_depth_.load()) {
+				boost::unique_lock<boost::mutex> lock(fh->ml_mutex_);
+				if (fh->ml_depth_map_ && !fh->ml_depth_map_->empty()) {
+					coarseInitializer->setMLDepth(*fh->ml_depth_map_, fh->ml_confidence_.load());
+					printf("Initialization: ML depth stored for first frame (conf: %.2f)\n", 
+						   fh->ml_confidence_.load());
+				}
+			}
 		}
 		else if(coarseInitializer->trackFrame(fh, outputWrapper))	// if SNAPPED
 		{
 
 			initializeFromInitializer(fh);
+			
+			// Calculate total initialization time
+			auto init_end = std::chrono::high_resolution_clock::now();
+			total_init_time_ms_ = std::chrono::duration<double, std::milli>(
+				init_end - init_start_time_).count();
+			
+			// Calculate pure tracking time (total - ML processing)
+			double tracking_time_ms = total_init_time_ms_ - ml_init_processing_time_ms_;
+			
+			// Log initialization performance using FPSLogger
+			FPSLogger::logInitializationPerformance(
+				total_init_time_ms_,
+				ml_init_processing_time_ms_,
+				tracking_time_ms,
+				using_metric_scale_ ? "Metric" : "Photometric",
+				init_scale_factor_,
+				init_points_count_,
+				using_metric_scale_ ? coarseInitializer->mlConfidence : 0.0f
+			);
+			
 			lock.unlock();
 			deliverTrackedFrame(fh, true);
 		}
@@ -2256,13 +2332,54 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	firstFrame->pointHessiansOut.reserve(wG[0]*hG[0]*0.2f);
 
 
-	float sumID=1e-5, numID=1e-5;
-	for(int i=0;i<coarseInitializer->numPoints[0];i++)
-	{
-		sumID += coarseInitializer->points[0][i].iR;
-		numID++;
+	// NEW: Compute metric scale if ML depth available
+	float rescaleFactor;
+	bool usingMetricScale = false;
+	
+	float metricScaleFactor = coarseInitializer->computeMetricScaleFactor();
+	
+	if (setting_useMLForInitialization && metricScaleFactor > 0 && 
+		coarseInitializer->mlConfidence > setting_mlInitConfidenceThreshold) {
+		// Use ML-based metric scale
+		rescaleFactor = metricScaleFactor;
+		usingMetricScale = true;
+		
+		printf("=== INITIALIZATION WITH METRIC SCALE ===\n");
+		printf("Using ML depth to establish metric scale: %.3f\n", rescaleFactor);
+		printf("ML confidence: %.2f\n", coarseInitializer->mlConfidence);
+		
+	} else {
+		// Fallback to original arbitrary scale
+		float sumID=1e-5, numID=1e-5;
+		for(int i=0;i<coarseInitializer->numPoints[0];i++)
+		{
+			sumID += coarseInitializer->points[0][i].iR;
+			numID++;
+		}
+		rescaleFactor = 1 / (sumID / numID);
+		
+		printf("=== INITIALIZATION WITH ARBITRARY SCALE ===\n");
+		printf("Warning: ML depth unavailable or low confidence\n");
+		printf("Using photometric scale: %.3f\n", rescaleFactor);
 	}
-	float rescaleFactor = 1 / (sumID / numID);
+	
+	// Store initialization method and scale factor for logging
+	if (setting_useMLForInitialization && metricScaleFactor > 0 && 
+		coarseInitializer->mlConfidence > setting_mlInitConfidenceThreshold) {
+		using_metric_scale_ = true;
+		init_scale_factor_ = metricScaleFactor;
+	} else {
+		using_metric_scale_ = false;
+		init_scale_factor_ = rescaleFactor;
+	}
+	
+	// VALIDATION DEBUG: Show clear ML benefit
+	printf("🔍 VALIDATION: Scale Factor = %.4f (%.1f%% different from 1.0)\n", 
+		   rescaleFactor, fabs(rescaleFactor - 1.0) * 100.0);
+	printf("🔍 VALIDATION: Using %s scale for initialization\n",
+		   using_metric_scale_ ? "METRIC (ML-guided)" : "ARBITRARY (photometric)");
+	printf("🔍 VALIDATION: ML Initialization %s\n",
+		   setting_useMLForInitialization ? "ENABLED" : "DISABLED");
 
 	// randomly sub-select the points I need.
 	float keepPercentage = setting_desiredPointDensity / coarseInitializer->numPoints[0];
@@ -2312,6 +2429,24 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		ph->setIdepthZero(ph->idepth);
 		ph->hasDepthPrior = true;
 		ph->setPointStatus(PointHessian::ACTIVE);
+		
+		// NEW: If using metric scale, also set ML depth prior
+		if (usingMetricScale && coarseInitializer->hasMLDepth) {
+			int u = (int)(point->u + 0.5f);
+			int v = (int)(point->v + 0.5f);
+			
+			if (u >= 0 && v >= 0 && 
+				u < coarseInitializer->firstFrameMLDepth.cols && 
+				v < coarseInitializer->firstFrameMLDepth.rows) {
+				
+				float mlDepth = coarseInitializer->firstFrameMLDepth.at<float>(v, u);
+				if (mlDepth > 0 && std::isfinite(mlDepth)) {
+					// Point already initialized with metric scale
+					// hasDepthPrior flag indicates ML depth available
+					ph->hasDepthPrior = true;
+				}
+			}
+		}
 
 		firstFrame->pointHessians.push_back(ph);
 		ef->insertPoint(ph);
@@ -2326,6 +2461,9 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 			globalMap->AddMapPoint(pMP);
 		}
 	}
+	
+	// Store points count for logging
+	init_points_count_ = firstFrame->pointHessians.size();
 
 
 	// indirect!: Add indirect point to global map
@@ -3716,6 +3854,22 @@ void FullSystem::printKeyframeStats() const
 				   << " " << std::fixed << std::setprecision(4) << keyframeRatio << "\n";
 		numsLog->flush();
 	}
+}
+
+void FullSystem::printInitializationPerformance() const
+{
+	printf("\n=== Initialization Performance ===\n");
+	printf("Method: %s\n", using_metric_scale_ ? "Metric (ML-based)" : "Photometric");
+	printf("Total Time: %.1f ms\n", total_init_time_ms_);
+	if (ml_init_processing_time_ms_ > 0) {
+		printf("  ML Processing: %.1f ms (%.1f%%)\n", 
+			   ml_init_processing_time_ms_,
+			   (ml_init_processing_time_ms_/total_init_time_ms_)*100);
+	}
+	printf("  Tracking: %.1f ms\n", total_init_time_ms_ - ml_init_processing_time_ms_);
+	printf("Scale Factor: %.4f\n", init_scale_factor_);
+	printf("Initial Points: %d\n", init_points_count_);
+	printf("=================================\n");
 }
 
 // =================== MLDepthProcessor Initialization ===================

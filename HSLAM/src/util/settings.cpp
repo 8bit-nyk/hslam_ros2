@@ -222,6 +222,12 @@ bool setting_logStuff = true;
 bool setting_preserveMLDepthBounds = true;  // Preserve ML depth bounds during tracking
 float setting_mlDepthWeight = 1.0f;         // Weight for ML depth constraints in bundle adjustment
 
+// ML Initialization Settings
+bool setting_useMLForInitialization = true;        // Enable ML-based metric scale initialization
+float setting_mlInitConfidenceThreshold = 0.5f;   // Min confidence for ML scale usage
+int setting_mlInitMinPoints = 20;                  // Min points for robust scale estimation  
+bool setting_mlReinitializationEnabled = true;    // Enable ML depth for re-initialization
+
 bool goStepByStep = false;
 
 

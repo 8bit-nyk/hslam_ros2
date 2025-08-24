@@ -32,6 +32,7 @@
 #include "util/settings.h"
 #include "vector"
 #include <math.h>
+#include <opencv2/opencv.hpp>
 
 
 
@@ -86,6 +87,10 @@ public:
 
 	void setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHessian);
 	bool trackFrame(FrameHessian* newFrameHessian, std::vector<IOWrap::Output3DWrapper*> &wraps);
+	
+	// ML depth initialization methods
+	void setMLDepth(const cv::Mat& mlDepth, float confidence);
+	float computeMetricScaleFactor();
 
 	int frameID;
 	bool fixAffine;
@@ -99,6 +104,11 @@ public:
 
 	FrameHessian* firstFrame;
 	FrameHessian* newFrame;
+	
+	// ML depth storage for metric scale initialization
+	cv::Mat firstFrameMLDepth;      // ML depth for first frame
+	bool hasMLDepth;                // ML depth availability flag
+	float mlConfidence;             // ML quality metric
 private:
 	Mat33 K[PYR_LEVELS];
 	Mat33 Ki[PYR_LEVELS];

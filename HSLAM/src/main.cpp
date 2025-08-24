@@ -113,6 +113,7 @@ int main(int argc, char **argv)
 		("ml-fp16", "Enable FP16 optimization for GPU inference", cxxopts::value<bool>()->default_value("false"))
 		("ml-gpu-device", "GPU device ID for ML inference", cxxopts::value<int>()->default_value("0"))
 		("ml-gpu-memory", "GPU memory limit in MB", cxxopts::value<size_t>()->default_value("2048"))
+		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("h,help", "Print usage")
     ;
 
@@ -158,6 +159,9 @@ int main(int argc, char **argv)
 	bool ml_fp16_enabled = result["ml-fp16"].as<bool>();
 	int ml_gpu_device = result["ml-gpu-device"].as<int>();
 	size_t ml_gpu_memory_mb = result["ml-gpu-memory"].as<size_t>();
+	
+	// ML initialization control (for A/B testing)
+	bool ml_init_enabled = result["ml-init"].as<bool>();
 
 	if(source.empty() || calib.empty()) { std::cout<< "Path to images or calibration not provided! cannot function without them. exit." << std::endl; return(0);}
 
@@ -278,6 +282,9 @@ int main(int argc, char **argv)
 	FullSystem* fullSystem = new FullSystem();
 	fullSystem->setGammaFunction(reader->getPhotometricGamma());
 	fullSystem->linearizeOperation = (playbackSpeed == 0);
+	
+	// Apply ML initialization setting from command line
+	setting_useMLForInitialization = ml_init_enabled;
 
 	if(LoopClosure)
 	{

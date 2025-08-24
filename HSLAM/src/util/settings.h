@@ -174,6 +174,12 @@ extern bool setting_onlyLogKFPoses;
 extern bool setting_preserveMLDepthBounds;
 extern float setting_mlDepthWeight;
 
+// ML Initialization Settings
+extern bool setting_useMLForInitialization;      // Enable ML-based initialization
+extern float setting_mlInitConfidenceThreshold;  // Min confidence for ML scale
+extern int setting_mlInitMinPoints;              // Min points for scale estimation
+extern bool setting_mlReinitializationEnabled;   // Enable for re-init
+
 extern bool debugSaveImages;
 
 

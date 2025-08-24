@@ -100,6 +100,27 @@ public:
                                         float performance_impact);
     
     /**
+     * @brief Log initialization performance metrics
+     * 
+     * @param total_time_ms Total initialization time in milliseconds
+     * @param ml_time_ms ML depth processing time (0 if not used)
+     * @param tracking_time_ms Pure tracking/triangulation time
+     * @param scale_method "Metric" or "Photometric"
+     * @param scale_factor The scale factor computed
+     * @param points_initialized Number of points initialized
+     * @param ml_confidence ML confidence score (0 if not used)
+     */
+    static void logInitializationPerformance(
+        double total_time_ms,
+        double ml_time_ms,
+        double tracking_time_ms,
+        const std::string& scale_method,
+        float scale_factor,
+        int points_initialized,
+        float ml_confidence = 0.0f
+    );
+    
+    /**
      * @brief Close logger and finalize log file
      */
     static void finalize();

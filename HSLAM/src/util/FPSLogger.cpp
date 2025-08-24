@@ -213,6 +213,43 @@ void FPSLogger::logPerformanceComparison(double monocular_fps, double ml_enhance
     debugLog(message, "Performance");
 }
 
+void FPSLogger::logInitializationPerformance(
+    double total_time_ms, double ml_time_ms, double tracking_time_ms,
+    const std::string& scale_method, float scale_factor, 
+    int points_initialized, float ml_confidence) {
+    
+    std::string timestamp = getTimestamp();
+    
+    // Console output (brief summary)
+    printf("\nInitialization Complete: %s scale (%.1fms total, %d points)\n",
+           scale_method.c_str(), total_time_ms, points_initialized);
+    
+    // File logging (detailed, human-readable format)
+    if (log_file.is_open()) {
+        log_file << "[" << timestamp << "] Initialization Performance:" << std::endl;
+        log_file << "  Total Time: " << std::fixed << std::setprecision(1) 
+                 << total_time_ms << " ms" << std::endl;
+        
+        if (ml_time_ms > 0) {
+            log_file << "  ML Depth Processing: " << std::fixed << std::setprecision(1)
+                     << ml_time_ms << " ms (" 
+                     << std::setprecision(1) << (ml_time_ms/total_time_ms)*100 
+                     << "%)" << std::endl;
+            log_file << "  ML Confidence: " << std::fixed << std::setprecision(2)
+                     << ml_confidence << std::endl;
+        }
+        
+        log_file << "  Tracking/Triangulation: " << std::fixed << std::setprecision(1)
+                 << tracking_time_ms << " ms" << std::endl;
+        log_file << "  Scale Method: " << scale_method << std::endl;
+        log_file << "  Scale Factor: " << std::fixed << std::setprecision(4) 
+                 << scale_factor << std::endl;
+        log_file << "  Points Initialized: " << points_initialized << std::endl;
+        log_file << std::endl;
+        log_file.flush();
+    }
+}
+
 void FPSLogger::finalize() {
     if (log_file.is_open()) {
         auto end_time = std::chrono::steady_clock::now();

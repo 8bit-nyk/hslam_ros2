@@ -247,6 +247,16 @@ public:
 	};
 	MLMetrics ml_metrics_;
 	
+	// Initialization performance tracking
+	std::chrono::high_resolution_clock::time_point init_start_time_;
+	double ml_init_processing_time_ms_ = 0.0;
+	double total_init_time_ms_ = 0.0;
+	bool using_metric_scale_ = false;
+	float init_scale_factor_ = 1.0f;
+	int init_points_count_ = 0;
+	
+	// RGB storage for first frame ML processing
+	cv::Mat first_frame_rgb_;
 	
 	// ML Depth Processor Management
 public:
@@ -291,6 +301,7 @@ public:
 	float getKeyframeRatio() const;
 	size_t getTotalFrameCount() const;
 	void printKeyframeStats() const;
+	void printInitializationPerformance() const;
 	
 private:
 	// Helper methods for ML integration
