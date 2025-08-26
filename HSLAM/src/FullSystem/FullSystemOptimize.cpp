@@ -840,16 +840,23 @@ std::vector<VecX> FullSystem::getNullspaces(
 		if(i==1) nullspaces_affB.push_back(nullspace_x0);
 	}
 
-	VecX nullspace_x0(n);
-	nullspace_x0.setZero();
-	for(FrameHessian* fh : frameHessians)
-	{
-		nullspace_x0.segment<6>(CPARS+fh->idx*8) = fh->nullspaces_scale;
-		nullspace_x0.segment<3>(CPARS+fh->idx*8) *= SCALE_XI_TRANS_INVERSE;
-		nullspace_x0.segment<3>(CPARS+fh->idx*8+3) *= SCALE_XI_ROT_INVERSE;
+	// Conditional scale nullspace: only add for pure monocular (no metric scale)
+	if (!using_metric_scale_) {
+		VecX nullspace_x0(n);
+		nullspace_x0.setZero();
+		for(FrameHessian* fh : frameHessians)
+		{
+			nullspace_x0.segment<6>(CPARS+fh->idx*8) = fh->nullspaces_scale;
+			nullspace_x0.segment<3>(CPARS+fh->idx*8) *= SCALE_XI_TRANS_INVERSE;
+			nullspace_x0.segment<3>(CPARS+fh->idx*8+3) *= SCALE_XI_ROT_INVERSE;
+		}
+		nullspaces_x0_pre.push_back(nullspace_x0);
+		nullspaces_scale.push_back(nullspace_x0);
+		printf("[SCALE_DEBUG] Added scale nullspace (monocular mode) - scale drift allowed\n");
+	} else {
+		printf("[SCALE_DEBUG] Skipped scale nullspace (metric scale mode) - scale preserved\n");
 	}
-	nullspaces_x0_pre.push_back(nullspace_x0);
-	nullspaces_scale.push_back(nullspace_x0);
+	// When using_metric_scale_ is true, scale is observable from ML depth - don't add scale nullspace
 
 	return nullspaces_x0_pre;
 }

@@ -2386,9 +2386,11 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		coarseInitializer->mlConfidence > setting_mlInitConfidenceThreshold) {
 		using_metric_scale_ = true;
 		init_scale_factor_ = metricScaleFactor;
+		printf("[SCALE_DEBUG] Metric scale mode ENABLED - scale nullspace will be SKIPPED in optimization\n");
 	} else {
 		using_metric_scale_ = false;
 		init_scale_factor_ = rescaleFactor;
+		printf("[SCALE_DEBUG] Monocular mode - scale nullspace will be ADDED in optimization\n");
 	}
 	
 	// VALIDATION DEBUG: Show clear ML benefit
