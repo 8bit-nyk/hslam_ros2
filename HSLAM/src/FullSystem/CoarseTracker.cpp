@@ -1266,10 +1266,15 @@ void CoarseTracker::integrateExternalDepthL0()
     int integrated_count = 0;
     int fused_count = 0;
     
-    // Process each pixel in the depth image
+    // ONLY process pixels that already have photometric depth (sparse fusion)
     for(int v = 0; v < h[0]; v++) {
         for(int u = 0; u < w[0]; u++) {
             int idx = u + v * w[0];
+            
+            // SKIP pixels that don't have existing photometric depth
+            if(weightSums[0][idx] <= 0) {
+                continue;
+            }
             
             // Get external depth value
             float external_depth = external_depth_image.at<float>(v, u);
@@ -1282,38 +1287,27 @@ void CoarseTracker::integrateExternalDepthL0()
             float external_idepth = 1.0f / external_depth;
             float external_weight = calculateConfidenceWeight(external_depth, u, v, true);
             
-            // Check if map point already exists at this location
-            bool has_map_point = (weightSums[0][idx] > 0);
+            // Fuse ML depth with existing photometric depth only
+            float existing_idepth = idepth[0][idx] / weightSums[0][idx];
+            float existing_weight = weightSums[0][idx];
             
-            if(has_map_point) {
-                // Fuse external depth with existing map point
-                float existing_idepth = idepth[0][idx] / weightSums[0][idx];
-                float existing_weight = weightSums[0][idx];
-                
-                // Weighted combination of map point and external depth
-                float combined_weight = existing_weight + external_weight;
-                float combined_idepth = (existing_idepth * existing_weight + 
-                                       external_idepth * external_weight) / combined_weight;
-                
-                idepth[0][idx] = combined_idepth * combined_weight;
-                weightSums[0][idx] = combined_weight;
-                
-                fused_count++;
-            } else {
-                // Use external depth directly
-                idepth[0][idx] = external_idepth * external_weight;
-                weightSums[0][idx] = external_weight;
-                
-                integrated_count++;
-            }
+            // Weighted combination of photometric and ML depth
+            float combined_weight = existing_weight + external_weight;
+            float combined_idepth = (existing_idepth * existing_weight + 
+                                   external_idepth * external_weight) / combined_weight;
+            
+            idepth[0][idx] = combined_idepth * combined_weight;
+            weightSums[0][idx] = combined_weight;
+            
+            fused_count++;
         }
     }
     
-    last_stats.pixels_from_external_depth = integrated_count;
+    last_stats.pixels_from_external_depth = 0;  // No new pixels added, only fusion
     last_stats.pixels_fused = fused_count;
     
     // Debug-only logging for external depth integration details
-    HSLAM::DepthLogger::logExternalDepthDetails(integrated_count, fused_count);
+    HSLAM::DepthLogger::logExternalDepthDetails(0, fused_count);
 }
 
 /**
