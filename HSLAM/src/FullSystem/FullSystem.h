@@ -273,10 +273,14 @@ public:
 		
 		int input_width = 518;
 		int input_height = 518;
-		float min_depth = 0.01f;  // Very permissive minimum (1cm)
-		float max_depth = 1000.0f; // Very permissive maximum (1km)
+		float min_depth = 0.01f;  // Default/fallback minimum (1cm)
+		float max_depth = 10.0f; // Default/fallback maximum (10m - appropriate for indoor scenes)
 		bool benchmark_enabled = false;
+		
 	};
+	
+	// ML configuration storage  
+	MLConfig ml_config_;
 	
 	                              
 	/**

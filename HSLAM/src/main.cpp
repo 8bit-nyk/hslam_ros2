@@ -658,8 +658,11 @@ int main(int argc, char **argv)
                         // Use undistorted RGB if available, otherwise load original
                         cv::Mat rgb_color;
                         
-                        // Check if we have undistorted color channels available
-                        if (img->useColour && img->r_image != nullptr && img->g_image != nullptr && img->b_image != nullptr) {
+                        // CRITICAL FIX: The undistorted color channel conversion was corrupting ML input
+                        // Revert to original file loading approach that was working on Aug 20th
+                        // TODO: Fix the float channel conversion properly later
+                        if (false && img->useColour && img->r_image != nullptr && img->g_image != nullptr && img->b_image != nullptr) {
+                            // DISABLED - This conversion was corrupting the ML input images
                             // Create RGB image from undistorted color channels at correct resolution (640x480)
                             rgb_color = cv::Mat::zeros(img->h, img->w, CV_8UC3);
                             
@@ -679,8 +682,7 @@ int main(int argc, char **argv)
                                 rgb_color = cv::imread(imagefile, cv::IMREAD_COLOR);
                                 if (!rgb_color.empty()) {
                                     cv::cvtColor(rgb_color, rgb_color, cv::COLOR_BGR2RGB);
-                                    printf("WARNING: Using original RGB file at %dx%d (will be resized to match HSLAM)\n", 
-                                           rgb_color.cols, rgb_color.rows);
+                                    // Restored to working Aug 20th approach - loading from original file
                                 }
                             }
                         }

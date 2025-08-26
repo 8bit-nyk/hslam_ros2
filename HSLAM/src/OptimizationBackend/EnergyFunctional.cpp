@@ -413,25 +413,31 @@ double EnergyFunctional::calcLEnergyF_MT()
 	// This constrains pose optimization to be consistent with ML depths
 	double ml_energy = 0;
 	int ml_constraints = 0;
+	int total_points = 0;
+	int points_with_depth_prior = 0;
+	
 	for(EFFrame* f : frames) {
 		for(EFPoint* p : f->points) {
+			total_points++;
 			// Add ML depth residual if point has ML depth prior
+			if(p->data->hasDepthPrior) points_with_depth_prior++;
 			if(p->data->hasDepthPrior && setting_mlDepthWeight > 0) {
-				float ml_residual = p->deltaF;  // p->deltaF = current_idepth - idepth_zero (ML depth)
+				float ml_residual = p->deltaF;  // p->deltaF = current_idepth - idepth_zero (correct: ML depth reference)
 				
 				// Conservative ML weighting: prevent systematic drift while using ML guidance
 				float current_idepth = p->data->idepth + p->deltaF;
 				float depth = (current_idepth > 1e-6f) ? (1.0f / current_idepth) : 1000.0f;
 				
-				// Distance factor: closer depths more reliable (as in CoarseTracker)
+				// Distance factor: closer depths more reliable
 				float distance_factor = 1.0f / (1.0f + depth * 0.1f);
 				
 				// Robust factor: down-weight outliers to prevent systematic bias accumulation
+				// Keep the improved robust factor (0.5f) which is more permissive than the original 2.0f
 				float abs_residual = std::abs(ml_residual);
-				float robust_factor = std::exp(-abs_residual * abs_residual * 2.0f); // Exponential down-weighting of outliers
+				float robust_factor = std::exp(-abs_residual * abs_residual * 0.5f);
 				
-				// Conservative base weight: ML guidance without overwhelming photometric tracking
-				float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor * 0.5f;
+				// Simple ML weighting: restore to August 21st approach
+				float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor;
 				
 				ml_energy += ml_weight * ml_residual * ml_residual;
 				ml_constraints++;
@@ -440,10 +446,16 @@ double EnergyFunctional::calcLEnergyF_MT()
 	}
 	E += ml_energy;
 	
+	// Debug output for ML constraints when they are found
 	static int debug_counter = 0;
-	if(debug_counter++ % 100 == 0 && ml_constraints > 0) {
-		printf("BUNDLE_ADJUSTMENT: Added %d ML depth constraints, energy=%.6f\n", 
-			   ml_constraints, ml_energy);
+	if(debug_counter++ % 50 == 0) {
+		if(ml_constraints > 0) {
+			printf("BUNDLE_ADJUSTMENT: Added %d ML constraints (of %d points), energy=%.6f, avg_residual=%.4f\n", 
+				   ml_constraints, total_points, ml_energy, ml_energy/ml_constraints);
+		} else if(points_with_depth_prior > 0) {
+			printf("BUNDLE_ADJUSTMENT: WARNING - %d points have ML depth but 0 constraints added (weights too low?)\n", 
+				   points_with_depth_prior);
+		}
 	}
 
 	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,

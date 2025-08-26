@@ -213,8 +213,14 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 	p->lastResiduals[0].second = ResState::OOB;
 	p->lastResiduals[1].first = 0;
 	p->lastResiduals[1].second = ResState::OOB;
-	p->setIdepthZero(currentIdepth);
-	p->setIdepth(currentIdepth);
+	// For ML depth constraints: set idepth_zero to original ML depth, not optimized depth
+	if(point->idepth_GT > 0) {
+		p->setIdepthZero(point->idepth_GT);  // ML depth as reference for bundle adjustment constraints
+		p->setIdepth(currentIdepth);         // Optimized depth as current estimate
+	} else {
+		p->setIdepthZero(currentIdepth);     // Original behavior for non-ML points
+		p->setIdepth(currentIdepth);
+	}
 	p->setPointStatus(PointHessian::ACTIVE);
 
 	// Do all of the required optimization calculations for the new points

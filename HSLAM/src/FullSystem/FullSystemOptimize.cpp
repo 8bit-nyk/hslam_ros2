@@ -301,7 +301,11 @@ bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,f
 				sumNID += fabsf(ph->idepth_backup);
 				numID++;
 
-                ph->setIdepthZero(ph->idepth_backup + step_ph);
+                // CRITICAL FIX: Don't overwrite idepth_zero for ML points
+                // This preserves ML reference depth for bundle adjustment constraints
+                if(!ph->hasDepthPrior) {
+                    ph->setIdepthZero(ph->idepth_backup + step_ph);
+                }
 			}
 		}
 	}
@@ -323,7 +327,11 @@ bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,f
 				sumNID += fabsf(ph->idepth_backup);
 				numID++;
 
-                ph->setIdepthZero(ph->idepth_backup + stepfacD*ph->step);
+                // CRITICAL FIX: Don't overwrite idepth_zero for ML points
+                // This preserves ML reference depth for bundle adjustment constraints
+                if(!ph->hasDepthPrior) {
+                    ph->setIdepthZero(ph->idepth_backup + stepfacD*ph->step);
+                }
 			}
 		}
 	}

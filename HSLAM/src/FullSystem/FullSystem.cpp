@@ -2237,33 +2237,51 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 	// =========================== add new Immature points & new residuals =========================
-	// Unified depth handling: Check for ML depth first, then RGB-D depth
-	if(!currentMLDepthImage.empty() && initialized) {
-		// Use ML depth for enhanced point creation
-		if(!setting_debugout_runquiet) {
-			printf("makeNewTraces: Using ML depth (%dx%d) for enhanced tracking\n", 
-			       currentMLDepthImage.cols, currentMLDepthImage.rows);
-		}
-		makeNewTracesWithMLDepth(fh, currentMLDepthImage);
-		
-		// Clear ML depth after use
-		currentMLDepthImage = cv::Mat();
-	} else {
-		// Use RGB-D depth if available, otherwise pure monocular
+	// UNIFIED depth handling: Use makeNewTraces for all cases with ML depth guidance
+	{
+		// Prepare depth information for unified processing
 		float* depthData = nullptr;
+		bool hasMLDepth = false;
+		
+		// Check for ML depth first (preferred)
+		if(!currentMLDepthImage.empty() && initialized) {
+			hasMLDepth = true;
+			if(!setting_debugout_runquiet) {
+				printf("makeNewTraces: Using ML depth (%dx%d) as guidance for enhanced tracking\n", 
+				       currentMLDepthImage.cols, currentMLDepthImage.rows);
+			}
+		}
+		
+		// Check for RGB-D depth as fallback
 		{
 			boost::unique_lock<boost::mutex> lock(rgbd_depth_mutex_);
 			if(!currentDepthImage.empty() && currentDepthImage.type() == CV_32FC1) {
 				depthData = (float*)currentDepthImage.data;
-				if(!setting_debugout_runquiet) {
+				if(!hasMLDepth && !setting_debugout_runquiet) {
 					printf("makeNewTraces: Using RGB-D depth (%dx%d)\n", 
 					       currentDepthImage.cols, currentDepthImage.rows);
 				}
-			} else if(!setting_debugout_runquiet) {
+			}
+		}
+		
+		// Check for ML depth first, then RGB-D depth
+		if(hasMLDepth) {
+			// Use ML depth for enhanced point creation
+			if(!setting_debugout_runquiet) {
+				printf("makeNewTraces: Using ML depth (%dx%d) for enhanced tracking\n", 
+				       currentMLDepthImage.cols, currentMLDepthImage.rows);
+			}
+			makeNewTracesWithMLDepth(fh, currentMLDepthImage);
+			
+			// Clear ML depth after use
+			currentMLDepthImage = cv::Mat();
+		} else {
+			// Use RGB-D depth if available, otherwise pure monocular
+			makeNewTraces(fh, depthData);
+			if(!depthData && !setting_debugout_runquiet) {
 				printf("makeNewTraces: Using pure monocular (no depth available)\n");
 			}
 		}
-		makeNewTraces(fh, depthData);
 	}
 
 
@@ -2628,7 +2646,11 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
             
             ImmaturePoint* impt = new ImmaturePoint(x, y, newFrame, selectionMap[i], &Hcalib);
             
-            // ML depth integration
+            // Store original photometric bounds before ML modification
+            float photometric_min = impt->idepth_min;
+            float photometric_max = impt->idepth_max;
+            
+            // ML depth integration - GUIDE rather than REPLACE photometric search
             if(!ml_depth.empty() && y < ml_depth.rows && x < ml_depth.cols) {
                 float depth = ml_depth.at<float>(y, x);
                 
