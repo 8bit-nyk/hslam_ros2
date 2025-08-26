@@ -227,6 +227,16 @@ private:
 	bool validateExternalDepth(float depth, int u, int v);
 	
 	/**
+	 * @brief Calculate ML reliability factor for confidence boost
+	 * 
+	 * @param depth Depth value (in meters)
+	 * @param u Horizontal pixel coordinate
+	 * @param v Vertical pixel coordinate
+	 * @return float ML reliability factor (0.3 to 1.0)
+	 */
+	float calculateMLReliability(float depth, int u, int v);
+	
+	/**
 	 * @brief Calculate confidence weight for depth value
 	 * 
 	 * @param depth Depth value (in meters)

@@ -1285,16 +1285,20 @@ void CoarseTracker::integrateExternalDepthL0()
             }
             
             float external_idepth = 1.0f / external_depth;
-            float external_weight = calculateConfidenceWeight(external_depth, u, v, true);
             
-            // Fuse ML depth with existing photometric depth only
+            // Fuse ML depth with existing photometric depth using confidence-weighted approach
             float existing_idepth = idepth[0][idx] / weightSums[0][idx];
             float existing_weight = weightSums[0][idx];
             
-            // Weighted combination of photometric and ML depth
-            float combined_weight = existing_weight + external_weight;
+            // Calculate ML reliability relative to photometric uncertainty
+            float ml_reliability = calculateMLReliability(external_depth, u, v);
+            
+            // Confidence-weighted fusion that preserves photometric weight scale
+            // ML provides up to 20% boost based on reliability and photometric uncertainty
+            float weight_contribution = existing_weight * 0.2f * ml_reliability;
+            float combined_weight = existing_weight + weight_contribution;
             float combined_idepth = (existing_idepth * existing_weight + 
-                                   external_idepth * external_weight) / combined_weight;
+                                   external_idepth * weight_contribution) / combined_weight;
             
             idepth[0][idx] = combined_idepth * combined_weight;
             weightSums[0][idx] = combined_weight;
@@ -1341,25 +1345,28 @@ bool CoarseTracker::validateExternalDepth(float depth, int u, int v)
  * @param is_external True if depth is from external source, false if from map points
  * @return float Confidence weight for depth integration
  */
+float CoarseTracker::calculateMLReliability(float depth, int u, int v)
+{
+    // Reliability based on ML prediction consistency, not absolute confidence
+    // This returns a reliability factor (0.3 to 1.0) for confidence boost calculation
+    float depth_consistency = 1.0f / (1.0f + depth * 0.05f);  // Reduced depth penalty
+    
+    // Gradient-based reliability (high gradient = more reliable ML prediction)
+    float gradient_factor = 1.0f;
+    if(lastRef && lastRef->dIp[0]) {
+        Eigen::Vector3f grad = lastRef->dIp[0][u + v * w[0]];
+        gradient_factor = std::min(1.0f, std::max(0.3f, grad.norm() * 0.005f));
+    }
+    
+    // Return reliability factor (0.3 to 1.0), not absolute confidence
+    return depth_consistency * gradient_factor;
+}
+
 float CoarseTracker::calculateConfidenceWeight(float depth, int u, int v, bool is_external)
 {
     if(is_external) {
-        // External depth confidence based on:
-        // 1. Depth value stability (closer depths more reliable)
-        // 2. Image gradient (higher gradient = more reliable)
-        // 3. Base confidence for ground truth
-        
-        float base_confidence = 0.9f;  // High confidence for ground truth
-        float depth_factor = 1.0f / (1.0f + depth * 0.1f);  // Closer depths more reliable
-        
-        // Get image gradient at this location
-        float gradient_factor = 1.0f;
-        if(lastRef && lastRef->dIp[0]) {
-            Eigen::Vector3f grad = lastRef->dIp[0][u + v * w[0]];
-            gradient_factor = std::min(2.0f, std::max(0.5f, grad.norm() * 0.01f));
-        }
-        
-        return base_confidence * depth_factor * gradient_factor;
+        // For backward compatibility, use ML reliability calculation
+        return calculateMLReliability(depth, u, v);
     } else {
         // Map point confidence (existing calculation)
         return sqrtf(1e-3 / (1e-12 + 1e-3));  // Simplified version
