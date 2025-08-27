@@ -852,9 +852,9 @@ std::vector<VecX> FullSystem::getNullspaces(
 		}
 		nullspaces_x0_pre.push_back(nullspace_x0);
 		nullspaces_scale.push_back(nullspace_x0);
-		printf("[SCALE_DEBUG] Added scale nullspace (monocular mode) - scale drift allowed\n");
+		// printf("[SCALE_DEBUG] Added scale nullspace (monocular mode) - scale drift allowed\n");
 	} else {
-		printf("[SCALE_DEBUG] Skipped scale nullspace (metric scale mode) - scale preserved\n");
+		// printf("[SCALE_DEBUG] Skipped scale nullspace (metric scale mode) - scale preserved\n");
 	}
 	// When using_metric_scale_ is true, scale is observable from ML depth - don't add scale nullspace
 
