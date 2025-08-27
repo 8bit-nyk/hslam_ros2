@@ -89,7 +89,7 @@ public:
 	bool trackFrame(FrameHessian* newFrameHessian, std::vector<IOWrap::Output3DWrapper*> &wraps);
 	
 	// ML depth initialization methods
-	void setMLDepth(const cv::Mat& mlDepth, float confidence);
+	void setMLDepth(const cv::Mat& mlDepth, float confidence, float meanDepth = 0.0f);
 	float computeMetricScaleFactor();
 
 	int frameID;
@@ -107,6 +107,7 @@ public:
 	
 	// ML depth storage for metric scale initialization
 	cv::Mat firstFrameMLDepth;      // ML depth for first frame
+	float mlMeanDepth;              // ML mean depth for streamlined scale computation
 	bool hasMLDepth;                // ML depth availability flag
 	float mlConfidence;             // ML quality metric
 private:

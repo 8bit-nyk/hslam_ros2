@@ -28,13 +28,14 @@ public:
         bool success = false;
         float inference_time_ms = 0.0f;
         float confidence = 1.0f;  // Default high confidence for successful processing
+        float mean_depth = 0.0f;  // ML depth mean for streamlined scale computation
         std::string error_message;
         
         ProcessingResult() = default;
         
-        ProcessingResult(const cv::Mat& depth, float time_ms, float conf = 1.0f)
+        ProcessingResult(const cv::Mat& depth, float time_ms, float conf = 1.0f, float mean = 0.0f)
             : depth_map(depth.clone()), success(!depth.empty()), 
-              inference_time_ms(time_ms), confidence(conf) {}
+              inference_time_ms(time_ms), confidence(conf), mean_depth(mean) {}
     };
 
 private:

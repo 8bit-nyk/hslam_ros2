@@ -1544,10 +1544,10 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 						ml_end - ml_start).count();
 					
 					if (ml_result.success && !ml_result.depth_map.empty()) {
-						// Store in CoarseInitializer using existing method
-						coarseInitializer->setMLDepth(ml_result.depth_map, ml_result.confidence);
-						printf("Initialization: ML depth processed successfully (%.1fms, conf=%.2f)\n",
-							   ml_init_processing_time_ms_, ml_result.confidence);
+						// Store in CoarseInitializer with mean depth for streamlined scale computation
+						coarseInitializer->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.mean_depth);
+						printf("Initialization: ML depth processed successfully (%.1fms, conf=%.2f, mean=%.2fm)\n",
+							   ml_init_processing_time_ms_, ml_result.confidence, ml_result.mean_depth);
 					} else {
 						printf("Initialization: ML depth processing failed, will use photometric scale\n");
 						ml_init_processing_time_ms_ = 0.0; // Reset since it failed
@@ -1562,9 +1562,13 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 			else if (fh->has_ml_depth_.load()) {
 				boost::unique_lock<boost::mutex> lock(fh->ml_mutex_);
 				if (fh->ml_depth_map_ && !fh->ml_depth_map_->empty()) {
-					coarseInitializer->setMLDepth(*fh->ml_depth_map_, fh->ml_confidence_.load());
-					printf("Initialization: ML depth stored for first frame (conf: %.2f)\n", 
-						   fh->ml_confidence_.load());
+					// Compute mean depth for fallback case (background processing doesn't compute it)
+					cv::Scalar mean_depth_scalar = cv::mean(*fh->ml_depth_map_);
+					float mean_depth = static_cast<float>(mean_depth_scalar[0]);
+					
+					coarseInitializer->setMLDepth(*fh->ml_depth_map_, fh->ml_confidence_.load(), mean_depth);
+					printf("Initialization: ML depth stored for first frame (conf: %.2f, mean: %.2fm)\n", 
+						   fh->ml_confidence_.load(), mean_depth);
 				}
 			}
 		}
@@ -2362,9 +2366,9 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		rescaleFactor = metricScaleFactor;
 		usingMetricScale = true;
 		
-		printf("=== INITIALIZATION WITH METRIC SCALE ===\n");
-		printf("Using ML depth to establish metric scale: %.3f\n", rescaleFactor);
-		printf("ML confidence: %.2f\n", coarseInitializer->mlConfidence);
+		printf("=== INITIALIZATION WITH METRIC SCALE (STREAMLINED) ===\n");
+		printf("Using ML mean depth directly as metric scale: %.3f\n", rescaleFactor);
+		printf("ML confidence: %.2f (streamlined approach - no photometric comparison)\n", coarseInitializer->mlConfidence);
 		
 	} else {
 		// Fallback to original arbitrary scale
@@ -2393,13 +2397,19 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		printf("[SCALE_DEBUG] Monocular mode - scale nullspace will be ADDED in optimization\n");
 	}
 	
-	// VALIDATION DEBUG: Show clear ML benefit
+	// VALIDATION DEBUG: Show streamlined ML approach benefits
 	printf("🔍 VALIDATION: Scale Factor = %.4f (%.1f%% different from 1.0)\n", 
 		   rescaleFactor, fabs(rescaleFactor - 1.0) * 100.0);
 	printf("🔍 VALIDATION: Using %s scale for initialization\n",
-		   using_metric_scale_ ? "METRIC (ML-guided)" : "ARBITRARY (photometric)");
-	printf("🔍 VALIDATION: ML Initialization %s\n",
+		   using_metric_scale_ ? "METRIC (ML mean direct)" : "ARBITRARY (photometric)");
+	printf("🔍 VALIDATION: ML Initialization %s (streamlined approach)\n",
 		   setting_useMLForInitialization ? "ENABLED" : "DISABLED");
+	
+	// SCALE MONITORING: Track scale evolution for validation
+	if (using_metric_scale_) {
+		printf("[SCALE_MONITOR] Reference scale established: %.3f (ML mean depth)\n", rescaleFactor);
+		printf("[SCALE_MONITOR] No photometric comparison - direct ML scale usage\n");
+	}
 
 	// randomly sub-select the points I need.
 	float keepPercentage = setting_desiredPointDensity / coarseInitializer->numPoints[0];

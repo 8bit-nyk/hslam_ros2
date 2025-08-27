@@ -1203,8 +1203,9 @@ void CoarseInitializer::makeNN()
  * 
  * @param mlDepth ML depth image (CV_32F format)
  * @param confidence ML depth confidence score [0,1]
+ * @param meanDepth ML mean depth for streamlined scale computation
  */
-void CoarseInitializer::setMLDepth(const cv::Mat& mlDepth, float confidence)
+void CoarseInitializer::setMLDepth(const cv::Mat& mlDepth, float confidence, float meanDepth)
 {
     if (mlDepth.empty() || mlDepth.type() != CV_32F) {
         printf("CoarseInitializer: Invalid ML depth format\n");
@@ -1213,67 +1214,33 @@ void CoarseInitializer::setMLDepth(const cv::Mat& mlDepth, float confidence)
     
     firstFrameMLDepth = mlDepth.clone();
     mlConfidence = confidence;
+    mlMeanDepth = meanDepth;
     hasMLDepth = true;
+    
+    printf("CoarseInitializer: ML depth stored (mean=%.2fm, confidence=%.2f)\n", 
+           mlMeanDepth, confidence);
     
     printf("CoarseInitializer: ML depth stored (size: %dx%d, confidence: %.2f)\n", 
            mlDepth.cols, mlDepth.rows, confidence);
 }
 
 /**
- * @brief Compute metric scale factor from ML depth vs photometric depth
+ * @brief Compute metric scale factor using ML mean depth directly (streamlined approach)
  * 
  * @return float Metric scale factor, or -1 if computation failed
  */
 float CoarseInitializer::computeMetricScaleFactor()
 {
-    if (!hasMLDepth || firstFrameMLDepth.empty()) {
+    if (!hasMLDepth || mlMeanDepth <= 0.0f) {
         printf("CoarseInitializer: No ML depth available for scale computation\n");
         return -1.0f;
     }
     
-    float sumRatios = 0;
-    int validCount = 0;
+    // Streamlined approach: Use ML mean depth directly as metric scale
+    float metricScale = mlMeanDepth;
     
-    printf("CoarseInitializer: Computing scale from %d points\n", numPoints[0]);
-    
-    // Match ML depths with initialized points at level 0 (highest resolution)
-    for (int i = 0; i < numPoints[0]; i++) {
-        Pnt* point = &points[0][i];
-        
-        int u = (int)(point->u + 0.5f);
-        int v = (int)(point->v + 0.5f);
-        
-        if (u >= 0 && v >= 0 && u < firstFrameMLDepth.cols && v < firstFrameMLDepth.rows) {
-            float mlDepth = firstFrameMLDepth.at<float>(v, u);
-            
-            if (mlDepth > 0.1f && mlDepth < 100.0f && std::isfinite(mlDepth) && point->iR > 0) {
-                // Convert photometric inverse depth to depth
-                float photometricDepth = 1.0f / point->iR;
-                float ratio = mlDepth / photometricDepth;
-                
-                // Robust averaging (exclude extreme outliers)
-                if (ratio > 0.1f && ratio < 10.0f) {
-                    sumRatios += ratio;
-                    validCount++;
-                    
-                    if (validCount <= 5) { // Debug first few matches
-                        printf("  Point %d: ML=%.2f, Photo=%.2f, ratio=%.3f\n", 
-                               i, mlDepth, photometricDepth, ratio);
-                    }
-                }
-            }
-        }
-    }
-    
-    if (validCount < setting_mlInitMinPoints) {
-        printf("CoarseInitializer: Insufficient valid ML depth matches (%d < %d)\n", 
-               validCount, setting_mlInitMinPoints);
-        return -1.0f;
-    }
-    
-    float metricScale = sumRatios / validCount;
-    printf("CoarseInitializer: Computed metric scale factor: %.3f from %d points\n", 
-           metricScale, validCount);
+    printf("CoarseInitializer: Using ML mean depth as metric scale: %.3f\n", metricScale);
+    printf("CoarseInitializer: Streamlined approach - direct ML scale (no photometric comparison)\n");
     
     return metricScale;
 }

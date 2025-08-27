@@ -131,6 +131,10 @@ MLDepthProcessor::ProcessingResult MLDepthProcessor::processKeyframeDetailed(con
         double min_depth, max_depth;
         cv::minMaxLoc(result.depth_map, &min_depth, &max_depth);
         
+        // Compute mean depth for streamlined scale computation
+        cv::Scalar mean_depth_scalar = cv::mean(result.depth_map);
+        detailed_result.mean_depth = static_cast<float>(mean_depth_scalar[0]);
+        
         printf("MLDepthProcessor: Detailed processing successful (%.1fms, range: %.2f-%.2fm)\n", 
                detailed_result.inference_time_ms, min_depth, max_depth);
     } else {
