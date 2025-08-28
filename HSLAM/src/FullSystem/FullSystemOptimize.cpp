@@ -437,7 +437,11 @@ void FullSystem::loadSateBackup()
 		{
 			ph->setIdepth(ph->idepth_backup);
 
-            ph->setIdepthZero(ph->idepth_backup);
+            // CRITICAL FIX: Don't overwrite idepth_zero for ML points during backup restoration
+            // This preserves ML reference depth even when optimization backtracks
+            if(!ph->hasDepthPrior) {
+                ph->setIdepthZero(ph->idepth_backup);
+            }
 		}
 
 	}
