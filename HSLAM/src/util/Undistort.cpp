@@ -720,7 +720,7 @@ void Undistort::undistort_colour(MinimalImage<T>* r_image, MinimalImage<T>* g_im
 		else
 		{
 			for (int j = 0, size = w * h; j < size; ++j)
-				out_channels[i][j] = channels[i]->data[i];
+				out_channels[i][j] = channels[i]->data[j];  // FIXED: use [j] to copy all pixels
 		}
 	}
 }

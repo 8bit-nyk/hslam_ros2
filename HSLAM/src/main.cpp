@@ -49,27 +49,20 @@ inline std::istream& operator>>(std::istream& is, RGBDAssociation& assoc) {
 using namespace HSLAM;
 
 /**
- * Efficiently converts HSLAM's undistorted float channels to RGB Mat for ML processing
- * Uses vectorized OpenCV operations instead of manual per-pixel loops
+ * Converts HSLAM's undistorted float channels to RGB Mat for ML processing
  */
 cv::Mat convertUndistortedToRGB(ImageAndExposure* img) {
-    // Create BGR Mat to exactly match original manual code behavior
     cv::Mat rgb_color = cv::Mat(img->h, img->w, CV_8UC3);
     
-    // Use manual clamping logic exactly as original code did:
-    // rgb_color.at<cv::Vec3b>(y, x)[0] = (unsigned char)std::min(255.0f, std::max(0.0f, img->b_image[idx]));
-    // rgb_color.at<cv::Vec3b>(y, x)[1] = (unsigned char)std::min(255.0f, std::max(0.0f, img->g_image[idx])); 
-    // rgb_color.at<cv::Vec3b>(y, x)[2] = (unsigned char)std::min(255.0f, std::max(0.0f, img->r_image[idx]));
-    
+    // Optimized conversion using direct pointer access
+    unsigned char* rgb_ptr = rgb_color.ptr<unsigned char>(0);
     int total_pixels = img->h * img->w;
-    for (int idx = 0; idx < total_pixels; idx++) {
-        int y = idx / img->w;
-        int x = idx % img->w;
-        
-        // Exact replication of original manual code
-        rgb_color.at<cv::Vec3b>(y, x)[0] = (unsigned char)std::min(255.0f, std::max(0.0f, img->b_image[idx]));
-        rgb_color.at<cv::Vec3b>(y, x)[1] = (unsigned char)std::min(255.0f, std::max(0.0f, img->g_image[idx]));
-        rgb_color.at<cv::Vec3b>(y, x)[2] = (unsigned char)std::min(255.0f, std::max(0.0f, img->r_image[idx]));
+    
+    for (int i = 0; i < total_pixels; i++) {
+        // BGR order for OpenCV Mat
+        rgb_ptr[i * 3 + 0] = (unsigned char)std::min(255.0f, std::max(0.0f, img->b_image[i]));
+        rgb_ptr[i * 3 + 1] = (unsigned char)std::min(255.0f, std::max(0.0f, img->g_image[i]));
+        rgb_ptr[i * 3 + 2] = (unsigned char)std::min(255.0f, std::max(0.0f, img->r_image[i]));
     }
     
     return rgb_color;
@@ -685,47 +678,13 @@ int main(int argc, char **argv)
                         // Use undistorted RGB if available, otherwise load original
                         cv::Mat rgb_color;
                         
-                        // FIXED: Use undistorted RGB channels at correct resolution (640x480)
-                        // This eliminates the 752x480 -> 640x480 resize warning in ML processing
-                        // Check if undistortion produced useful color data
+                        // Use DataReader's undistorted RGB channels for all datasets
                         if (img->useColour && img->r_image != nullptr && img->g_image != nullptr && img->b_image != nullptr) {
-                            // For TUM (PINHOLE with "No Rectification"), use direct file loading
-                            // For EuRoC (RadTan with rectification 752→640), use undistorted channels
-                            // TUM shows "Out: No Rectification" in logs, EuRoC shows "Out: Rectify Crop" 
-                            bool is_no_rectification = (img->w == 640 && img->h == 480); // After undistortion
-                            bool use_file_loading = is_no_rectification; // For TUM PINHOLE only
-                            
-                            if (use_file_loading) {
-                                // TUM: Use direct file loading (matches working baseline performance)
-                                std::string imagefile = reader->getFilename(i);
-                                if (!imagefile.empty()) {
-                                    rgb_color = cv::imread(imagefile, cv::IMREAD_COLOR);
-                                    if (!rgb_color.empty()) {
-                                        cv::cvtColor(rgb_color, rgb_color, cv::COLOR_BGR2RGB);
-                                    }
-                                }
-                                if (i % 100 == 0) {
-                                    printf("Using direct file loading (TUM): %dx%d - optimal for PINHOLE\n", 
-                                           rgb_color.cols, rgb_color.rows);
-                                }
-                            } else {
-                                // EuRoC: Use undistorted channels for correct resolution
-                                rgb_color = convertUndistortedToRGB(img);
-                                if (i % 100 == 0) {
-                                    printf("Using undistorted RGB (EuRoC): %dx%d - corrected resolution\n", 
-                                           rgb_color.cols, rgb_color.rows);
-                                }
-                            }
+                            // Universal undistorted RGB processing - trust DataReader architecture
+                            rgb_color = convertUndistortedToRGB(img);
                         } else {
-                            // Fallback: Load original RGB from file (will need resizing in FullSystem)
-                            std::string imagefile = reader->getFilename(i);
-                            if (!imagefile.empty()) {
-                                rgb_color = cv::imread(imagefile, cv::IMREAD_COLOR);
-                                if (!rgb_color.empty()) {
-                                    cv::cvtColor(rgb_color, rgb_color, cv::COLOR_BGR2RGB);
-                                    // Restored to working Aug 20th approach - loading from original file
-                                }
-                            }
+                            // Handle case where undistorted color channels are not available
+                            printf("Warning: No undistorted color channels available for frame %d\n", i);
                         }
                         
                         // Create grayscale matrix from existing processed data
