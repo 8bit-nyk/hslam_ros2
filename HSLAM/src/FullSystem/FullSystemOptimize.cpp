@@ -858,11 +858,11 @@ std::vector<VecX> FullSystem::getNullspaces(
 	nullspaces_x0_pre.push_back(nullspace_x0);
 	nullspaces_scale.push_back(nullspace_x0);
 	
-	if (!using_metric_scale_) {
-		printf("[SCALE_DEBUG] Added scale nullspace (photometric mode) - scale drift allowed\n");
-	} else {
-		printf("[SCALE_DEBUG] Added scale nullspace (ML mode) - preserving indirect SLAM compatibility\n");
-	}
+	// if (!using_metric_scale_) {
+	// 	printf("[SCALE_DEBUG] Added scale nullspace (photometric mode) - scale drift allowed\n");
+	// } else {
+	// 	printf("[SCALE_DEBUG] Added scale nullspace (ML mode) - preserving indirect SLAM compatibility\n");
+	// }
 	// NOTE: ML depth provides scale constraints through priors, but scale nullspace is still needed
 	// for proper optimization convergence and indirect SLAM functionality
 

@@ -457,26 +457,57 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 
 
 	// ============== set new interval for idepth_min and idepth_max===================
-	// CRITICAL FIX: Preserve ML depth bounds if available (Phase 1 implementation)
-	if(idepth_GT > 0 && setting_preserveMLDepthBounds)
+	// PHASE 1 FIX: ALWAYS compute photometric bounds first, then preserve/combine with ML
+	// Photometric bounds computation (ALWAYS needed for hybrid approach)
+	float photometric_min, photometric_max;
+	if(dx*dx>dy*dy)
 	{
-		// Don't overwrite ML-based bounds - they are more accurate than photometric search
-		// Keep existing idepth_min and idepth_max which were set from ML depth
+		photometric_min = (pr[2]*(bestU-errorInPixel*dx) - pr[0]) / (hostToFrame_Kt[0] - hostToFrame_Kt[2]*(bestU-errorInPixel*dx));
+		photometric_max = (pr[2]*(bestU+errorInPixel*dx) - pr[0]) / (hostToFrame_Kt[0] - hostToFrame_Kt[2]*(bestU+errorInPixel*dx));
 	}
 	else
 	{
-		// Standard photometric bounds for points without ML depth
-		if(dx*dx>dy*dy)
-		{
-			idepth_min = (pr[2]*(bestU-errorInPixel*dx) - pr[0]) / (hostToFrame_Kt[0] - hostToFrame_Kt[2]*(bestU-errorInPixel*dx));
-			idepth_max = (pr[2]*(bestU+errorInPixel*dx) - pr[0]) / (hostToFrame_Kt[0] - hostToFrame_Kt[2]*(bestU+errorInPixel*dx));
+		photometric_min = (pr[2]*(bestV-errorInPixel*dy) - pr[1]) / (hostToFrame_Kt[1] - hostToFrame_Kt[2]*(bestV-errorInPixel*dy));
+		photometric_max = (pr[2]*(bestV+errorInPixel*dy) - pr[1]) / (hostToFrame_Kt[1] - hostToFrame_Kt[2]*(bestV+errorInPixel*dy));
+	}
+	if(photometric_min > photometric_max) std::swap<float>(photometric_min, photometric_max);
+	
+	// PHASE 1 HYBRID BOUNDS: Combine photometric and ML bounds at tracing time
+	if(idepth_GT > 0 && setting_preserveMLDepthBounds && 
+	   std::isfinite(idepth_min) && std::isfinite(idepth_max))
+	{
+		// ML bounds are valid - combine with photometric bounds
+		float ml_min = idepth_min;  // ML bounds set at creation
+		float ml_max = idepth_max;
+		
+		// Combine photometric and ML bounds (intersection preferred)
+		float combined_min = std::max(photometric_min, ml_min);
+		float combined_max = std::min(photometric_max, ml_max);
+		
+		static int trace_count = 0;
+		bool bounds_overlap = (combined_min <= combined_max);
+		
+		if(bounds_overlap) {
+			// Bounds overlap - use intersection (preserves both constraints)
+			idepth_min = combined_min;
+			idepth_max = combined_max;
+			
+			// Debug: Intersection mode working correctly
+		} else {
+			// Bounds don't overlap - use weighted average (30% ML, 70% photometric)
+			const float ml_trust = 0.3f;
+			idepth_min = ml_trust * ml_min + (1.0f - ml_trust) * photometric_min;
+			idepth_max = ml_trust * ml_max + (1.0f - ml_trust) * photometric_max;
+			
+			// Debug: Non-overlapping bounds blended (30% ML, 70% photometric)
 		}
-		else
-		{
-			idepth_min = (pr[2]*(bestV-errorInPixel*dy) - pr[1]) / (hostToFrame_Kt[1] - hostToFrame_Kt[2]*(bestV-errorInPixel*dy));
-			idepth_max = (pr[2]*(bestV+errorInPixel*dy) - pr[1]) / (hostToFrame_Kt[1] - hostToFrame_Kt[2]*(bestV+errorInPixel*dy));
-		}
-		if(idepth_min > idepth_max) std::swap<float>(idepth_min, idepth_max);
+		trace_count++;
+	}
+	else
+	{
+		// No valid ML bounds - use pure photometric bounds
+		idepth_min = photometric_min;
+		idepth_max = photometric_max;
 	}
 
 

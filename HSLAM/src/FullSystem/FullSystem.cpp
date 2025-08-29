@@ -2527,36 +2527,24 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
             
             ImmaturePoint* impt = new ImmaturePoint(x, y, newFrame, selectionMap[i], &Hcalib);
             
-            // Store original photometric bounds before ML modification
-            float photometric_min = impt->idepth_min;
-            float photometric_max = impt->idepth_max;
-            
-            // ML depth integration - GUIDE rather than REPLACE photometric search
+            // ML depth integration - SET ML bounds at creation, combine during tracing
             if(!ml_depth.empty() && y < ml_depth.rows && x < ml_depth.cols) {
                 float depth = ml_depth.at<float>(y, x);
                 
                 if(depth > 0.0f && std::isfinite(depth)) {
-                    // EXPERIMENT 3: Restrictive uncertainty model (tighter bounds for outdoor scenes)
-                    // 4% relative instead of 12% - should provide 3x tighter constraints
+                    // Phase 1 Fix: Compute ML bounds but don't combine yet
                     const float base_uncertainty = 0.04f;  // 4cm minimum  
-                    const float relative_factor = 0.04f;   // 4% relative (was 12%)
+                    const float relative_factor = 0.04f;   // 4% relative
                     const float u = base_uncertainty + depth * relative_factor;
-                    
-                    // EXPERIMENT 1 (commented out): Pure relative uncertainty  
-                    // const float u = depth * 0.15f;  // 15% relative uncertainty at all depths
-                    
-                    // OLD MODEL (commented out for comparison):
-                    // Adaptive uncertainty model: indoor scenes (2m cap) vs outdoor scenes (10m cap)
-                    // float max_uncertainty = (depth > 10.0f) ? 10.0f : 2.0f;
-                    // const float u = std::min(max_uncertainty, 0.08f + 0.1f * depth);
 
                     const float idepth        = 1.0f / depth;             // m⁻¹
                     const float idepth_min_ml = 1.0f / (depth + u);       // m⁻¹
                     const float idepth_max_ml = 1.0f / std::max(0.05f, depth - u); // m⁻¹ (ε avoids /0)
 
+                    // Store ML bounds directly - combination happens during tracing
                     impt->idepth_min = idepth_min_ml;
                     impt->idepth_max = idepth_max_ml;
-                    impt->idepth_GT  = idepth;            // unchanged
+                    impt->idepth_GT  = idepth;
                     
                     // Debug output for ML bounds verification (COMMENTED OUT for cleaner testing)
                     // if(ml_depth_points < 20 || ml_depth_points % 100 == 0) {
@@ -2596,6 +2584,8 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
             total_points++;
         }
     }
+    
+    // ML bounds set at creation - hybrid combination happens during tracing
     
     // TEMP_DEBUG_REPETITIVE: Commented out ML integration statistics for cleaner output
     // if(ml_depth_points > 0) {
