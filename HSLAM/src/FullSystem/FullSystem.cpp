@@ -1375,86 +1375,7 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, ImageAndExposure
 
 void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 {
-	// GPU warmup on absolute first frame - before ANY SLAM processing
-	static bool ml_gpu_initialized = false;
-	
-	if (ml_depth_enabled_ && ml_processor_ && !ml_gpu_initialized) {
-		printf("🔥 Initializing ML processor (one-time warmup)...\n");
-		auto start = std::chrono::high_resolution_clock::now();
-		
-		try {
-			// Validate input image first
-			if (!image || !image->image || image->w <= 0 || image->h <= 0) {
-				printf("ERROR: Invalid input image for ML warmup - skipping ML depth\n");
-				ml_depth_enabled_ = false;
-				return;
-			}
-			
-			// DEBUG: ML warmup - converting image %dx%d\n", image->w, image->h);
-			
-			// Convert float array to cv::Mat then to RGB for warmup with validation
-			cv::Mat gray_image(image->h, image->w, CV_32FC1, image->image);
-			if (gray_image.empty()) {
-				printf("ERROR: Failed to create gray image for ML warmup\n");
-				ml_depth_enabled_ = false;
-				return;
-			}
-			
-			cv::Mat gray_8u;
-			gray_image.convertTo(gray_8u, CV_8UC1);
-			if (gray_8u.empty()) {
-				printf("ERROR: Failed to convert to 8-bit gray for ML warmup\n");
-				ml_depth_enabled_ = false;
-				return;
-			}
-			
-			cv::Mat rgb_image;
-			cv::cvtColor(gray_8u, rgb_image, cv::COLOR_GRAY2RGB);
-			if (rgb_image.empty()) {
-				printf("ERROR: Failed to convert to RGB for ML warmup\n");
-				ml_depth_enabled_ = false;
-				return;
-			}
-			
-			// DEBUG: ML warmup - RGB image ready %dx%d channels=%d\n", 
-			//        rgb_image.cols, rgb_image.rows, rgb_image.channels());
-			
-			// Validate ML processor state
-			if (!ml_processor_->isReady()) {
-				printf("ERROR: ML processor not ready for warmup\n");
-				ml_depth_enabled_ = false;
-				return;
-			}
-			
-			// Single warmup inference (result discarded)
-			auto warmup_result = ml_processor_->processKeyframe(rgb_image);
-			
-			auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-				std::chrono::high_resolution_clock::now() - start).count();
-			
-			if (warmup_result.has_value() && !warmup_result->empty()) {
-				printf("✅ ML processor initialized in %ldms - ready for processing\n", duration);
-				ml_gpu_initialized = true;
-			} else {
-				printf("ERROR: ML warmup failed - disabling ML depth\n");
-				ml_depth_enabled_ = false;
-				return;
-			}
-			
-		} catch (const cv::Exception& e) {
-			printf("ERROR: OpenCV exception during ML warmup: %s\n", e.what());
-			ml_depth_enabled_ = false;
-			return;
-		} catch (const std::exception& e) {
-			printf("ERROR: Exception during ML warmup: %s\n", e.what());
-			ml_depth_enabled_ = false;
-			return;
-		} catch (...) {
-			printf("ERROR: Unknown exception during ML warmup - disabling ML depth\n");
-			ml_depth_enabled_ = false;
-			return;
-		}
-	}
+	// ML processor warmup is now handled in main.cpp during initialization
 
     if(isLost) return;
 	boost::unique_lock<boost::mutex> lock(trackMutex);
@@ -1505,60 +1426,11 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 			
 			coarseInitializer->setFirst(&Hcalib, fh);
 			
-			// Store RGB image for ML processing (leverage existing conversion pattern from warmup)
-			if (setting_useMLForInitialization && ml_depth_enabled_ && image && image->image) {
-				cv::Mat gray_image(image->h, image->w, CV_32FC1, image->image);
-				cv::Mat gray_8u;
-				gray_image.convertTo(gray_8u, CV_8UC1);
-				cv::cvtColor(gray_8u, first_frame_rgb_, cv::COLOR_GRAY2RGB);
-				
-				printf("Initialization: RGB image prepared for ML processing (%dx%d)\n",
-					   first_frame_rgb_.cols, first_frame_rgb_.rows);
-			}
+			// DISABLED: ML depth processing during initialization to prevent delays
+			// Use standard monocular initialization for ML pipeline for faster startup
+			printf("Initialization: Using standard monocular initialization (ML depth disabled during init)\n");
 			
-			// Process ML depth synchronously for metric scale initialization
-			if (setting_useMLForInitialization && ml_depth_enabled_ && 
-				ml_processor_ && ml_processor_->isReady() && !first_frame_rgb_.empty()) {
-				
-				printf("Initialization: Processing ML depth for metric scale...\n");
-				auto ml_start = std::chrono::high_resolution_clock::now();
-				
-				try {
-					// Use existing ML processing pattern from makeKeyFrame
-					auto ml_result = ml_processor_->processKeyframeDetailed(first_frame_rgb_);
-					
-					auto ml_end = std::chrono::high_resolution_clock::now();
-					ml_init_processing_time_ms_ = std::chrono::duration<double, std::milli>(
-						ml_end - ml_start).count();
-					
-					if (ml_result.success && !ml_result.depth_map.empty()) {
-						// Store in CoarseInitializer with mean depth for streamlined scale computation
-						coarseInitializer->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.mean_depth);
-						printf("Initialization: ML depth processed successfully (%.1fms, conf=%.2f, mean=%.2fm)\n",
-							   ml_init_processing_time_ms_, ml_result.confidence, ml_result.mean_depth);
-					} else {
-						printf("Initialization: ML depth processing failed, will use photometric scale\n");
-						ml_init_processing_time_ms_ = 0.0; // Reset since it failed
-					}
-				} catch (const std::exception& e) {
-					printf("Initialization: ML processing exception: %s\n", e.what());
-					ml_init_processing_time_ms_ = 0.0;
-				}
-			}
-			
-			// Check if ML depth was already available from background processing (fallback)
-			else if (fh->has_ml_depth_.load()) {
-				boost::unique_lock<boost::mutex> lock(fh->ml_mutex_);
-				if (fh->ml_depth_map_ && !fh->ml_depth_map_->empty()) {
-					// Compute mean depth for fallback case (background processing doesn't compute it)
-					cv::Scalar mean_depth_scalar = cv::mean(*fh->ml_depth_map_);
-					float mean_depth = static_cast<float>(mean_depth_scalar[0]);
-					
-					coarseInitializer->setMLDepth(*fh->ml_depth_map_, fh->ml_confidence_.load(), mean_depth);
-					printf("Initialization: ML depth stored for first frame (conf: %.2f, mean: %.2fm)\n", 
-						   fh->ml_confidence_.load(), mean_depth);
-				}
-			}
+			// Removed ML fallback processing to ensure pure monocular initialization
 		}
 		else if(coarseInitializer->trackFrame(fh, outputWrapper))	// if SNAPPED
 		{
@@ -3971,6 +3843,36 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 		printf("initializeMLDepthProcessor: ❌ Unknown exception during initialization\n");
 		ml_processor_.reset();
 		ml_depth_enabled_ = false;
+		return false;
+	}
+}
+
+bool FullSystem::performMLWarmup(const cv::Mat& warmup_image)
+{
+	if (!ml_processor_ || !ml_depth_enabled_) {
+		printf("ERROR: ML processor not initialized for warmup\n");
+		return false;
+	}
+	
+	try {
+		// Validate warmup image
+		if (warmup_image.empty() || warmup_image.channels() != 3) {
+			printf("ERROR: Invalid warmup image format\n");
+			return false;
+		}
+		
+		// Perform warmup inference (result discarded)
+		auto warmup_result = ml_processor_->processKeyframe(warmup_image);
+		
+		if (warmup_result.has_value() && !warmup_result->empty()) {
+			return true;
+		} else {
+			printf("ERROR: ML warmup inference failed\n");
+			return false;
+		}
+		
+	} catch (const std::exception& e) {
+		printf("ERROR: Exception during ML warmup: %s\n", e.what());
 		return false;
 	}
 }

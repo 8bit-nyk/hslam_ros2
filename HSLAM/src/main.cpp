@@ -350,6 +350,33 @@ int main(int argc, char **argv)
 		}
 		printf("ML Depth Processor initialized successfully\n");
 		
+		// Perform ML warmup before frame processing to prevent blocking
+		printf("🔥 Warming up ML processor (one-time GPU initialization)...\n");
+		auto warmup_start = std::chrono::high_resolution_clock::now();
+		
+		try {
+			// Create synthetic RGB image for warmup (640x368 to match typical SLAM resolution)
+			cv::Mat synthetic_rgb(368, 640, CV_8UC3, cv::Scalar(128, 128, 128)); // Gray image
+			
+			// Perform warmup inference (result discarded)
+			bool warmup_success = fullSystem->performMLWarmup(synthetic_rgb);
+			
+			auto warmup_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::high_resolution_clock::now() - warmup_start).count();
+			
+			if (warmup_success) {
+				printf("✅ ML processor warmed up successfully in %ldms\n", warmup_duration);
+			} else {
+				printf("ERROR: ML warmup failed - disabling ML depth\n");
+				fullSystem->ml_depth_enabled_ = false;
+				ml_depth_enabled = false;
+			}
+		} catch (const std::exception& e) {
+			printf("ERROR: Exception during ML warmup: %s - disabling ML depth\n", e.what());
+			fullSystem->ml_depth_enabled_ = false;
+			ml_depth_enabled = false;
+		}
+		
 		// ML processor is ready immediately (synchronous initialization)
 		
 		// Extract dataset name from source path for results directory

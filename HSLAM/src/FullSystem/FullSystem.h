@@ -288,6 +288,13 @@ public:
 	 */
 	bool initializeMLDepthProcessor(const MLConfig& config);
 	
+	/**
+	 * @brief Perform ML processor warmup to prevent blocking during frame processing
+	 * @param warmup_image RGB image for warmup inference (result discarded)
+	 * @return true if warmup successful, false otherwise
+	 */
+	bool performMLWarmup(const cv::Mat& warmup_image);
+	
 	
 	/**
 	 * @brief Get current ML depth processor performance statistics
