@@ -683,11 +683,8 @@ int main(int argc, char **argv)
                             printf("Warning: No undistorted color channels available for frame %d\n", i);
                         }
                         
-                        // Create grayscale matrix from existing processed data
-                        cv::Mat rgb_mat(img->h, img->w, CV_32FC1, img->image);
-                        
-                        // Use ML-enhanced tracking with both RGB and grayscale
-                        fullSystem->TrackMonocularWithML(rgb_color.empty() ? rgb_mat : rgb_color, rgb_mat, img->timestamp);
+                        // Use ML-enhanced tracking with original ImageAndExposure to preserve both image buffers
+                        fullSystem->TrackMonocularWithML(rgb_color, img);
                     } else {
                         // Use standard monocular tracking
                         fullSystem->addActiveFrame(img, i);

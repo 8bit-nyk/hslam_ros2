@@ -48,8 +48,10 @@ void FeatureDetector::ExtractFeatures(cv::Mat &Image, cv::Mat &Occupancy, std::v
 
 
     cv::GaussianBlur(Image, ImageBlurred, cv::Size(5, 5), 0.5, 0.5, cv::BORDER_REFLECT_101);
+    
     vector<cv::KeyPoint> FASTselection;
     cv::FAST(ImageBlurred, FASTselection, minThFAST, true);
+    
     sort(FASTselection.begin(), FASTselection.end(), [](const cv::KeyPoint &a, const cv::KeyPoint &b) -> bool { return a.response > b.response; });
 
     uchar *ptr = Occupancy.data;

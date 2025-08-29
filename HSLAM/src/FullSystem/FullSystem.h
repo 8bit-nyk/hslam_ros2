@@ -154,7 +154,7 @@ public:
 	void TrackRGBD(const cv::Mat& rgb_color, const cv::Mat& rgb_img, const cv::Mat& depth_img, const double timestamp);
 
 	// ML Depth tracking method - enhanced monocular tracking with ML depth
-	void TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& rgb_img, double timestamp);
+	void TrackMonocularWithML(const cv::Mat& rgb_color, ImageAndExposure* original_img);
 	
 
 	// Phase 2.5: ML service persistence through SLAM resets

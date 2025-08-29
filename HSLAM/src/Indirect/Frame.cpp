@@ -17,6 +17,7 @@ namespace HSLAM
     NeedConnRefresh(true), HCalib(_HCalib), fh(_fh), fs(_fs)
     {
         cv::Mat(hG[0], wG[0], CV_32FC1, Img).convertTo(Image, CV_8U);
+      
         Occupancy = cv::Mat(hG[0], wG[0], CV_8U, cv::Scalar(0));
         detector->ExtractFeatures(Image, Occupancy, mvKeys, Descriptors, nFeatures, indFeaturesToExtract);
         assignFeaturesToGrid();

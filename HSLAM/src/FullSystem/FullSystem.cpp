@@ -1201,16 +1201,24 @@ void FullSystem::TrackRGBD(const cv::Mat& rgb_color, const cv::Mat& rgb_image, c
  * Falls back to standard monocular tracking if ML depth unavailable.
  * 
  * @param rgb_color RGB color image for ML processing
- * @param rgb_img Grayscale image for SLAM processing
- * @param timestamp Frame timestamp
+ * @param original_img Original ImageAndExposure with both image and PhoUncalibImage buffers
  */
-void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& rgb_img, double timestamp)
+void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, ImageAndExposure* original_img)
 {
     if(isLost) return;
     
-    // Validate input images
+    // Extract data from original ImageAndExposure
+    if(!original_img || !original_img->image) {
+        printf("ERROR: Invalid ImageAndExposure in TrackMonocularWithML\n");
+        return;
+    }
+    
+    double timestamp = original_img->timestamp;
+    cv::Mat rgb_img(original_img->h, original_img->w, CV_32FC1, original_img->image);
+    
+    // Validate extracted image
     if(rgb_img.empty()) {
-        printf("ERROR: Empty grayscale image in TrackMonocularWithML\n");
+        printf("ERROR: Empty grayscale image extracted from ImageAndExposure\n");
         return;
     }
     
@@ -1358,31 +1366,10 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, const cv::Mat& r
     // Clear any existing RGB-D depth to use pure monocular/ML approach
     currentDepthImage = cv::Mat();
     
-    // Convert RGB to HSLAM format for unified pipeline
-    cv::Mat gray_image;
-    if(rgb_img.channels() == 3) {
-        cv::cvtColor(rgb_img, gray_image, cv::COLOR_BGR2GRAY);
-    } else {
-        gray_image = rgb_img;
-    }
-    
-    // Convert to float if needed
-    cv::Mat float_image;
-    if(gray_image.type() != CV_32FC1) {
-        gray_image.convertTo(float_image, CV_32FC1);
-    } else {
-        float_image = gray_image;
-    }
-    
-    // Create ImageAndExposure for unified HSLAM pipeline
-    ImageAndExposure* img = new ImageAndExposure(float_image.cols, float_image.rows, timestamp);
-    std::memcpy(img->image, float_image.ptr<float>(), float_image.cols * float_image.rows * sizeof(float));
-    
-    // Use unified pipeline for both ML and non-ML cases
+    // FIX: Use original ImageAndExposure which has both image and PhoUncalibImage buffers properly populated
+    // This preserves the PhoUncalibImage buffer needed for indirect SLAM (ORB feature detection)
     static int frame_id_tracking = 0;
-    addActiveFrame(img, frame_id_tracking++);
-    
-    delete img;
+    addActiveFrame(original_img, frame_id_tracking++);
 }
 
 
@@ -1479,6 +1466,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 
 	// indirect!: Create indirect frame
 	// Indirect point are detected when frame is made
+	
 	shell->frame = std::make_shared<Frame>(image->PhoUncalibImage, detector, &Hcalib, fh, shell, globalMap);
 	
 	// std::cout << shell->frame->nFeatures << std::endl;

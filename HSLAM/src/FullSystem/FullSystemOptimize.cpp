@@ -492,10 +492,7 @@ void FullSystem::printOptRes(const Vec3 &res, double resL, double resM, double r
  */
 float FullSystem::optimize(int mnumOptIts)
 {
-	printf("TEMP_DEBUG: optimize() called with %zu frameHessians, mnumOptIts=%d\n", frameHessians.size(), mnumOptIts);
-
 	if(frameHessians.size() < 2) {
-		printf("TEMP_DEBUG: optimize() EARLY RETURN - frameHessians.size()=%zu < 2\n", frameHessians.size());
 		return 0;
 	}
 	if(frameHessians.size() < 3) mnumOptIts = 20;
@@ -537,9 +534,7 @@ float FullSystem::optimize(int mnumOptIts)
 	// Do optimization process
 	Vec3 lastEnergy = linearizeAll(false);
 	double lastEnergyL = calcLEnergy();
-	printf("TEMP_DEBUG: About to call calcMEnergy() in optimize()\n");
 	double lastEnergyM = calcMEnergy();
-	printf("TEMP_DEBUG: calcMEnergy() returned: %f\n", lastEnergyM);
 
 
 
