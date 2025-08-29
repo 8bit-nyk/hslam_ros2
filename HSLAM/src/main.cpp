@@ -334,8 +334,6 @@ int main(int argc, char **argv)
 		
 		ml_config.input_width = 518;   // Metric3D model requirement
 		ml_config.input_height = 518;  // Metric3D model requirement
-		ml_config.min_depth = 0.1f;
-		ml_config.max_depth = 10.0f;
 		ml_config.benchmark_enabled = ml_benchmark_enabled;
 		
 		if(ml_gpu_enabled) {
@@ -394,7 +392,7 @@ int main(int argc, char **argv)
         } else {
             // Try to initialize GUI with error handling
             try {
-                viewer = new IOWrap::PangolinDSOViewer(wG[0],hG[0], true);  // Enable GUI thread
+                viewer = new IOWrap::PangolinDSOViewer(wG[0],hG[0], false);  // Disable GUI thread (fix GLX error)
                 fullSystem->outputWrapper.push_back(viewer);
                 printf("GUI viewer initialized successfully\n");
             } catch (const std::exception& e) {
@@ -583,8 +581,6 @@ int main(int argc, char **argv)
                             ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
                             ml_config.input_width = 518;
                             ml_config.input_height = 518;
-                            ml_config.min_depth = 0.1f;
-                            ml_config.max_depth = 10.0f;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
                             
                             // Reinitialize MLDepthProcessor
@@ -742,8 +738,6 @@ int main(int argc, char **argv)
                             ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
                             ml_config.input_width = 518;
                             ml_config.input_height = 518;
-                            ml_config.min_depth = 0.1f;
-                            ml_config.max_depth = 10.0f;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
                             
                             // Reinitialize MLDepthProcessor

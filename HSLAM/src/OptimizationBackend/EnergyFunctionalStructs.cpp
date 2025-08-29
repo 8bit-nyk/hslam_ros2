@@ -78,9 +78,21 @@ void EFFrame::takeData()
 
 void EFPoint::takeData()
 {
+	// Indirect MapPoint prior calculation (restored original DSO behavior)
 	priorF = data->hasDepthPrior ? setting_idepthFixPrior*SCALE_IDEPTH*SCALE_IDEPTH : 0;
-	// priorF = priorF + data->priorFromInd;
+	// priorF = priorF + data->priorFromInd;  // Reserved for future indirect SLAM enhancements
 	if(setting_solverMode & SOLVER_REMOVE_POSEPRIOR) priorF=0;
+	
+	// ML depth prior calculation (separate from indirect priors)
+	if (data->hasMLDepth) {
+		// Use adaptive weight computed in PointHessian, or fallback to default
+		float ml_weight_base = (data->ml_weight > 0) ? data->ml_weight : setting_idepthFixPrior;
+		ml_priorF = ml_weight_base * SCALE_IDEPTH * SCALE_IDEPTH;
+		ml_reference = data->ml_idepth_reference;
+	} else {
+		ml_priorF = 0;
+		ml_reference = 0;
+	}
 
 	deltaF = data->idepth-data->idepth_zero;
 }

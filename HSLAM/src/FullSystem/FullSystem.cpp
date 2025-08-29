@@ -1976,7 +1976,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		}
 		
 		if (!rgb_image.empty()) {
-			printf("makeKeyFrame: Processing keyframe %d with ML processor...\n", fh->frameID);
+			// TEMP_DEBUG_REPETITIVE: Commented out for cleaner testing output
+			// printf("makeKeyFrame: Processing keyframe %d with ML processor...\n", fh->frameID);
 			// DEBUG: makeKeyFrame - RGB image %dx%d channels=%d\n", 
 			//        rgb_image.cols, rgb_image.rows, rgb_image.channels());
 		
@@ -2043,8 +2044,9 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						coarseTracker_forNewKF->setExternalDepthImage(ml_depth_for_tracker);
 					}
 					
-					printf("makeKeyFrame: ✅ ML processing successful for frame %d (%.1fms inference, conf=%.2f, total=%.1fms)\n",
-						   fh->frameID, ml_result.inference_time_ms, ml_result.confidence, (float)processing_time);
+					// TEMP_DEBUG_REPETITIVE: Commented out for cleaner testing output
+					// printf("makeKeyFrame: ✅ ML processing successful for frame %d (%.1fms inference, conf=%.2f, total=%.1fms)\n",
+					//	   fh->frameID, ml_result.inference_time_ms, ml_result.confidence, (float)processing_time);
 					
 					// Update metrics
 					ml_metrics_.ml_keyframes_successful++;
@@ -2457,10 +2459,15 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 
 		ph->setIdepthScaled(point->iR * rescaleFactor);
 		ph->setIdepthZero(ph->idepth);
-		ph->hasDepthPrior = true;
 		ph->setPointStatus(PointHessian::ACTIVE);
 		
-		// NEW: If using metric scale, also set ML depth prior
+		// Set appropriate depth prior flags based on point type
+		if (ph->my_type > 4) {
+			// Indirect point from MapPoint - set indirect prior
+			ph->hasDepthPrior = true;
+		}
+		
+		// NEW: If using metric scale, also set ML depth prior (independent)
 		if (usingMetricScale && coarseInitializer->hasMLDepth) {
 			int u = (int)(point->u + 0.5f);
 			int v = (int)(point->v + 0.5f);
@@ -2471,9 +2478,11 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 				
 				float mlDepth = coarseInitializer->firstFrameMLDepth.at<float>(v, u);
 				if (mlDepth > 0 && std::isfinite(mlDepth)) {
-					// Point already initialized with metric scale
-					// hasDepthPrior flag indicates ML depth available
-					ph->hasDepthPrior = true;
+					// Set ML depth information (separate from indirect prior)
+					ph->hasMLDepth = true;
+					ph->ml_idepth_reference = 1.0f / mlDepth;
+					ph->ml_uncertainty = 0.1f; // Default uncertainty for initialization
+					ph->ml_weight = setting_idepthFixPrior; // Use default weight for initialization
 				}
 			}
 		}
@@ -2667,9 +2676,19 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                 float depth = ml_depth.at<float>(y, x);
                 
                 if(depth > 0.0f && std::isfinite(depth)) {
-                    // Conservative uncertainty model: prevents ML drift while allowing reasonable constraints
-                    // Based on original model but capped for stability
-                    const float u = std::min(2.0f, 0.08f + 0.1f * depth);    // metres – conservative uncertainty, max 2m
+                    // EXPERIMENT 3: Restrictive uncertainty model (tighter bounds for outdoor scenes)
+                    // 4% relative instead of 12% - should provide 3x tighter constraints
+                    const float base_uncertainty = 0.04f;  // 4cm minimum  
+                    const float relative_factor = 0.04f;   // 4% relative (was 12%)
+                    const float u = base_uncertainty + depth * relative_factor;
+                    
+                    // EXPERIMENT 1 (commented out): Pure relative uncertainty  
+                    // const float u = depth * 0.15f;  // 15% relative uncertainty at all depths
+                    
+                    // OLD MODEL (commented out for comparison):
+                    // Adaptive uncertainty model: indoor scenes (2m cap) vs outdoor scenes (10m cap)
+                    // float max_uncertainty = (depth > 10.0f) ? 10.0f : 2.0f;
+                    // const float u = std::min(max_uncertainty, 0.08f + 0.1f * depth);
 
                     const float idepth        = 1.0f / depth;             // m⁻¹
                     const float idepth_min_ml = 1.0f / (depth + u);       // m⁻¹
@@ -2679,7 +2698,14 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                     impt->idepth_max = idepth_max_ml;
                     impt->idepth_GT  = idepth;            // unchanged
                     
-                    // DEPTH_DEBUG: ML point logging removed - better comparison available in activatePointsMT()
+                    // Debug output for ML bounds verification (COMMENTED OUT for cleaner testing)
+                    // if(ml_depth_points < 20 || ml_depth_points % 100 == 0) {
+                    //     printf("ML_BOUNDS_DEBUG Point %d: depth=%.2fm, uncertainty=%.2fm (%.1f%%), "
+                    //            "depth_bounds=[%.2fm, %.2fm], idepth_bounds=[%.4f, %.4f]\n",
+                    //            ml_depth_points, depth, u, (u/depth)*100.0f,
+                    //            std::max(0.05f, depth - u), depth + u,
+                    //            idepth_min_ml, idepth_max_ml);
+                    // }
                     
                     ml_depth_points++;                    // unchanged
                 }
@@ -2711,12 +2737,12 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
         }
     }
     
-    // Log ML integration statistics (essential for current debugging focus)
-    if(ml_depth_points > 0) {
-        printf("ML Depth Integration: %d/%d points (%.1f%%)\n",
-               ml_depth_points, total_points, 
-               100.0f * ml_depth_points / total_points);
-    }
+    // TEMP_DEBUG_REPETITIVE: Commented out ML integration statistics for cleaner output
+    // if(ml_depth_points > 0) {
+    //     printf("ML Depth Integration: %d/%d points (%.1f%%)\n",
+    //            ml_depth_points, total_points, 
+    //            100.0f * ml_depth_points / total_points);
+    // }
     
     // DEPTH_DEBUG: Comprehensive ML depth integration logging (TEMPORARY)
     #ifdef ENABLE_DEPTH_DEBUG
@@ -3924,15 +3950,12 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 		
 		ml_config.input_width = 518;   // Metric3D model requirement for quality inference
 		ml_config.input_height = 518;  // Metric3D model requirement for quality inference
-		ml_config.min_depth = config.min_depth;
-		ml_config.max_depth = config.max_depth;
 		ml_config.benchmark_enabled = config.benchmark_enabled;
 		
 		printf("initializeMLDepthProcessor: Initializing simplified ML processor...\n");
 		printf("  Model path: %s\n", ml_config.model_path.c_str());
 		printf("  GPU enabled: %s\n", ml_config.enable_gpu ? "YES" : "NO");
 		printf("  Input resolution: %dx%d\n", ml_config.input_width, ml_config.input_height);
-		printf("  Depth range: %.2f - %.2f\n", ml_config.min_depth, ml_config.max_depth);
 		
 		// Create MLDepthProcessor instance
 		ml_processor_ = std::make_unique<ML::MLDepthProcessor>(ml_config);

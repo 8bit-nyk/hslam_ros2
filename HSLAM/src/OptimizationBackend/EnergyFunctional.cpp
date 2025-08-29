@@ -409,6 +409,11 @@ double EnergyFunctional::calcLEnergyF_MT()
 	}
 	E += cDeltaF.cwiseProduct(cPriorF).dot(cDeltaF);
 	
+	// TEMP_DEBUG_ENERGY: Debug entry point to see if this function is called
+	static int energy_call_count = 0;
+	++energy_call_count;
+	printf("TEMP_DEBUG: calcMEnergyF called %d times, frames=%zu\n", energy_call_count, frames.size());
+	
 	// PHASE 2: Add ML depth constraints to bundle adjustment energy
 	// This constrains pose optimization to be consistent with ML depths
 	double ml_energy = 0;
@@ -420,39 +425,50 @@ double EnergyFunctional::calcLEnergyF_MT()
 		for(EFPoint* p : f->points) {
 			total_points++;
 			// Add ML depth residual if point has ML depth prior
-			if(p->data->hasDepthPrior) points_with_depth_prior++;
-			if(p->data->hasDepthPrior && setting_mlDepthWeight > 0) {
-				float ml_residual = p->deltaF;  // p->deltaF = current_idepth - idepth_zero (correct: ML depth reference)
+			if(p->data->hasMLDepth) points_with_depth_prior++;
+			if(p->data->hasMLDepth && setting_mlDepthWeight > 0) {
+				float ml_residual = p->data->idepth - p->ml_reference;  // ML residual relative to ML reference
 				
 				// Conservative ML weighting: prevent systematic drift while using ML guidance
 				float current_idepth = p->data->idepth + p->deltaF;
 				float depth = (current_idepth > 1e-6f) ? (1.0f / current_idepth) : 1000.0f;
 				
-				// Distance factor: closer depths more reliable
-				float distance_factor = 1.0f / (1.0f + depth * 0.1f);
+				// EXPERIMENT: Remove distance penalty completely - test if this is the bottleneck
+				float distance_factor = 1.0f;  // No distance penalty
+				// ORIGINAL: float distance_factor = 1.0f / (1.0f + depth * 0.1f);
 				
 				// Robust factor: down-weight outliers to prevent systematic bias accumulation
 				// Keep the improved robust factor (0.5f) which is more permissive than the original 2.0f
 				float abs_residual = std::abs(ml_residual);
 				float robust_factor = std::exp(-abs_residual * abs_residual * 0.5f);
 				
-				// Simple ML weighting: restore to August 21st approach
-				float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor;
+				// TEMP_DEBUG_ENERGY: Test dramatically increased ML weight
+				float ml_weight_multiplier = 10.0f;  // EXPERIMENT: 10x weight increase
+				float ml_weight = (setting_mlDepthWeight * ml_weight_multiplier) * distance_factor * robust_factor;
+				// ORIGINAL: float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor;
 				
 				ml_energy += ml_weight * ml_residual * ml_residual;
 				ml_constraints++;
 			}
 		}
 	}
+	// TEMP_DEBUG_ENERGY: Store photometric energy before adding ML energy  
+	float photometric_energy = E;
 	E += ml_energy;
 	
-	// Debug output for ML constraints when they are found
+	// TEMP_DEBUG_ENERGY: Energy balance debugging - can be easily removed
 	static int debug_counter = 0;
 	if(debug_counter++ % 50 == 0) {
+		float total_energy = E;
 		if(ml_constraints > 0) {
+			printf("ENERGY_DEBUG: Photo=%.2f, ML=%.2f, Total=%.2f, ML_Ratio=%.1f%%, Constraints=%d\n", 
+				   photometric_energy, ml_energy, total_energy, 
+				   (ml_energy/total_energy)*100.0f, ml_constraints);
 			printf("BUNDLE_ADJUSTMENT: Added %d ML constraints (of %d points), energy=%.6f, avg_residual=%.4f\n", 
 				   ml_constraints, total_points, ml_energy, ml_energy/ml_constraints);
 		} else if(points_with_depth_prior > 0) {
+			printf("ENERGY_DEBUG: Photo=%.2f, ML=%.2f (ZERO!), Total=%.2f\n", 
+				   photometric_energy, ml_energy, total_energy);
 			printf("BUNDLE_ADJUSTMENT: WARNING - %d points have ML depth but 0 constraints added (weights too low?)\n", 
 				   points_with_depth_prior);
 		}

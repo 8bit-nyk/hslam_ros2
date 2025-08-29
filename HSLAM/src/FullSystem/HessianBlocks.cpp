@@ -51,9 +51,21 @@ PointHessian::PointHessian(const ImmaturePoint* const rawPoint, CalibHessian* Hc
 	point_id = totalInstantCounter;
 	totalInstantCounter++;
 	host = rawPoint->host; // host frame
-	// ML Depth Integration: Transfer ML depth flag from ImmaturePoint
-	// hasDepthPrior=false;
-	hasDepthPrior = (rawPoint->idepth_GT > 0);  // ML depth available if GT depth set
+	
+	// RESTORED: hasDepthPrior for indirect MapPoint priors only (original DSO design)
+	hasDepthPrior = false;  // Will be set to true only for indirect MapPoint priors
+	
+	// ML Depth Integration: Separate from hasDepthPrior to avoid conflicts
+	hasMLDepth = (rawPoint->idepth_GT > 0);
+	if (hasMLDepth) {
+		ml_idepth_reference = rawPoint->idepth_GT;
+		ml_uncertainty = 0.1f;  // Default uncertainty, will be refined during assignment
+		ml_weight = 0.0f;       // Will be computed adaptively
+	} else {
+		ml_idepth_reference = 0.0f;
+		ml_uncertainty = 0.0f;
+		ml_weight = 0.0f;
+	}
 
 	idepth_hessian=0;
 	maxRelBaseline=0;

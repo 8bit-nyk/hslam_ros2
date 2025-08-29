@@ -517,7 +517,13 @@ struct PointHessian
 	int idx;
 	float energyTH;
 	FrameHessian* host;
-	bool hasDepthPrior;
+	bool hasDepthPrior;          // RESTORED: For indirect MapPoint priors only
+	
+	// ML Depth Integration Fields (separated from hasDepthPrior)
+	bool hasMLDepth;             // NEW: Separate ML depth flag  
+	float ml_idepth_reference;   // NEW: ML depth reference value
+	float ml_uncertainty;        // NEW: ML depth uncertainty
+	float ml_weight;             // NEW: Computed adaptive ML weight
 
 	float my_type;
 

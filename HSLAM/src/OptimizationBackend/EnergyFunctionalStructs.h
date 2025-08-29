@@ -114,8 +114,12 @@ public:
 
 
 
-	float priorF;
+	float priorF;          // For indirect MapPoint priors (original DSO)
 	float deltaF;
+	
+	// ML Depth Integration Fields (separated from priorF)
+	float ml_priorF;       // NEW: For ML depth priors only
+	float ml_reference;    // NEW: ML reference depth (idepth_zero equivalent)
 
 
 	// constant info (never changes in-between).

@@ -642,7 +642,8 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
     cv::minMaxLoc(final_depth, &min_depth, &max_depth);
     
     cv::Scalar mean_depth = cv::mean(final_depth);
-    printf("ML depth postprocess: range=[%.2f, %.2f], mean=%.2f\n", min_depth, max_depth, mean_depth[0]);
+    // TEMP_DEBUG_REPETITIVE: Commented out for cleaner testing output
+    // printf("ML depth postprocess: range=[%.2f, %.2f], mean=%.2f\n", min_depth, max_depth, mean_depth[0]);
     
     // Quality validation
     if (min_depth < 0.0 || max_depth > 100.0) {

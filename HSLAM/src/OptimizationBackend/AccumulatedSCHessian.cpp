@@ -44,14 +44,28 @@ void AccumulatedSCHessianSSE::addPoint(EFPoint* p, bool shiftPriorToZero, int ti
 		return;
 	}
 
-	float H = p->Hdd_accAF+p->Hdd_accLF+p->priorF;
+	// Apply both indirect and ML priors independently
+	float H = p->Hdd_accAF+p->Hdd_accLF+p->priorF+p->ml_priorF;
 	if(H < 1e-10) H = 1e-10;
 
 	p->data->idepth_hessian=H;
 
 	p->HdiF = 1.0 / H;
 	p->bdSumF = p->bd_accAF + p->bd_accLF;
-	if(shiftPriorToZero) p->bdSumF += p->priorF*p->deltaF;
+	
+	// Apply both prior types separately when shifting to zero
+	if(shiftPriorToZero) {
+		// Original indirect MapPoint prior
+		if(p->priorF > 0) {
+			p->bdSumF += p->priorF * p->deltaF;
+		}
+		
+		// ML depth prior (relative to ML reference, not idepth_zero)
+		if(p->ml_priorF > 0) {
+			float ml_deltaF = p->data->idepth - p->ml_reference;
+			p->bdSumF += p->ml_priorF * ml_deltaF;
+		}
+	}
 	VecCf Hcd = p->Hcd_accAF + p->Hcd_accLF;
 	accHcc[tid].update(Hcd,Hcd,p->HdiF);
 	accbc[tid].update(Hcd, p->bdSumF * p->HdiF);

@@ -301,9 +301,9 @@ bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,f
 				sumNID += fabsf(ph->idepth_backup);
 				numID++;
 
-                // CRITICAL FIX: Don't overwrite idepth_zero for ML points
-                // This preserves ML reference depth for bundle adjustment constraints
-                if(!ph->hasDepthPrior) {
+                // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors
+                // This preserves both ML reference depth and indirect MapPoint priors
+                if(!ph->hasDepthPrior && !ph->hasMLDepth) {
                     ph->setIdepthZero(ph->idepth_backup + step_ph);
                 }
 			}
@@ -327,9 +327,9 @@ bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,f
 				sumNID += fabsf(ph->idepth_backup);
 				numID++;
 
-                // CRITICAL FIX: Don't overwrite idepth_zero for ML points
-                // This preserves ML reference depth for bundle adjustment constraints
-                if(!ph->hasDepthPrior) {
+                // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors
+                // This preserves both ML reference depth and indirect MapPoint priors  
+                if(!ph->hasDepthPrior && !ph->hasMLDepth) {
                     ph->setIdepthZero(ph->idepth_backup + stepfacD*ph->step);
                 }
 			}
@@ -437,9 +437,9 @@ void FullSystem::loadSateBackup()
 		{
 			ph->setIdepth(ph->idepth_backup);
 
-            // CRITICAL FIX: Don't overwrite idepth_zero for ML points during backup restoration
-            // This preserves ML reference depth even when optimization backtracks
-            if(!ph->hasDepthPrior) {
+            // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors during backup restoration
+            // This preserves both ML reference depth and indirect MapPoint priors during backtracking
+            if(!ph->hasDepthPrior && !ph->hasMLDepth) {
                 ph->setIdepthZero(ph->idepth_backup);
             }
 		}
@@ -492,8 +492,12 @@ void FullSystem::printOptRes(const Vec3 &res, double resL, double resM, double r
  */
 float FullSystem::optimize(int mnumOptIts)
 {
+	printf("TEMP_DEBUG: optimize() called with %zu frameHessians, mnumOptIts=%d\n", frameHessians.size(), mnumOptIts);
 
-	if(frameHessians.size() < 2) return 0;
+	if(frameHessians.size() < 2) {
+		printf("TEMP_DEBUG: optimize() EARLY RETURN - frameHessians.size()=%zu < 2\n", frameHessians.size());
+		return 0;
+	}
 	if(frameHessians.size() < 3) mnumOptIts = 20;
 	if(frameHessians.size() < 4) mnumOptIts = 15;
 
@@ -533,7 +537,9 @@ float FullSystem::optimize(int mnumOptIts)
 	// Do optimization process
 	Vec3 lastEnergy = linearizeAll(false);
 	double lastEnergyL = calcLEnergy();
+	printf("TEMP_DEBUG: About to call calcMEnergy() in optimize()\n");
 	double lastEnergyM = calcMEnergy();
+	printf("TEMP_DEBUG: calcMEnergy() returned: %f\n", lastEnergyM);
 
 
 
@@ -844,23 +850,26 @@ std::vector<VecX> FullSystem::getNullspaces(
 		if(i==1) nullspaces_affB.push_back(nullspace_x0);
 	}
 
-	// Conditional scale nullspace: only add for pure monocular (no metric scale)
-	if (!using_metric_scale_) {
-		VecX nullspace_x0(n);
-		nullspace_x0.setZero();
-		for(FrameHessian* fh : frameHessians)
-		{
-			nullspace_x0.segment<6>(CPARS+fh->idx*8) = fh->nullspaces_scale;
-			nullspace_x0.segment<3>(CPARS+fh->idx*8) *= SCALE_XI_TRANS_INVERSE;
-			nullspace_x0.segment<3>(CPARS+fh->idx*8+3) *= SCALE_XI_ROT_INVERSE;
-		}
-		nullspaces_x0_pre.push_back(nullspace_x0);
-		nullspaces_scale.push_back(nullspace_x0);
-		// printf("[SCALE_DEBUG] Added scale nullspace (monocular mode) - scale drift allowed\n");
-	} else {
-		// printf("[SCALE_DEBUG] Skipped scale nullspace (metric scale mode) - scale preserved\n");
+	// CRITICAL FIX: Always add scale nullspace for indirect SLAM compatibility
+	// Even with ML metric scale, indirect SLAM requires scale nullspace for proper optimization
+	VecX nullspace_x0(n);
+	nullspace_x0.setZero();
+	for(FrameHessian* fh : frameHessians)
+	{
+		nullspace_x0.segment<6>(CPARS+fh->idx*8) = fh->nullspaces_scale;
+		nullspace_x0.segment<3>(CPARS+fh->idx*8) *= SCALE_XI_TRANS_INVERSE;
+		nullspace_x0.segment<3>(CPARS+fh->idx*8+3) *= SCALE_XI_ROT_INVERSE;
 	}
-	// When using_metric_scale_ is true, scale is observable from ML depth - don't add scale nullspace
+	nullspaces_x0_pre.push_back(nullspace_x0);
+	nullspaces_scale.push_back(nullspace_x0);
+	
+	if (!using_metric_scale_) {
+		printf("[SCALE_DEBUG] Added scale nullspace (photometric mode) - scale drift allowed\n");
+	} else {
+		printf("[SCALE_DEBUG] Added scale nullspace (ML mode) - preserving indirect SLAM compatibility\n");
+	}
+	// NOTE: ML depth provides scale constraints through priors, but scale nullspace is still needed
+	// for proper optimization convergence and indirect SLAM functionality
 
 	return nullspaces_x0_pre;
 }
