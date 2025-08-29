@@ -124,8 +124,17 @@ MLDepthProcessor::ProcessingResult MLDepthProcessor::processKeyframeDetailed(con
         successful_processed_.fetch_add(1);
         
         detailed_result.depth_map = result.depth_map;
+        detailed_result.confidence_map = result.confidence_map;  // PHASE 2: Pass confidence map
         detailed_result.success = true;
         detailed_result.confidence = 1.0f;  // High confidence for successful Metric3D processing
+        
+        // PHASE2_DEBUG: Log confidence map transfer
+        if(!result.confidence_map.empty()) {
+            printf("PHASE2_DEBUG: MLDepthProcessor - Transferred confidence map %dx%d\n", 
+                   result.confidence_map.cols, result.confidence_map.rows);
+        } else {
+            printf("PHASE2_DEBUG: MLDepthProcessor - No confidence map from inference\n");
+        }
         
         // Add depth quality information
         double min_depth, max_depth;

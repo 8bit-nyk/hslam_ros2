@@ -6,6 +6,7 @@
 #include <cmath>
 #include <fstream>
 #include <unistd.h>
+#include <numeric>  // PHASE 2: For std::accumulate
 
 namespace HSLAM {
 namespace ML {
@@ -384,6 +385,44 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
         auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
         auto output_data = output_tensor.GetTensorData<float>();
         
+        // PHASE 2: Extract uncertainty/confidence from output[2] if available
+        std::vector<float> uncertainty_values;
+        int uncertainty_height = 0, uncertainty_width = 0;
+        bool has_uncertainty = false;
+        
+        if(config_.model_type == METRIC3D_V2 && output_tensors.size() > 2) {
+            auto& uncertainty_tensor = output_tensors[2];
+            auto uncertainty_shape = uncertainty_tensor.GetTensorTypeAndShapeInfo().GetShape();
+            auto uncertainty_data = uncertainty_tensor.GetTensorData<float>();
+            
+            // PHASE2_DEBUG: Log uncertainty extraction
+            printf("PHASE2_DEBUG: Found output[2] with %zu dimensions\n", uncertainty_shape.size());
+            
+            if(uncertainty_shape.size() >= 2) {
+                uncertainty_height = static_cast<int>(uncertainty_shape[uncertainty_shape.size()-2]);
+                uncertainty_width = static_cast<int>(uncertainty_shape[uncertainty_shape.size()-1]);
+                
+                size_t uncertainty_size = 1;
+                for(auto dim : uncertainty_shape) uncertainty_size *= dim;
+                
+                if(uncertainty_size > 0) {
+                    uncertainty_values = std::vector<float>(uncertainty_data, uncertainty_data + uncertainty_size);
+                    has_uncertainty = true;
+                    
+                    // PHASE2_DEBUG: Analyze uncertainty statistics
+                    float min_unc = *std::min_element(uncertainty_values.begin(), uncertainty_values.end());
+                    float max_unc = *std::max_element(uncertainty_values.begin(), uncertainty_values.end());
+                    float mean_unc = std::accumulate(uncertainty_values.begin(), uncertainty_values.end(), 0.0f) / uncertainty_values.size();
+                    
+                    printf("PHASE2_DEBUG: Uncertainty extracted - Size: %dx%d, Range: [%.3f, %.3f], Mean: %.3f\n",
+                           uncertainty_width, uncertainty_height, min_unc, max_unc, mean_unc);
+                }
+            }
+        } else {
+            // PHASE2_DEBUG: Log when uncertainty is not available
+            printf("PHASE2_DEBUG: No uncertainty output - Model outputs: %zu\n", output_tensors.size());
+        }
+        
         // Debug: Validate output shape
         if(output_shape.empty()) {
             result.error_message = "Output tensor has empty shape";
@@ -411,16 +450,40 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             return result;
         }
         
-        cv::Mat depth_map;
+        cv::Mat depth_map, confidence_map;
+        
         switch(config_.model_type) {
             case METRIC3D_V2:
                 depth_map = postprocessMetric3D(output_values, output_width, output_height, input_image.cols, input_image.rows);
+                
+                // PHASE 2: Process uncertainty into confidence map
+                if(has_uncertainty) {
+                    confidence_map = processUncertaintyToConfidence(uncertainty_values, uncertainty_width, uncertainty_height, 
+                                                                  input_image.cols, input_image.rows);
+                    // PHASE2_DEBUG: Log confidence processing
+                    if(!confidence_map.empty()) {
+                        cv::Scalar conf_mean, conf_std;
+                        cv::meanStdDev(confidence_map, conf_mean, conf_std);
+                        printf("PHASE2_DEBUG: Confidence map created - Size: %dx%d, Mean: %.3f, Std: %.3f\n",
+                               confidence_map.cols, confidence_map.rows, conf_mean[0], conf_std[0]);
+                    }
+                } else {
+                    // PHASE2_DEBUG: Create default confidence map
+                    confidence_map = cv::Mat::ones(input_image.rows, input_image.cols, CV_32F);
+                    printf("PHASE2_DEBUG: Created default confidence map (all 1.0)\n");
+                }
                 break;
             case DEPTH_ANYTHING:
                 depth_map = postprocessDepthAnything(output_values, output_width, output_height);
+                // PHASE2_DEBUG: No uncertainty for DepthAnything
+                confidence_map = cv::Mat::ones(input_image.rows, input_image.cols, CV_32F);
+                printf("PHASE2_DEBUG: DepthAnything - Created default confidence map\n");
                 break;
             case MIDAS_V3:
                 depth_map = postprocessMiDaS(output_values, output_width, output_height);
+                // PHASE2_DEBUG: No uncertainty for MiDaS
+                confidence_map = cv::Mat::ones(input_image.rows, input_image.cols, CV_32F);
+                printf("PHASE2_DEBUG: MiDaS - Created default confidence map\n");
                 break;
         }
         
@@ -435,10 +498,16 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             cv::resize(depth_map, depth_map, input_image.size(), 0, 0, cv::INTER_LINEAR);
         }
         
+        // PHASE 2: Resize confidence map if needed
+        if(!confidence_map.empty() && confidence_map.size() != input_image.size()) {
+            cv::resize(confidence_map, confidence_map, input_image.size(), 0, 0, cv::INTER_LINEAR);
+        }
+        
         auto end_time = std::chrono::steady_clock::now();
         result.inference_time_ms = std::chrono::duration<float, std::milli>(end_time - start_time).count();
         
         result.depth_map = depth_map;
+        result.confidence_map = confidence_map;  // PHASE 2: Include confidence map
         result.success = true;
         
         return result;
@@ -1122,6 +1191,93 @@ float MLInference::benchmarkInferencePerformance(const cv::Mat& test_image, cons
     printf("MLInference: Benchmarking not available - ONNX Runtime not compiled\n");
     return -1.0f;
 #endif
+}
+
+// PHASE 2: Convert normal uncertainty to confidence
+cv::Mat MLInference::processUncertaintyToConfidence(const std::vector<float>& uncertainty_output, int width, int height, int target_width, int target_height) const {
+    // PHASE2_DEBUG: Log function entry
+    printf("PHASE2_DEBUG: processUncertaintyToConfidence called - Input: %dx%d -> Target: %dx%d\n", 
+           width, height, target_width, target_height);
+    
+    if(uncertainty_output.empty()) {
+        // PHASE2_DEBUG: Empty input
+        printf("PHASE2_DEBUG: Empty uncertainty output - returning empty confidence map\n");
+        return cv::Mat();
+    }
+    
+    // Validate input dimensions
+    size_t expected_size = static_cast<size_t>(width * height);
+    if(uncertainty_output.size() != expected_size) {
+        // PHASE2_DEBUG: Size mismatch
+        printf("PHASE2_DEBUG: Size mismatch - expected %zu, got %zu\n", expected_size, uncertainty_output.size());
+        return cv::Mat();
+    }
+    
+    // Create uncertainty map from raw output
+    cv::Mat uncertainty_map(height, width, CV_32FC1);
+    std::memcpy(uncertainty_map.ptr<float>(), uncertainty_output.data(), uncertainty_output.size() * sizeof(float));
+    
+    // PHASE2_DEBUG: Analyze uncertainty before conversion
+    cv::Scalar unc_mean, unc_std;
+    cv::meanStdDev(uncertainty_map, unc_mean, unc_std);
+    double unc_min, unc_max;
+    cv::minMaxLoc(uncertainty_map, &unc_min, &unc_max);
+    printf("PHASE2_DEBUG: Raw uncertainty - Min: %.3f, Max: %.3f, Mean: %.3f, Std: %.3f\n", 
+           unc_min, unc_max, unc_mean[0], unc_std[0]);
+    
+    // Convert uncertainty to confidence [0,1]
+    // High uncertainty = low confidence
+    // Use sigmoid-like transformation: confidence = 1 / (1 + uncertainty/scale)
+    cv::Mat confidence_map = cv::Mat::zeros(height, width, CV_32FC1);
+    const float uncertainty_scale = 5.0f;  // Tunable parameter
+    
+    for(int y = 0; y < height; y++) {
+        for(int x = 0; x < width; x++) {
+            float uncertainty = uncertainty_map.at<float>(y, x);
+            // Sigmoid transformation: high uncertainty -> low confidence
+            float confidence = 1.0f / (1.0f + uncertainty / uncertainty_scale);
+            confidence_map.at<float>(y, x) = confidence;
+        }
+    }
+    
+    // PHASE2_DEBUG: Analyze confidence after conversion
+    cv::Scalar conf_mean, conf_std;
+    cv::meanStdDev(confidence_map, conf_mean, conf_std);
+    double conf_min, conf_max;
+    cv::minMaxLoc(confidence_map, &conf_min, &conf_max);
+    printf("PHASE2_DEBUG: Converted confidence - Min: %.3f, Max: %.3f, Mean: %.3f, Std: %.3f\n",
+           conf_min, conf_max, conf_mean[0], conf_std[0]);
+    
+    // Remove padding if it was applied (similar to depth processing)
+    cv::Mat unpadded_confidence;
+    if (current_padding_.top >= 0) {
+        int unpadded_height = height - current_padding_.top - current_padding_.bottom;
+        int unpadded_width = width - current_padding_.left - current_padding_.right;
+        
+        if(unpadded_height > 0 && unpadded_width > 0) {
+            cv::Rect roi(current_padding_.left, current_padding_.top, unpadded_width, unpadded_height);
+            unpadded_confidence = confidence_map(roi).clone();
+            // PHASE2_DEBUG: Log unpadding
+            printf("PHASE2_DEBUG: Unpadded confidence %dx%d -> %dx%d\n", width, height, unpadded_width, unpadded_height);
+        } else {
+            unpadded_confidence = confidence_map;
+        }
+    } else {
+        unpadded_confidence = confidence_map;
+    }
+    
+    // Resize to target dimensions if specified
+    if(target_width > 0 && target_height > 0 && 
+       (unpadded_confidence.cols != target_width || unpadded_confidence.rows != target_height)) {
+        cv::Mat resized_confidence;
+        cv::resize(unpadded_confidence, resized_confidence, cv::Size(target_width, target_height), 0, 0, cv::INTER_LINEAR);
+        // PHASE2_DEBUG: Log resizing
+        printf("PHASE2_DEBUG: Resized confidence %dx%d -> %dx%d\n", 
+               unpadded_confidence.cols, unpadded_confidence.rows, target_width, target_height);
+        return resized_confidence;
+    }
+    
+    return unpadded_confidence;
 }
 
 } // namespace ML

@@ -209,6 +209,21 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 	PointHessian* p = new PointHessian(point, &Hcalib);
 	if(!std::isfinite(p->energyTH)) {delete p; return (PointHessian*)((long)(-1));}
 
+	// PHASE 2 FIX: Ensure ML confidence values are properly transferred (backup to constructor)
+	if(point->idepth_GT > 0 && point->ml_confidence > 0) {
+		float adaptive_confidence = std::max(0.1f, std::min(1.0f, point->ml_confidence));
+		p->ml_weight = setting_mlDepthWeight * adaptive_confidence;
+		p->ml_uncertainty = (point->ml_uncertainty_m > 0) ? point->ml_uncertainty_m : 0.1f;
+		
+		// PHASE2_DEBUG: Log final adaptive weight for verification  
+		static int weight_transfer_count = 0;
+		if (weight_transfer_count < 3) {
+			printf("PHASE2_DEBUG: Final adaptive weight %d: conf=%.3f -> weight=%.3f (base=%.3f)\n",
+			       weight_transfer_count, adaptive_confidence, p->ml_weight, setting_mlDepthWeight);
+			weight_transfer_count++;
+		}
+	}
+
 	p->lastResiduals[0].first = 0;
 	p->lastResiduals[0].second = ResState::OOB;
 	p->lastResiduals[1].first = 0;

@@ -1888,6 +1888,25 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					// NEW: Set as ML reference for tracking (CoarseTracker-style pattern)
 					setMLReference(fh->frameID, ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
 				
+					// PHASE 2: Store confidence map for point creation with proper validation
+					if (!ml_result.confidence_map.empty()) {
+						// Store confidence map with proper resolution matching
+						if(ml_result.confidence_map.cols != wG[0] || ml_result.confidence_map.rows != hG[0]) {
+							cv::Mat resized_confidence;
+							cv::resize(ml_result.confidence_map, resized_confidence, 
+								      cv::Size(wG[0], hG[0]), 0, 0, cv::INTER_LINEAR);
+							currentMLConfidenceMap = resized_confidence;
+							printf("PHASE2_DEBUG: Resized confidence map from %dx%d to %dx%d\n",
+							       ml_result.confidence_map.cols, ml_result.confidence_map.rows, wG[0], hG[0]);
+						} else {
+							currentMLConfidenceMap = ml_result.confidence_map.clone();
+							printf("PHASE2_DEBUG: Stored confidence map %dx%d (no resize needed)\n", wG[0], hG[0]);
+						}
+					} else {
+						currentMLConfidenceMap = cv::Mat();
+						printf("PHASE2_DEBUG: No confidence map available from ML inference\n");
+					}
+				
 					// PHASE 3: Forward ML depth to CoarseTracker for frame-to-frame tracking (KEYFRAMES ONLY)
 					if(initialized && !currentMLDepthImage.empty()) {
 						// Ensure ML depth dimensions match processing resolution
@@ -2137,10 +2156,11 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 				printf("makeNewTraces: Using ML depth (%dx%d) for enhanced tracking\n", 
 				       currentMLDepthImage.cols, currentMLDepthImage.rows);
 			}
-			makeNewTracesWithMLDepth(fh, currentMLDepthImage);
+			makeNewTracesWithMLDepth(fh, currentMLDepthImage, currentMLConfidenceMap);
 			
-			// Clear ML depth after use
+			// Clear ML depth and confidence after use
 			currentMLDepthImage = cv::Mat();
+			currentMLConfidenceMap = cv::Mat();
 		} else {
 			// Use RGB-D depth if available, otherwise pure monocular
 			makeNewTraces(fh, depthData);
@@ -2509,7 +2529,13 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 	HSLAM::DepthLogger::logPointCreation((int)newFrame->immaturePoints.size(), depthIntegratedCount);
 }
 
-void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth) {
+void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth, const cv::Mat& ml_confidence) {
+    // PHASE2_DEBUG: Log function entry with confidence info
+    printf("PHASE2_DEBUG: makeNewTracesWithMLDepth called - ML depth: %dx%d, Confidence: %dx%d\n",
+           ml_depth.cols, ml_depth.rows, 
+           ml_confidence.empty() ? 0 : ml_confidence.cols, 
+           ml_confidence.empty() ? 0 : ml_confidence.rows);
+    
     int numPointsTotal = pixelSelector->makeMaps(newFrame, selectionMap, setting_desiredImmatureDensity);
     
     newFrame->pointHessians.reserve(numPointsTotal * 1.2f);
@@ -2527,24 +2553,45 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
             
             ImmaturePoint* impt = new ImmaturePoint(x, y, newFrame, selectionMap[i], &Hcalib);
             
-            // ML depth integration - SET ML bounds at creation, combine during tracing
+            // PHASE 2: ML depth integration with inverse-depth aware uncertainty transformation
             if(!ml_depth.empty() && y < ml_depth.rows && x < ml_depth.cols) {
                 float depth = ml_depth.at<float>(y, x);
                 
                 if(depth > 0.0f && std::isfinite(depth)) {
-                    // Phase 1 Fix: Compute ML bounds but don't combine yet
+                    // PHASE 2: Extract per-pixel ML confidence if available
+                    float pixel_confidence = 1.0f;  // Default confidence
+                    if(!ml_confidence.empty() && y < ml_confidence.rows && x < ml_confidence.cols) {
+                        pixel_confidence = ml_confidence.at<float>(y, x);
+                        pixel_confidence = std::max(0.1f, std::min(1.0f, pixel_confidence));  // Clamp to [0.1, 1.0]
+                    }
+                    
+                    // PHASE 2: Improved uncertainty model (base + relative)
                     const float base_uncertainty = 0.04f;  // 4cm minimum  
                     const float relative_factor = 0.04f;   // 4% relative
-                    const float u = base_uncertainty + depth * relative_factor;
-
-                    const float idepth        = 1.0f / depth;             // m⁻¹
-                    const float idepth_min_ml = 1.0f / (depth + u);       // m⁻¹
-                    const float idepth_max_ml = 1.0f / std::max(0.05f, depth - u); // m⁻¹ (ε avoids /0)
-
-                    // Store ML bounds directly - combination happens during tracing
-                    impt->idepth_min = idepth_min_ml;
-                    impt->idepth_max = idepth_max_ml;
-                    impt->idepth_GT  = idepth;
+                    float uncertainty_m = base_uncertainty + depth * relative_factor;
+                    
+                    // PHASE 2: CRITICAL - Transform metric uncertainty to inverse depth uncertainty
+                    // Uncertainty propagation: d(1/depth)/d(depth) = -1/depth²
+                    // So uncertainty in inverse depth = uncertainty_m / depth²
+                    const float idepth = 1.0f / depth;
+                    float idepth_uncertainty = uncertainty_m / (depth * depth);
+                    
+                    // PHASE 2: Modulate uncertainty by confidence (low confidence = higher uncertainty)
+                    float effective_idepth_uncertainty = idepth_uncertainty / pixel_confidence;
+                    
+                    // PHASE 2: Store ML bounds with proper uncertainty propagation
+                    impt->idepth_min = idepth - effective_idepth_uncertainty;
+                    impt->idepth_max = idepth + effective_idepth_uncertainty;
+                    impt->idepth_GT = idepth;
+                    impt->ml_confidence = pixel_confidence;           // Store per-pixel confidence
+                    impt->ml_uncertainty_m = uncertainty_m;          // Store metric uncertainty
+                    
+                    // PHASE2_DEBUG: Log first few points with confidence info
+                    if(ml_depth_points < 3) {
+                        printf("PHASE2_DEBUG: Point[%d] - Depth: %.2fm, Conf: %.3f, Unc_m: %.3f, Unc_idepth: %.6f, Bounds: [%.6f, %.6f]\n",
+                               ml_depth_points, depth, pixel_confidence, uncertainty_m, effective_idepth_uncertainty,
+                               impt->idepth_min, impt->idepth_max);
+                    }
                     
                     // Debug output for ML bounds verification (COMMENTED OUT for cleaner testing)
                     // if(ml_depth_points < 20 || ml_depth_points % 100 == 0) {

@@ -91,6 +91,10 @@ public:
 	float lastTracePixelInterval;
 
 	float idepth_GT;
+	
+	// PHASE 2: ML confidence and uncertainty fields
+	float ml_confidence;      // Per-pixel ML confidence [0,1] from normal uncertainty
+	float ml_uncertainty_m;   // Uncertainty in meters (for inverse depth transformation)
 
 	double linearizeResidual(
 			CalibHessian *  HCalib, const float outlierTHSlack,

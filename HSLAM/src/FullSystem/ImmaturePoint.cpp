@@ -40,7 +40,8 @@ namespace HSLAM
  * @param HCalib 
  */
 ImmaturePoint::ImmaturePoint(int u_, int v_, FrameHessian* host_, float type, CalibHessian* HCalib)
-: u(u_), v(v_), host(host_), my_type(type), idepth_min(0), idepth_max(NAN), lastTraceStatus(IPS_UNINITIALIZED)
+: u(u_), v(v_), host(host_), my_type(type), idepth_min(0), idepth_max(NAN), lastTraceStatus(IPS_UNINITIALIZED),
+  ml_confidence(0.0f), ml_uncertainty_m(0.0f)  // PHASE 2: Initialize ML confidence fields
 {
 
 	gradH.setZero();
@@ -472,6 +473,52 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 	}
 	if(photometric_min > photometric_max) std::swap<float>(photometric_min, photometric_max);
 	
+	// PHASE 2: Scene-adaptive confidence computation
+	float adaptive_confidence = 1.0f;
+	if(ml_confidence > 0.0f && ml_uncertainty_m > 0.0f) {
+		// Factor 1: Base ML confidence (from normal prediction uncertainty)
+		float ml_conf_factor = ml_confidence;
+		
+		// Factor 2: Texture quality assessment
+		float texture_strength = sqrt(gradH_ev[0] + gradH_ev[1]);  // Combined gradient magnitude
+		float texture_factor = std::min(1.0f, texture_strength / 50.0f);  // Normalize to [0,1]
+		
+		// Factor 3: Depth agreement between ML and photometric
+		float ml_depth = (ml_uncertainty_m > 0 && std::isfinite(1.0f/idepth_GT)) ? 1.0f/idepth_GT : 0.0f;
+		float photometric_center = (photometric_min + photometric_max) * 0.5f;
+		float photo_depth = std::isfinite(photometric_center) && photometric_center > 0 ? 1.0f/photometric_center : 0.0f;
+		
+		float depth_agreement = 1.0f;
+		if(ml_depth > 0 && photo_depth > 0) {
+			float depth_ratio = std::min(ml_depth, photo_depth) / std::max(ml_depth, photo_depth);
+			depth_agreement = std::max(0.3f, depth_ratio);  // Minimum 30% agreement
+		}
+		
+		// Factor 4: Spatial context (points near center are more reliable)
+		float center_u = wG[0] * 0.5f;
+		float center_v = hG[0] * 0.5f;
+		float dist_from_center = sqrt(pow(u - center_u, 2) + pow(v - center_v, 2));
+		float max_dist = sqrt(center_u*center_u + center_v*center_v);
+		float spatial_factor = std::max(0.5f, 1.0f - (dist_from_center / max_dist));
+		
+		// Combine all factors with appropriate weights
+		adaptive_confidence = ml_conf_factor * 0.4f +        // 40% ML model confidence
+		                     texture_factor * 0.3f +         // 30% texture quality  
+		                     depth_agreement * 0.2f +        // 20% depth agreement
+		                     spatial_factor * 0.1f;          // 10% spatial context
+		
+		// Clamp to reasonable bounds
+		adaptive_confidence = std::max(0.1f, std::min(1.0f, adaptive_confidence));
+		
+		// PHASE2_DEBUG: Log first few adaptive confidence computations
+		static int adaptive_debug_count = 0;
+		if(adaptive_debug_count < 5) {
+			printf("PHASE2_DEBUG: Adaptive confidence point %d: ml=%.3f, texture=%.3f, agreement=%.3f, spatial=%.3f -> final=%.3f\n",
+			       adaptive_debug_count, ml_conf_factor, texture_factor, depth_agreement, spatial_factor, adaptive_confidence);
+			adaptive_debug_count++;
+		}
+	}
+	
 	// PHASE 1 HYBRID BOUNDS: Combine photometric and ML bounds at tracing time
 	if(idepth_GT > 0 && setting_preserveMLDepthBounds && 
 	   std::isfinite(idepth_min) && std::isfinite(idepth_max))
@@ -494,12 +541,20 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 			
 			// Debug: Intersection mode working correctly
 		} else {
-			// Bounds don't overlap - use weighted average (30% ML, 70% photometric)
-			const float ml_trust = 0.3f;
-			idepth_min = ml_trust * ml_min + (1.0f - ml_trust) * photometric_min;
-			idepth_max = ml_trust * ml_max + (1.0f - ml_trust) * photometric_max;
+			// PHASE 2: Bounds don't overlap - use adaptive confidence-based smooth blending
+			float ml_trust = adaptive_confidence;  // Use scene-adaptive confidence instead of fixed 30%
+			float photometric_trust = 1.0f - ml_trust;
 			
-			// Debug: Non-overlapping bounds blended (30% ML, 70% photometric)
+			idepth_min = ml_trust * ml_min + photometric_trust * photometric_min;
+			idepth_max = ml_trust * ml_max + photometric_trust * photometric_max;
+			
+			// PHASE2_DEBUG: Log adaptive blending for first few points
+			static int blend_debug_count = 0;
+			if(blend_debug_count < 3) {
+				printf("PHASE2_DEBUG: Adaptive blending point %d: ML trust=%.3f (was 0.30), bounds=[%.3f,%.3f]\n",
+				       blend_debug_count, ml_trust, idepth_min, idepth_max);
+				blend_debug_count++;
+			}
 		}
 		trace_count++;
 	}

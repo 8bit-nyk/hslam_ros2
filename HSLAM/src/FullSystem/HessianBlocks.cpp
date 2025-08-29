@@ -59,8 +59,21 @@ PointHessian::PointHessian(const ImmaturePoint* const rawPoint, CalibHessian* Hc
 	hasMLDepth = (rawPoint->idepth_GT > 0);
 	if (hasMLDepth) {
 		ml_idepth_reference = rawPoint->idepth_GT;
-		ml_uncertainty = 0.1f;  // Default uncertainty, will be refined during assignment
-		ml_weight = 0.0f;       // Will be computed adaptively
+		
+		// PHASE 2 FIX: Transfer actual ML confidence and uncertainty from ImmaturePoint
+		ml_uncertainty = (rawPoint->ml_uncertainty_m > 0) ? rawPoint->ml_uncertainty_m : 0.1f;
+		
+		// PHASE 2 FIX: Compute adaptive ML weight based on confidence
+		float confidence = std::max(0.1f, std::min(1.0f, rawPoint->ml_confidence));
+		ml_weight = setting_mlDepthWeight * confidence;  // Scale base weight by confidence
+		
+		// PHASE2_DEBUG: Log confidence transfer for verification
+		static int confidence_transfer_count = 0;
+		if (confidence_transfer_count < 3) {
+			printf("PHASE2_DEBUG: PointHessian confidence transfer %d: conf=%.3f, unc_m=%.3f, weight=%.3f\n",
+			       confidence_transfer_count, confidence, ml_uncertainty, ml_weight);
+			confidence_transfer_count++;
+		}
 	} else {
 		ml_idepth_reference = 0.0f;
 		ml_uncertainty = 0.0f;
