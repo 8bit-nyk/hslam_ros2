@@ -1885,6 +1885,9 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
 					fh->setMLPending(false);  // Clear pending flag
 					
+					// CRITICAL FIX: Immediate scale alignment to prevent mixed scale artifacts
+					alignScalesImmediately(ml_result.depth_map);
+					
 					// NEW: Set as ML reference for tracking (CoarseTracker-style pattern)
 					setMLReference(fh->frameID, ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
 				
@@ -2020,6 +2023,13 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	// =========================== Activate Points (& flag for marginalization). =========================
 	activatePointsMT();
 	ef->makeIDX();
+	
+	// Attempt scale alignment after point activation (when mature points are available)
+	// NOTE: With immediate alignment fix, this should usually be already done
+	if (!scale_aligned_) {
+		printf("[SCALE_FIX] Late scale alignment attempted (should be rare now)\n");
+		computeScaleAlignment();
+	}
 
 
 
@@ -2530,11 +2540,7 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 }
 
 void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth, const cv::Mat& ml_confidence) {
-    // PHASE2_DEBUG: Log function entry with confidence info
-    printf("PHASE2_DEBUG: makeNewTracesWithMLDepth called - ML depth: %dx%d, Confidence: %dx%d\n",
-           ml_depth.cols, ml_depth.rows, 
-           ml_confidence.empty() ? 0 : ml_confidence.cols, 
-           ml_confidence.empty() ? 0 : ml_confidence.rows);
+    // ML depth integration with confidence maps
     
     int numPointsTotal = pixelSelector->makeMaps(newFrame, selectionMap, setting_desiredImmatureDensity);
     
@@ -2553,11 +2559,19 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
             
             ImmaturePoint* impt = new ImmaturePoint(x, y, newFrame, selectionMap[i], &Hcalib);
             
-            // PHASE 2: ML depth integration with inverse-depth aware uncertainty transformation
+            // ML depth integration with scale alignment and validation
             if(!ml_depth.empty() && y < ml_depth.rows && x < ml_depth.cols) {
-                float depth = ml_depth.at<float>(y, x);
+                float raw_ml_depth = ml_depth.at<float>(y, x);
                 
-                if(depth > 0.0f && std::isfinite(depth)) {
+                // Validate ML depth before processing
+                if(isMLDepthValid(raw_ml_depth, 50.0f)) {
+                    // Convert ML depth from metric to SLAM scale (should be immediate now)
+                    float depth = convertMLDepthToSLAMScale(raw_ml_depth);
+                    
+                    // Debug: verify scale alignment is working
+                    if(ml_depth_points == 0 && scale_aligned_) {
+                        printf("[SCALE_FIX] Creating points with aligned scale factor: %.3f\n", ml_to_slam_scale_factor_);
+                    }
                     // PHASE 2: Extract per-pixel ML confidence if available
                     float pixel_confidence = 1.0f;  // Default confidence
                     if(!ml_confidence.empty() && y < ml_confidence.rows && x < ml_confidence.cols) {
@@ -2586,12 +2600,7 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                     impt->ml_confidence = pixel_confidence;           // Store per-pixel confidence
                     impt->ml_uncertainty_m = uncertainty_m;          // Store metric uncertainty
                     
-                    // PHASE2_DEBUG: Log first few points with confidence info
-                    if(ml_depth_points < 3) {
-                        printf("PHASE2_DEBUG: Point[%d] - Depth: %.2fm, Conf: %.3f, Unc_m: %.3f, Unc_idepth: %.6f, Bounds: [%.6f, %.6f]\n",
-                               ml_depth_points, depth, pixel_confidence, uncertainty_m, effective_idepth_uncertainty,
-                               impt->idepth_min, impt->idepth_max);
-                    }
+                    // ML depth integration complete for this point
                     
                     // Debug output for ML bounds verification (COMMENTED OUT for cleaner testing)
                     // if(ml_depth_points < 20 || ml_depth_points % 100 == 0) {
@@ -2658,6 +2667,164 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
     
     // Log using existing depth logger
     HSLAM::DepthLogger::logPointCreation(total_points, ml_depth_points);
+}
+
+/**
+ * @brief Compute scale alignment between ML depth (metric) and SLAM depth (arbitrary)
+ * 
+ * This function analyzes existing points to determine the scale factor needed to convert
+ * ML depths from metric units to the arbitrary scale used by SLAM.
+ */
+void FullSystem::computeScaleAlignment() {
+    if (scale_aligned_ || frameHessians.empty()) {
+        return;  // Already aligned or no frames to analyze
+    }
+    
+    // Collect depth samples from mature points
+    std::vector<float> slam_depths;
+    std::vector<float> ml_depths_at_points;
+    
+    // Use the most recent frame with mature points
+    for (int fh_idx = frameHessians.size() - 1; fh_idx >= 0 && slam_depths.size() < 50; fh_idx--) {
+        FrameHessian* fh = frameHessians[fh_idx];
+        
+        for (PointHessian* ph : fh->pointHessians) {
+            if (ph->idepth > 1e-6f && ph->hasMLDepth) {
+                float slam_depth = 1.0f / ph->idepth;
+                float ml_depth = ph->ml_idepth_reference > 0 ? (1.0f / ph->ml_idepth_reference) : -1.0f;
+                
+                if (ml_depth > 0.1f && ml_depth < 100.0f && slam_depth > 0.1f && slam_depth < 100.0f) {
+                    slam_depths.push_back(slam_depth);
+                    ml_depths_at_points.push_back(ml_depth);
+                }
+            }
+        }
+    }
+    
+    // Need at least 10 points for reliable scale estimation
+    if (slam_depths.size() >= 10) {
+        // Compute scale factor as median ratio to be robust to outliers
+        std::vector<float> scale_ratios;
+        for (size_t i = 0; i < slam_depths.size(); ++i) {
+            scale_ratios.push_back(slam_depths[i] / ml_depths_at_points[i]);
+        }
+        
+        std::sort(scale_ratios.begin(), scale_ratios.end());
+        ml_to_slam_scale_factor_ = scale_ratios[scale_ratios.size() / 2];  // Median
+        
+        // Store reference values for monitoring
+        reference_slam_depth_ = slam_depths[slam_depths.size() / 2];
+        reference_ml_depth_ = ml_depths_at_points[slam_depths.size() / 2];
+        
+        scale_aligned_ = true;
+        
+        printf("[SCALE_ALIGNMENT] Computed scale factor: %.3f (SLAM/ML ratio)\n", ml_to_slam_scale_factor_);
+        printf("[SCALE_ALIGNMENT] Reference: SLAM=%.2fm, ML=%.2fm, samples=%zu\n", 
+               reference_slam_depth_, reference_ml_depth_, slam_depths.size());
+    }
+}
+
+/**
+ * @brief Immediate scale alignment on first ML keyframe to prevent mixed scale artifacts
+ * 
+ * This method computes and applies scale alignment as soon as the first ML depth is available,
+ * preventing the creation of points at different scales which causes visual artifacts.
+ * 
+ * @param ml_depth ML depth map from first keyframe
+ */
+void FullSystem::alignScalesImmediately(const cv::Mat& ml_depth) {
+    if (scale_aligned_ || ml_depth.empty()) {
+        return;  // Already aligned or no ML depth available
+    }
+    
+    // Collect ML depth samples for robust scale estimation
+    std::vector<float> ml_depths;
+    ml_depths.reserve(1000);  // Pre-allocate for efficiency
+    
+    // Sample every 10th pixel to get representative depths without too much computation
+    for(int y = 5; y < ml_depth.rows; y += 10) {
+        for(int x = 5; x < ml_depth.cols; x += 10) {
+            float depth = ml_depth.at<float>(y, x);
+            // Validate depth (reasonable range for most scenes)
+            if(depth > 0.1f && depth < 100.0f && std::isfinite(depth)) {
+                ml_depths.push_back(depth);
+            }
+        }
+    }
+    
+    // Need sufficient samples for reliable estimation
+    if(ml_depths.size() < 50) {
+        printf("[IMMEDIATE_SCALE] Insufficient ML depth samples (%zu), alignment skipped\n", ml_depths.size());
+        return;
+    }
+    
+    // Compute median ML depth (robust to outliers)
+    std::sort(ml_depths.begin(), ml_depths.end());
+    float ml_median_depth = ml_depths[ml_depths.size() / 2];
+    
+    // The scale factor converts ML metric depths to SLAM arbitrary scale
+    // ml_to_slam_scale_factor = slam_scale / ml_scale
+    // Since initialization scale ≈ 1.0, we need to scale ML depths down to match
+    ml_to_slam_scale_factor_ = init_scale_factor_ / ml_median_depth;
+    
+    // Store reference values for monitoring and debugging
+    reference_ml_depth_ = ml_median_depth;
+    reference_slam_depth_ = init_scale_factor_;
+    
+    // Mark as aligned
+    scale_aligned_ = true;
+    
+    printf("[IMMEDIATE_SCALE] ✅ Scale aligned on first ML keyframe!\n");
+    printf("[IMMEDIATE_SCALE] Init scale: %.3f, ML median: %.2fm, factor: %.3f\n", 
+           init_scale_factor_, ml_median_depth, ml_to_slam_scale_factor_);
+    printf("[IMMEDIATE_SCALE] Samples used: %zu/%d pixels\n", 
+           ml_depths.size(), ml_depth.rows * ml_depth.cols);
+}
+
+/**
+ * @brief Convert ML depth from metric units to SLAM scale
+ * 
+ * @param ml_depth_meters ML depth in meters
+ * @return float Equivalent depth in SLAM arbitrary scale
+ */
+float FullSystem::convertMLDepthToSLAMScale(float ml_depth_meters) {
+    if (!scale_aligned_) {
+        // If not aligned yet, attempt alignment (should rarely happen now)
+        printf("[SCALE_FIX] WARNING: Scale not aligned during conversion, attempting late alignment\n");
+        computeScaleAlignment();
+    }
+    
+    if (scale_aligned_) {
+        return ml_depth_meters * ml_to_slam_scale_factor_;
+    }
+    
+    // Fallback: return original ML depth (no conversion)
+    return ml_depth_meters;
+}
+
+/**
+ * @brief Validate ML depth for reasonableness
+ * 
+ * @param ml_depth ML depth value to validate
+ * @param expected_range Maximum expected depth for scene
+ * @return true if depth is valid, false otherwise
+ */
+bool FullSystem::isMLDepthValid(float ml_depth, float expected_range) {
+    // Basic sanity checks
+    if (!std::isfinite(ml_depth) || ml_depth <= 0.0f) {
+        return false;
+    }
+    
+    // Scene-dependent range validation
+    if (ml_depth < 0.1f || ml_depth > expected_range) {
+        return false;
+    }
+    
+    // Additional validation based on dataset characteristics
+    // For EuRoC (indoor aerial): typical range 1-15m
+    // For KITTI (outdoor): typical range 2-80m  
+    // For TUM (indoor): typical range 0.5-8m
+    return true;
 }
 
 #ifdef ENABLE_DEPTH_DEBUG

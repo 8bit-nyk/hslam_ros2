@@ -451,22 +451,13 @@ double EnergyFunctional::calcLEnergyF_MT()
 	float photometric_energy = E;
 	E += ml_energy;
 	
-	// Energy balance monitoring (increased frequency for statistical analysis)
+	// Energy balance monitoring (reduced frequency for cleaner output)
 	static int debug_counter = 0;
-	if(debug_counter++ % 10 == 0) {
+	if(debug_counter++ % 50 == 0 && ml_constraints > 0) {
 		float total_energy = E;
-		if(ml_constraints > 0) {
-			printf("ENERGY_DEBUG: Photo=%.2f, ML=%.2f, Total=%.2f, ML_Ratio=%.1f%%, Constraints=%d\n", 
-				   photometric_energy, ml_energy, total_energy, 
-				   (ml_energy/total_energy)*100.0f, ml_constraints);
-			printf("BUNDLE_ADJUSTMENT: Added %d ML constraints (of %d points), energy=%.6f, avg_residual=%.4f\n", 
-				   ml_constraints, total_points, ml_energy, ml_energy/ml_constraints);
-		} else if(points_with_depth_prior > 0) {
-			printf("ENERGY_DEBUG: Photo=%.2f, ML=%.2f (ZERO!), Total=%.2f\n", 
-				   photometric_energy, ml_energy, total_energy);
-			printf("BUNDLE_ADJUSTMENT: WARNING - %d points have ML depth but 0 constraints added (weights too low?)\n", 
-				   points_with_depth_prior);
-		}
+		float ml_ratio = (ml_energy/total_energy)*100.0f;
+		printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n", 
+			   photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
 	}
 
 	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,

@@ -256,6 +256,12 @@ public:
 	float init_scale_factor_ = 1.0f;
 	int init_points_count_ = 0;
 	
+	// Scale alignment system for ML depth integration
+	float ml_to_slam_scale_factor_ = 1.0f;  // Conversion factor from ML (metric) to SLAM scale
+	bool scale_aligned_ = false;            // Whether scales have been aligned
+	float reference_slam_depth_ = -1.0f;    // Reference SLAM depth for alignment
+	float reference_ml_depth_ = -1.0f;      // Corresponding ML depth for alignment
+	
 	// RGB storage for first frame ML processing
 	cv::Mat first_frame_rgb_;
 	
@@ -346,6 +352,12 @@ private:
 	void flagPointsForRemoval();
 	void makeNewTraces(FrameHessian* newFrame, float* gtDepth);
 	void makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth, const cv::Mat& ml_confidence = cv::Mat());  // PHASE 2: Add confidence map
+	
+	// Scale alignment functions for ML depth integration
+	void computeScaleAlignment();
+	void alignScalesImmediately(const cv::Mat& ml_depth);  // NEW: Immediate alignment on first ML keyframe
+	float convertMLDepthToSLAMScale(float ml_depth_meters);
+	bool isMLDepthValid(float ml_depth, float expected_range = 50.0f);
 	#ifdef ENABLE_DEPTH_DEBUG
 	void debugMLDepthComparison(FrameHessian* newFrame, const cv::Mat& ml_depth);  // DEPTH_DEBUG: TEMPORARY
 	#endif
