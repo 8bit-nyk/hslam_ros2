@@ -84,7 +84,7 @@ float setting_initialCalibHessian = 5e9;
 /* some modes for solving the resulting linear system (e.g. orthogonalize wrt. unobservable dimensions) */
 int setting_solverMode = SOLVER_FIX_LAMBDA | SOLVER_ORTHOGONALIZE_X_LATER;
 double setting_solverModeDelta = 0.00001;
-bool setting_forceAceptStep = true;
+bool setting_forceAceptStep = false;  // CRITICAL FIX: Allow ML energy evaluation in bundle adjustment
 
 
 
@@ -220,7 +220,7 @@ bool setting_logStuff = true;
 
 // ML Depth Integration Settings
 bool setting_preserveMLDepthBounds = true;  // Preserve ML depth bounds during tracking
-float setting_mlDepthWeight = 1.0f;         // Weight for ML depth constraints in bundle adjustment
+float setting_mlDepthWeight = 2.0f;         // Weight for ML depth constraints in bundle adjustment (rebalanced to prevent ML energy dominance)
 
 // ML Initialization Settings
 bool setting_useMLForInitialization = true;        // Enable ML-based metric scale initialization

@@ -603,14 +603,54 @@ float FullSystem::optimize(int mnumOptIts)
 
         if(!setting_debugout_runquiet)
         {
+            bool accept = (newEnergy[0] +  newEnergy[1] +  newEnergyL + newEnergyM <
+					lastEnergy[0] + lastEnergy[1] + lastEnergyL + lastEnergyM) || setting_forceAceptStep;
             printf("%s %d (L %.2f, dir %.2f, ss %.1f): \t",
-				(newEnergy[0] +  newEnergy[1] +  newEnergyL + newEnergyM <
-						lastEnergy[0] + lastEnergy[1] + lastEnergyL + lastEnergyM) ? "ACCEPT" : "REJECT",
+				accept ? "ACCEPT" : "REJECT",
 				iteration,
 				log10(lambda),
 				incDirChange,
 				stepsize);
             printOptRes(newEnergy, newEnergyL, newEnergyM , 0, 0, frameHessians.back()->aff_g2l().a, frameHessians.back()->aff_g2l().b);
+            
+            // Energy balance summary for ML debugging
+            double totalEnergy = newEnergy[0] + newEnergy[1] + newEnergyL + newEnergyM;
+            double photoEnergy = newEnergy[0] + newEnergy[1];
+            if(totalEnergy > 0) {
+                printf("[ENERGY_BALANCE] Photo=%.1f (%.1f%%), ML=%.1f (%.1f%%), Linear=%.1f (%.1f%%), Total=%.1f\n",
+                       photoEnergy, (photoEnergy/totalEnergy)*100.0f,
+                       newEnergyM, (newEnergyM/totalEnergy)*100.0f,
+                       newEnergyL, (newEnergyL/totalEnergy)*100.0f,
+                       totalEnergy);
+            }
+            
+            // Scale monitoring for ML debugging
+            static float init_avg_depth = -1.0f;
+            static int ml_points_count = 0;
+            float curr_avg_depth = 0.0f;
+            int valid_points = 0;
+            int total_ml_points = 0;
+            
+            for(FrameHessian* fh : frameHessians) {
+                for(PointHessian* ph : fh->pointHessians) {
+                    if(ph->idepth > 1e-6f) {
+                        curr_avg_depth += 1.0f / ph->idepth;
+                        valid_points++;
+                    }
+                    if(ph->hasMLDepth) total_ml_points++;
+                }
+            }
+            
+            if(valid_points > 0) {
+                curr_avg_depth /= valid_points;
+                if(init_avg_depth < 0) {
+                    init_avg_depth = curr_avg_depth;
+                    ml_points_count = total_ml_points;
+                }
+                float scale_drift = (curr_avg_depth / init_avg_depth - 1.0f) * 100.0f;
+                printf("[SCALE_MONITOR] Iter %d: avg_depth=%.2fm, drift=%.1f%%, ML_points=%d/%d\n",
+                       iteration, curr_avg_depth, scale_drift, total_ml_points, valid_points);
+            }
         }
 
 		if(setting_forceAceptStep || (newEnergy[0] +  newEnergy[1] +  newEnergyL + newEnergyM <

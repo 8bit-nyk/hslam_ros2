@@ -409,10 +409,7 @@ double EnergyFunctional::calcLEnergyF_MT()
 	}
 	E += cDeltaF.cwiseProduct(cPriorF).dot(cDeltaF);
 	
-	// TEMP_DEBUG_ENERGY: Debug entry point to see if this function is called
-	static int energy_call_count = 0;
-	++energy_call_count;
-	printf("TEMP_DEBUG: calcMEnergyF called %d times, frames=%zu\n", energy_call_count, frames.size());
+	// ML energy calculation enabled (setting_forceAceptStep = false)
 	
 	// PHASE 2: Add ML depth constraints to bundle adjustment energy
 	// This constrains pose optimization to be consistent with ML depths
@@ -442,10 +439,8 @@ double EnergyFunctional::calcLEnergyF_MT()
 				float abs_residual = std::abs(ml_residual);
 				float robust_factor = std::exp(-abs_residual * abs_residual * 0.5f);
 				
-				// TEMP_DEBUG_ENERGY: Test dramatically increased ML weight
-				float ml_weight_multiplier = 10.0f;  // EXPERIMENT: 10x weight increase
-				float ml_weight = (setting_mlDepthWeight * ml_weight_multiplier) * distance_factor * robust_factor;
-				// ORIGINAL: float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor;
+				// Apply ML weight with distance and robust factors
+				float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor;
 				
 				ml_energy += ml_weight * ml_residual * ml_residual;
 				ml_constraints++;
@@ -456,9 +451,9 @@ double EnergyFunctional::calcLEnergyF_MT()
 	float photometric_energy = E;
 	E += ml_energy;
 	
-	// TEMP_DEBUG_ENERGY: Energy balance debugging - can be easily removed
+	// Energy balance monitoring (increased frequency for statistical analysis)
 	static int debug_counter = 0;
-	if(debug_counter++ % 50 == 0) {
+	if(debug_counter++ % 10 == 0) {
 		float total_energy = E;
 		if(ml_constraints > 0) {
 			printf("ENERGY_DEBUG: Photo=%.2f, ML=%.2f, Total=%.2f, ML_Ratio=%.1f%%, Constraints=%d\n", 
