@@ -261,6 +261,7 @@ public:
 	bool scale_aligned_ = false;            // Whether scales have been aligned
 	float reference_slam_depth_ = -1.0f;    // Reference SLAM depth for alignment
 	float reference_ml_depth_ = -1.0f;      // Corresponding ML depth for alignment
+	float initial_ml_to_slam_scale_factor_ = 1.0f;  // Store initial factor for protection
 	
 	// RGB storage for first frame ML processing
 	cv::Mat first_frame_rgb_;
@@ -356,6 +357,7 @@ private:
 	// Scale alignment functions for ML depth integration
 	void computeScaleAlignment();
 	void alignScalesImmediately(const cv::Mat& ml_depth);  // NEW: Immediate alignment on first ML keyframe
+	void applyMetricScaleConversion();  // FIXED: Post-initialization metric conversion
 	float convertMLDepthToSLAMScale(float ml_depth_meters);
 	bool isMLDepthValid(float ml_depth, float expected_range = 50.0f);
 	#ifdef ENABLE_DEPTH_DEBUG

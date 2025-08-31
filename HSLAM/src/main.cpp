@@ -350,24 +350,42 @@ int main(int argc, char **argv)
 		}
 		printf("ML Depth Processor initialized successfully\n");
 		
-		// Perform ML warmup before frame processing to prevent blocking
-		printf("🔥 Warming up ML processor (one-time GPU initialization)...\n");
+		// Perform ML warmup with real frame for effective GPU optimization
+		printf("🔥 Warming up ML processor with first real frame (one-time GPU initialization)...\n");
 		auto warmup_start = std::chrono::high_resolution_clock::now();
 		
 		try {
-			// Create synthetic RGB image for warmup (640x368 to match typical SLAM resolution)
-			cv::Mat synthetic_rgb(368, 640, CV_8UC3, cv::Scalar(128, 128, 128)); // Gray image
-			
-			// Perform warmup inference (result discarded)
-			bool warmup_success = fullSystem->performMLWarmup(synthetic_rgb);
-			
-			auto warmup_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-				std::chrono::high_resolution_clock::now() - warmup_start).count();
-			
-			if (warmup_success) {
-				printf("✅ ML processor warmed up successfully in %ldms\n", warmup_duration);
+			// Load first frame from dataset for real warmup
+			ImageAndExposure* first_img = reader->getImage(0);
+			if (first_img && first_img->useColour && first_img->r_image != nullptr) {
+				// Convert first real frame to RGB using the same pipeline
+				cv::Mat first_rgb = convertUndistortedToRGB(first_img);
+				
+				if (!first_rgb.empty()) {
+					printf("🔥 Processing first real frame for complete GPU optimization (expected ~6000ms)...\n");
+					
+					// Process first real frame - this triggers full GPU kernel compilation
+					bool warmup_success = fullSystem->performMLWarmup(first_rgb);
+					
+					auto warmup_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+						std::chrono::high_resolution_clock::now() - warmup_start).count();
+					
+					if (warmup_success) {
+						printf("✅ Real frame GPU warmup complete in %ldms\n", warmup_duration);
+						printf("🚀 GPU fully optimized - subsequent ML inferences will be fast (~40ms)\n");
+					} else {
+						printf("ERROR: Real frame warmup failed - disabling ML depth\n");
+						fullSystem->ml_depth_enabled_ = false;
+						ml_depth_enabled = false;
+					}
+				} else {
+					printf("ERROR: Could not convert first frame to RGB - disabling ML depth\n");
+					fullSystem->ml_depth_enabled_ = false;
+					ml_depth_enabled = false;
+				}
+				delete first_img; // Clean up
 			} else {
-				printf("ERROR: ML warmup failed - disabling ML depth\n");
+				printf("ERROR: Could not load first frame - disabling ML depth\n");
 				fullSystem->ml_depth_enabled_ = false;
 				ml_depth_enabled = false;
 			}
