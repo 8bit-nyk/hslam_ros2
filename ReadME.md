@@ -45,7 +45,7 @@ Please cite the paper if used in an academic context.
 
 ### Related Legacy projects:
 
-[HSLAM C++ original implementation](https://https://github.com/8bit-nyk/HSLAM)  
+[HSLAM C++ original implementation](https://github.com/8bit-nyk/HSLAM)  
 [ROS1 Wrapper for HSLAM](https://github.com/8bit-nyk/hslam_ros)  
 [Dockerized version of HSLAM](https://github.com/8bit-nyk/hslam_ros_docker)
 
