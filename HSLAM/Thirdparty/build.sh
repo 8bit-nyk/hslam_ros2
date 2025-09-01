@@ -65,19 +65,19 @@ echo -e "Compiling DBoW3\n"
 cd $SCRIPTPATH/DBow3
 mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=$BuildType -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_UTILS=OFF -DCMAKE_CXX_FLAGS=-std=c++11 -DUSE_CONTRIB=true -DOpenCV_DIR=$InstallDir/share/OpenCV && make -j $(nproc) && make install && cd .. && rm -r build
 
-# Download and setup ONNX Runtime for deep learning integration
-# echo -e "Setting up ONNX Runtime\n"
-# cd $SCRIPTPATH
-# if [ ! -d "onnxruntime" ]; then
-#     echo "Downloading ONNX Runtime..."
-#     wget https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/onnxruntime-linux-x64-1.19.2.tgz
-#     tar -xzf onnxruntime-linux-x64-1.19.2.tgz
-#     mv onnxruntime-linux-x64-1.19.2 onnxruntime
-#     rm onnxruntime-linux-x64-1.19.2.tgz
-#     echo "ONNX Runtime setup complete"
-# else
-#     echo "ONNX Runtime already exists"
-# fi
+# Download and setup ONNX Runtime GPU for deep learning integration
+echo -e "Setting up ONNX Runtime GPU\n"
+cd $SCRIPTPATH
+if [ ! -d "onnxruntime" ]; then
+    echo "Downloading ONNX Runtime GPU..."
+    wget https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/onnxruntime-linux-x64-gpu-1.19.2.tgz
+    tar -xzf onnxruntime-linux-x64-gpu-1.19.2.tgz
+    mv onnxruntime-linux-x64-gpu-1.19.2 onnxruntime
+    rm onnxruntime-linux-x64-gpu-1.19.2.tgz
+    echo "ONNX Runtime GPU setup complete"
+else
+    echo "ONNX Runtime already exists"
+fi
 
 #set environment settings
 #==========================
