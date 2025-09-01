@@ -66,7 +66,7 @@ HSLAM/Thirdparty/cmake_uninstall.cmake.in
 
 HSLAM/Thirdparty/onnxruntime*
 HSLAM/Thirdparty/onnxruntime-linux-x64-1.19.2.tgz
-
+HSLAM/Thirdparty/onnxruntime-cpu-backup
 .cursor
 .claude
 .cursorignore
