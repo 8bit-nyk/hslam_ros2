@@ -1436,7 +1436,19 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					}
 				}
 				
-				if (!rgb_image.empty()) {
+				// Check if we have warmup results available first (optimization)
+				if (warmup_results_available_) {
+					printf("[SCALE_INIT] Using GPU warmup results for metric scale...\n");
+					coarseInitializer->setMLDepth(warmup_depth_map_, 
+												 warmup_confidence_,
+												 warmup_mean_depth_);
+					printf("[SCALE_INIT] Metric scale set from warmup: %.2fm (saved ~70ms processing)\n", 
+						   warmup_mean_depth_);
+					
+					// Clear the stored results to free memory
+					warmup_depth_map_.release();
+					warmup_results_available_ = false;
+				} else if (!rgb_image.empty()) {
 					printf("[SCALE_INIT] Processing ML depth for metric scale initialization...\n");
 					auto ml_result = ml_processor_->processKeyframeDetailed(rgb_image);
 					if (ml_result.success) {
@@ -4261,10 +4273,17 @@ bool FullSystem::performMLWarmup(const cv::Mat& warmup_image)
 			return false;
 		}
 		
-		// Perform warmup inference (result discarded)
-		auto warmup_result = ml_processor_->processKeyframe(warmup_image);
+		// Perform detailed warmup inference and STORE results for initialization reuse
+		auto warmup_result = ml_processor_->processKeyframeDetailed(warmup_image);
 		
-		if (warmup_result.has_value() && !warmup_result->empty()) {
+		if (warmup_result.success && !warmup_result.depth_map.empty()) {
+			// STORE the warmup results for initialization
+			warmup_depth_map_ = warmup_result.depth_map.clone();
+			warmup_mean_depth_ = warmup_result.mean_depth;
+			warmup_confidence_ = warmup_result.confidence;
+			warmup_results_available_ = true;
+			
+			printf("✅ GPU warmup complete - stored metric scale: %.2fm\n", warmup_mean_depth_);
 			return true;
 		} else {
 			printf("ERROR: ML warmup inference failed\n");

@@ -233,6 +233,12 @@ public:
 	int ml_frame_counter_ = 0;           // Frame counter for ML processing
 	mutable boost::mutex ml_reference_mutex_; // Thread safety
 	
+	// GPU Warmup Result Caching (optimization to avoid duplicate processing)
+	cv::Mat warmup_depth_map_;           // Stored depth map from GPU warmup
+	float warmup_mean_depth_ = -1.0f;    // Mean depth from warmup inference
+	float warmup_confidence_ = 0.0f;     // Confidence score from warmup
+	bool warmup_results_available_ = false; // Flag indicating stored results are available
+	
 	// ML processing synchronization (temporary debugging solution)
 	mutable boost::mutex ml_processing_mutex_;
 	bool ml_processing_active_ = false;

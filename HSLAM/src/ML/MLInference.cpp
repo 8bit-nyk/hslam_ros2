@@ -395,8 +395,7 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             auto uncertainty_shape = uncertainty_tensor.GetTensorTypeAndShapeInfo().GetShape();
             auto uncertainty_data = uncertainty_tensor.GetTensorData<float>();
             
-            // PHASE2_DEBUG: Log uncertainty extraction
-            printf("PHASE2_DEBUG: Found output[2] with %zu dimensions\n", uncertainty_shape.size());
+            // Uncertainty extraction from output[2]
             
             if(uncertainty_shape.size() >= 2) {
                 uncertainty_height = static_cast<int>(uncertainty_shape[uncertainty_shape.size()-2]);
@@ -418,10 +417,8 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                            uncertainty_width, uncertainty_height, min_unc, max_unc, mean_unc);
                 }
             }
-        } else {
-            // PHASE2_DEBUG: Log when uncertainty is not available
-            printf("PHASE2_DEBUG: No uncertainty output - Model outputs: %zu\n", output_tensors.size());
         }
+        // Note: Model has only %zu outputs, no uncertainty available
         
         // Debug: Validate output shape
         if(output_shape.empty()) {
