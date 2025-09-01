@@ -1473,7 +1473,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 				total_init_time_ms_,
 				ml_init_processing_time_ms_,
 				tracking_time_ms,
-				using_metric_scale_ ? "Dual-Scale" : "Photometric",
+				using_metric_scale_ ? "Direct Metric" : "Photometric",
 				init_scale_factor_,
 				init_points_count_,
 				using_metric_scale_ ? coarseInitializer->mlConfidence : 0.0f
@@ -1825,29 +1825,6 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		fh->shell->setPoseOpti(Sim3(fh->shell->getPoseInverse().matrix()));
 	}
 
-	// CRITICAL FIX: Apply metric conversion after system is stable
-	// This runs for all keyframes (initialization + regular operation)
-	static bool metric_conversion_applied = false;  // Ensure it only runs once
-	
-	// DISABLED: Metric conversion causes trajectory disruption during active tracking
-	// The dual-scale approach works excellently without post-conversion
-	if (false && using_metric_scale_ && ml_to_slam_scale_factor_ > 0.0f && 
-		!metric_conversion_applied && initialized && allKeyFramesHistory.size() >= 15) {
-		
-		printf("[METRIC_CONVERSION] System stable (%zu keyframes) - applying metric conversion\n", allKeyFramesHistory.size());
-		printf("[METRIC_CONVERSION] Forcing conversion despite scale_aligned_=%s\n", scale_aligned_ ? "true" : "false");
-		printf("[METRIC_CONVERSION] Pre-conversion translation magnitude: %.6f\n", 
-			   frameHessians.empty() ? 0.0f : frameHessians[0]->shell->getPose().translation().norm());
-		
-		// Temporarily override scale_aligned_ to force conversion
-		bool original_scale_aligned = scale_aligned_;
-		scale_aligned_ = false;
-		applyMetricScaleConversion();
-		metric_conversion_applied = true;  // Mark as done
-		
-		printf("[METRIC_CONVERSION] Post-conversion translation magnitude: %.6f\n", 
-			   frameHessians.empty() ? 0.0f : frameHessians[0]->shell->getPose().translation().norm());
-	}
 
 	traceNewCoarse(fh);
 
@@ -2078,12 +2055,6 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	activatePointsMT();
 	ef->makeIDX();
 	
-	// DISABLED: No longer needed with immediate metric conversion
-	// Late scale alignment causes confusion with multiple scale factors
-	if (false && ml_depth_enabled_ && !scale_aligned_) {
-		printf("[SCALE_FIX] Late scale alignment attempted (DISABLED - using immediate conversion)\n");
-		// computeScaleAlignment(); // DISABLED
-	}
 
 
 
@@ -2376,10 +2347,10 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		ml_mean_depth = metricScaleFactor;  // Metric information
 		usingMetricScale = true;
 		
-		printf("=== INITIALIZATION WITH DUAL-SCALE APPROACH ===\n");
-		printf("Photometric scale (for geometry): %.3f\n", rescaleFactor);
-		printf("ML mean depth (for metric): %.3f\n", ml_mean_depth);
-		printf("ML confidence: %.2f (dual-scale approach preserves triangulation)\n", coarseInitializer->mlConfidence);
+		printf("=== INITIALIZATION WITH DIRECT METRIC APPROACH ===\n");
+		printf("Initial triangulation scale: %.3f (computed for metric conversion)\n", rescaleFactor);
+		printf("ML mean depth (metric scale): %.3f meters\n", ml_mean_depth);
+		printf("ML confidence: %.2f (system will be initialized directly in metric scale)\n", coarseInitializer->mlConfidence);
 		
 	} else {
 		// Standard photometric initialization
@@ -2393,14 +2364,14 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	// Store initialization method and scale factor for logging
 	if (usingMetricScale) {
 		using_metric_scale_ = true;
-		init_scale_factor_ = rescaleFactor;  // Photometric scale used for geometry
+		init_scale_factor_ = ml_mean_depth;  // Metric scale used directly
 		
-		// Store and protect the initial scale factor
-		initial_ml_to_slam_scale_factor_ = photometricScale / ml_mean_depth;
-		ml_to_slam_scale_factor_ = initial_ml_to_slam_scale_factor_;
+		// DIRECT METRIC: No conversion needed - system initialized in metric scale
+		initial_ml_to_slam_scale_factor_ = 1.0f;  // No conversion factor needed
+		ml_to_slam_scale_factor_ = 1.0f;         // Already in metric scale
 		
-		// Mark as NOT aligned - we need post-initialization metric conversion
-		scale_aligned_ = false;
+		// Mark as ALIGNED - system initialized directly in metric scale
+		scale_aligned_ = true;
 		
 	} else {
 		using_metric_scale_ = false;
@@ -2409,24 +2380,23 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		scale_aligned_ = true;  // Standard monocular, no conversion needed
 	}
 	
-	// VALIDATION DEBUG: Show dual-scale approach benefits
-	printf("🔍 VALIDATION: Geometry Scale = %.4f (%.1f%% different from 1.0)\n", 
+	// VALIDATION DEBUG: Show initial triangulation quality  
+	printf("🔍 VALIDATION: Triangulation Scale = %.4f (%.1f%% difference from 1.0 - good for geometry)\n", 
 		   rescaleFactor, fabs(rescaleFactor - 1.0) * 100.0);
 	printf("🔍 VALIDATION: Using %s initialization\n",
-		   usingMetricScale ? "DUAL-SCALE (good geometry + metric info)" : "PHOTOMETRIC");
+		   usingMetricScale ? "DIRECT METRIC (ML depth sets scale from start)" : "PHOTOMETRIC");
 	printf("🔍 VALIDATION: ML Initialization %s\n",
 		   setting_useMLForInitialization ? "ENABLED" : "DISABLED");
 	
-	// SCALE MONITORING: Track dual-scale approach
+	// SCALE MONITORING: Track direct metric initialization
 	if (usingMetricScale) {
-		printf("[SCALE_MONITOR] ✅ DUAL-SCALE INITIALIZATION ENABLED\n");
-		printf("[SCALE_MONITOR] Geometry scale: %.3f (photometric for good triangulation)\n", rescaleFactor);
-		printf("[SCALE_MONITOR] Metric scale: %.3f (ML mean depth)\n", ml_mean_depth);
-		printf("[SCALE_MONITOR] Conversion factor: %.3f (photo/metric)\n", ml_to_slam_scale_factor_);
-		printf("[SCALE_MONITOR] Initial scale factor stored: %.6f\n", initial_ml_to_slam_scale_factor_);
+		printf("[SCALE_MONITOR] ✅ DIRECT METRIC INITIALIZATION ENABLED\n");
+		printf("[SCALE_MONITOR] System initialized directly in metric scale: %.3f meters\n", ml_mean_depth);
+		printf("[SCALE_MONITOR] Translation and depths scaled to metric from start\n");
+		printf("[SCALE_MONITOR] Scale factor: 1.0 (no conversion needed)\n");
 		printf("[SCALE_MONITOR] ML confidence: %.2f, threshold: %.2f\n", 
 			   coarseInitializer->mlConfidence, setting_mlInitConfidenceThreshold);
-		printf("[SCALE_MONITOR] Expected: Good RMSE + post-init metric conversion\n");
+		printf("[SCALE_MONITOR] Expected: Direct ML depth usage, consistent RMSE\n");
 	} else {
 		printf("[SCALE_MONITOR] Using standard photometric scale: %.3f\n", rescaleFactor);
 		printf("[SCALE_MONITOR] Scale alignment may be needed if ML depth becomes available\n");
@@ -2442,14 +2412,17 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 
 	SE3 firstToNew = coarseInitializer->thisToNext;
 	
-	// CRITICAL FIX: Dual-scale approach - keep photometric scale for geometry
+	// DIRECT METRIC INITIALIZATION: Scale translation to metric from start
 	if (usingMetricScale) {
-		// DEBUG_INIT: Show we're preserving geometry
-		printf("[DEBUG_INIT] DUAL-SCALE: Using photometric scale %.6f for geometry (preserving translation: %.6f)\n", 
-			   1.0f, firstToNew.translation().norm());
-		printf("[DEBUG_INIT] DUAL-SCALE: ML scale %.3f stored for post-init metric conversion\n", ml_mean_depth);
-		// DON'T scale translation - keep photometric geometry intact
-		// firstToNew.translation() /= rescaleFactor;  // REMOVED - was causing poor triangulation
+		// Convert translation to metric scale during initialization
+		float metric_scale_factor = ml_mean_depth / photometricScale;
+		printf("[DEBUG_INIT] DIRECT METRIC: Scaling translation to metric (factor=%.6f)\n", metric_scale_factor);
+		printf("[DEBUG_INIT] Pre-metric translation: %.6f\n", firstToNew.translation().norm());
+		
+		firstToNew.translation() *= metric_scale_factor;
+		
+		printf("[DEBUG_INIT] Post-metric translation: %.6f\n", firstToNew.translation().norm());
+		printf("[DEBUG_INIT] System initialized directly in metric scale (no conversion needed)\n");
 	} else {
 		// Standard monocular - apply photometric scale normalization
 		printf("[DEBUG_INIT] Pre-scale translation magnitude: %.6f\n", firstToNew.translation().norm());
@@ -2491,19 +2464,21 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 
 		if (!std::isfinite(ph->energyTH)){ delete ph; continue; }
 
-		// CRITICAL FIX: Dual-scale approach for point depths
+		// DIRECT METRIC INITIALIZATION: Scale point depths to metric from start
 		float original_idepth = point->iR;
 		float final_idepth;
 		
 		if (usingMetricScale) {
-			// DUAL-SCALE: Keep photometric inverse depths for good geometry
-			final_idepth = original_idepth;  // Don't scale by metric factor
-			// DEBUG_INIT: Log dual-scale approach
-			static int debug_point_count_dual = 0;
-			if (debug_point_count_dual < 5) {
-				printf("[DEBUG_INIT] DUAL-SCALE Point %d: keeping photometric idepth=%.6f (depth=%.3fm)\n", 
-					   debug_point_count_dual, final_idepth, 1.0f/final_idepth);
-				debug_point_count_dual++;
+			// DIRECT METRIC: Scale inverse depths to metric during initialization
+			float metric_scale_factor = ml_mean_depth / photometricScale;
+			final_idepth = original_idepth / metric_scale_factor;  // Inverse depth scales inversely
+			
+			// DEBUG_INIT: Log direct metric approach
+			static int debug_point_count_metric = 0;
+			if (debug_point_count_metric < 5) {
+				printf("[DEBUG_INIT] DIRECT METRIC Point %d: original_iR=%.6f, metric_idepth=%.6f (factor=%.3f, depth=%.3fm)\n", 
+					   debug_point_count_metric, original_idepth, final_idepth, metric_scale_factor, 1.0f/final_idepth);
+				debug_point_count_metric++;
 			}
 		} else {
 			// Standard monocular - apply photometric scaling
@@ -2738,20 +2713,13 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                 
                 // Validate ML depth before processing
                 if(isMLDepthValid(raw_ml_depth, 50.0f)) {
-                    // FIXED: Use ML depth according to current system scale
-                    float depth = raw_ml_depth;
-                    if (scale_aligned_) {
-                        // System is in metric scale, use ML depth directly
-                        depth = raw_ml_depth;
-                    } else {
-                        // System still in photometric scale, convert ML to photometric  
-                        depth = raw_ml_depth * ml_to_slam_scale_factor_;
-                    }
+                    // DIRECT METRIC: System always initialized in metric scale when ML enabled
+                    float depth = raw_ml_depth;  // Use ML depth directly (system already metric)
                     
-                    // Update monitoring message
+                    // Monitor first ML point usage
                     if(ml_depth_points == 0) {
-                        printf("[SCALE_MONITOR] First ML point: raw=%.2fm, used=%.2fm (scale_aligned=%s)\n", 
-                               raw_ml_depth, depth, scale_aligned_ ? "true" : "false");
+                        printf("[SCALE_MONITOR] First ML point: raw=%.2fm, used=%.2fm (direct usage, system in metric)\n", 
+                               raw_ml_depth, depth);
                     }
                     // PHASE 2: Extract per-pixel ML confidence if available
                     float pixel_confidence = 1.0f;  // Default confidence
