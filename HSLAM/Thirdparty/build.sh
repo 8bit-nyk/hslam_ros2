@@ -73,7 +73,7 @@ if [ ! -d "onnxruntime" ]; then
     wget https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/onnxruntime-linux-x64-gpu-1.19.2.tgz
     tar -xzf onnxruntime-linux-x64-gpu-1.19.2.tgz
     mv onnxruntime-linux-x64-gpu-1.19.2 onnxruntime
-    rm onnxruntime-linux-x64-gpu-1.19.2.tgz
+    # rm onnxruntime-linux-x64-gpu-1.19.2.tgz
     echo "ONNX Runtime GPU setup complete"
 else
     echo "ONNX Runtime already exists"
