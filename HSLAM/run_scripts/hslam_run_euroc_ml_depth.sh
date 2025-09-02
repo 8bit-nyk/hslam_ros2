@@ -29,7 +29,7 @@ ml_benchmark=""  # Set to non-empty to enable benchmarking
 ml_gpu_enabled="true"      # Enable GPU acceleration (44ms inference vs 650ms CPU)
 ml_fp16_enabled=""          # Enable FP16 optimization (leave empty to disable)
 ml_gpu_device="0"           # GPU device ID
-ml_gpu_memory="6144"        # GPU memory limit in MB (increased from 2GB to 6GB for better performance)
+ml_gpu_memory="2048"        # GPU memory limit in MB (increased from 2GB to 6GB for better performance)
 
 # Processing configuration
 end_index="" # Process limited frames for testing (set to "" for full trajectory)

@@ -215,7 +215,6 @@ public:
 	// RGB-D depth integration support
 	cv::Mat currentDepthImage;     // RGB-D sensor depth for direct component
 	cv::Mat currentMLDepthImage;   // Dedicated ML depth storage (NEW)
-	cv::Mat currentMLConfidenceMap; // PHASE 2: Per-pixel ML confidence storage
 
 	// ML Depth integration support
 	std::unique_ptr<ML::MLDepthProcessor> ml_processor_;
@@ -358,7 +357,7 @@ private:
 	void activatePointsOldFirst();
 	void flagPointsForRemoval();
 	void makeNewTraces(FrameHessian* newFrame, float* gtDepth);
-	void makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth, const cv::Mat& ml_confidence = cv::Mat());  // PHASE 2: Add confidence map
+	void makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth);  // PHASE 2: Gets confidence from frame
 	
 	// Scale alignment functions for ML depth integration
 	void computeScaleAlignment();

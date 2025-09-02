@@ -726,6 +726,11 @@ void PangolinDSOViewer::pushLiveFrame(FrameHessian* image, int nIndmatches)
 void PangolinDSOViewer::updateMLVisualization(FrameHessian* fh) {
     if(disableAllDisplay) return;
     
+    // Prevent duplicate updates for the same frame
+    if (fh->frameID == last_ml_frame_id_) {
+        return;  // Already processed this frame
+    }
+    
     if (fh->hasMLDepth()) {
         auto ml_depth = fh->getMLDepth();
         auto ml_confidence = fh->getMLConfidenceMap();
@@ -733,10 +738,22 @@ void PangolinDSOViewer::updateMLVisualization(FrameHessian* fh) {
         cv::Mat depth_mat = (ml_depth && !ml_depth->empty()) ? *ml_depth : cv::Mat();
         cv::Mat conf_mat = (ml_confidence && !ml_confidence->empty()) ? *ml_confidence : cv::Mat();
         
-        printf("[DEBUG_VIEWER] Updating ML visualization: depth=%dx%d, confidence=%dx%d\n",
-               depth_mat.cols, depth_mat.rows, conf_mat.cols, conf_mat.rows);
+        // printf("[DEBUG_VIEWER] Updating ML visualization for frame %d: depth=%dx%d, confidence=%dx%d\n",
+        //        fh->frameID, depth_mat.cols, depth_mat.rows, conf_mat.cols, conf_mat.rows);
         
-        updateMLPanels(depth_mat, conf_mat);
+        // Generate colored visualizations and cache them
+        if (!depth_mat.empty()) {
+            cached_depth_colored_ = createDepthVisualization(depth_mat);
+        }
+        if (!conf_mat.empty()) {
+            cached_confidence_colored_ = createConfidenceVisualization(conf_mat);
+        }
+        
+        // Update panels with cached visualizations
+        updateMLPanels(cached_depth_colored_, cached_confidence_colored_);
+        
+        // Update frame ID to prevent duplicate processing
+        last_ml_frame_id_ = fh->frameID;
     }
 }
 
@@ -834,6 +851,48 @@ void PangolinDSOViewer::setInternalImageData(std::unique_ptr<InternalImage> &Int
 		InternalImage->HaveNewImage = true;
 }
 
+void PangolinDSOViewer::setInternalImageDataFromMat(std::unique_ptr<InternalImage> &InternalImage, const cv::Mat& colored_mat) {
+    if (colored_mat.empty()) return;
+    
+    boost::unique_lock<boost::mutex> lk(openImagesMutex);
+    
+    // Ensure the Mat is in the expected format (3-channel BGR)
+    if (colored_mat.channels() != 3) {
+        printf("[WARNING] ML visualization Mat has %d channels, expected 3\n", colored_mat.channels());
+        return;
+    }
+    
+    int mat_w = colored_mat.cols;
+    int mat_h = colored_mat.rows;
+    
+    // Allocate buffer if needed or size changed
+    if (InternalImage->Width == 0 || InternalImage->Height == 0 || 
+        InternalImage->Width != mat_w || InternalImage->Height != mat_h) {
+        
+        if (InternalImage->Image != nullptr) {
+            delete[] InternalImage->Image;
+        }
+        InternalImage->Image = new uchar[mat_w * mat_h * 3];
+        InternalImage->Width = mat_w;
+        InternalImage->Height = mat_h;
+        // printf("[DEBUG] Allocated new ML visualization buffer: %dx%d\n", mat_w, mat_h);
+    }
+    
+    // Direct memory copy from cv::Mat to InternalImage buffer
+    if (colored_mat.isContinuous()) {
+        memcpy(InternalImage->Image, colored_mat.data, mat_w * mat_h * 3 * sizeof(uchar));
+    } else {
+        // Handle non-continuous Mats row by row
+        for (int y = 0; y < mat_h; ++y) {
+            memcpy(InternalImage->Image + y * mat_w * 3, 
+                   colored_mat.ptr(y), 
+                   mat_w * 3 * sizeof(uchar));
+        }
+    }
+    
+    InternalImage->HaveNewImage = true;
+}
+
 
 void PangolinDSOViewer::renderInternalFrame(std::unique_ptr<InternalImage> &ImageToRender, View* CanvasFrame)
 {
@@ -888,23 +947,17 @@ cv::Mat PangolinDSOViewer::createConfidenceVisualization(const cv::Mat& confiden
     return conf_colored;
 }
 
-void PangolinDSOViewer::updateMLPanels(const cv::Mat& depth_map, const cv::Mat& confidence_map) {
-    // Panel 3: ML Depth Map (JET colormap) - completely separate from direct/indirect
-    if (!depth_map.empty()) {
-        cv::Mat depth_colored = createDepthVisualization(depth_map);
-        if (!depth_colored.empty()) {
-            setInternalImageData(MLDepthImage, (Vec3b*)depth_colored.data);
-            printf("[DEBUG_VIEWER] Updated Panel 3 with ML depth visualization\n");
-        }
+void PangolinDSOViewer::updateMLPanels(const cv::Mat& depth_colored, const cv::Mat& confidence_colored) {
+    // Panel 3: ML Depth Map (JET colormap) - using cached colored visualization
+    if (!depth_colored.empty()) {
+        setInternalImageDataFromMat(MLDepthImage, depth_colored);
+        // printf("[DEBUG_VIEWER] Updated Panel 3 with cached ML depth visualization\n");
     }
     
-    // Panel 4: ML Confidence Map (HOT colormap) - completely separate from direct/indirect
-    if (!confidence_map.empty()) {
-        cv::Mat conf_colored = createConfidenceVisualization(confidence_map);
-        if (!conf_colored.empty()) {
-            setInternalImageData(MLConfidenceImage, (Vec3b*)conf_colored.data);
-            printf("[DEBUG_VIEWER] Updated Panel 4 with ML confidence visualization\n");
-        }
+    // Panel 4: ML Confidence Map (HOT colormap) - using cached colored visualization  
+    if (!confidence_colored.empty()) {
+        setInternalImageDataFromMat(MLConfidenceImage, confidence_colored);
+        // printf("[DEBUG_VIEWER] Updated Panel 4 with cached ML confidence visualization\n");
     }
 }
 

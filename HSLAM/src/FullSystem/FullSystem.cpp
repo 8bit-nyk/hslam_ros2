@@ -1944,22 +1944,11 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					// NEW: Set as ML reference for tracking (CoarseTracker-style pattern)
 					setMLReference(fh->frameID, ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
 				
-					// PHASE 2: Store confidence map for point creation with proper validation
+					// PHASE 2: Confidence map now stored directly in FrameHessian (no duplicate storage)
 					if (!ml_result.confidence_map.empty()) {
-						// Store confidence map with proper resolution matching
-						if(ml_result.confidence_map.cols != wG[0] || ml_result.confidence_map.rows != hG[0]) {
-							cv::Mat resized_confidence;
-							cv::resize(ml_result.confidence_map, resized_confidence, 
-								      cv::Size(wG[0], hG[0]), 0, 0, cv::INTER_LINEAR);
-							currentMLConfidenceMap = resized_confidence;
-							printf("PHASE2_DEBUG: Resized confidence map from %dx%d to %dx%d\n",
-							       ml_result.confidence_map.cols, ml_result.confidence_map.rows, wG[0], hG[0]);
-						} else {
-							currentMLConfidenceMap = ml_result.confidence_map.clone();
-							printf("PHASE2_DEBUG: Stored confidence map %dx%d (no resize needed)\n", wG[0], hG[0]);
-						}
+						printf("PHASE2_DEBUG: Confidence map %dx%d stored in FrameHessian (no duplicate)\n", 
+						       ml_result.confidence_map.cols, ml_result.confidence_map.rows);
 					} else {
-						currentMLConfidenceMap = cv::Mat();
 						printf("PHASE2_DEBUG: No confidence map available from ML inference\n");
 					}
 				
@@ -2289,11 +2278,10 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 				printf("makeNewTraces: Using ML depth (%dx%d) for enhanced tracking\n", 
 				       currentMLDepthImage.cols, currentMLDepthImage.rows);
 			}
-			makeNewTracesWithMLDepth(fh, currentMLDepthImage, currentMLConfidenceMap);
+			makeNewTracesWithMLDepth(fh, currentMLDepthImage);
 			
-			// Clear ML depth and confidence after use
+			// Clear ML depth after use (confidence stored in frame, no clearing needed)
 			currentMLDepthImage = cv::Mat();
-			currentMLConfidenceMap = cv::Mat();
 		} else {
 			// Use RGB-D depth if available, otherwise pure monocular
 			makeNewTraces(fh, depthData);
@@ -2733,8 +2721,10 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 	HSLAM::DepthLogger::logPointCreation((int)newFrame->immaturePoints.size(), depthIntegratedCount);
 }
 
-void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth, const cv::Mat& ml_confidence) {
-    // ML depth integration with confidence maps
+void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat& ml_depth) {
+    // ML depth integration with confidence maps - get confidence directly from frame
+    auto ml_confidence_ptr = newFrame->getMLConfidenceMap();
+    cv::Mat ml_confidence = (ml_confidence_ptr && !ml_confidence_ptr->empty()) ? *ml_confidence_ptr : cv::Mat();
     
     int numPointsTotal = pixelSelector->makeMaps(newFrame, selectionMap, setting_desiredImmatureDensity);
     

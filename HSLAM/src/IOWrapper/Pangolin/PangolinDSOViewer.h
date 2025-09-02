@@ -116,6 +116,12 @@ private:
     cv::Mat createDepthVisualization(const cv::Mat& depth_map);
     cv::Mat createConfidenceVisualization(const cv::Mat& confidence_map);
     void updateMLPanels(const cv::Mat& depth_map, const cv::Mat& confidence_map);
+    void setInternalImageDataFromMat(std::unique_ptr<InternalImage> &InternalImage, const cv::Mat& colored_mat);
+    
+    // ML visualization caching to prevent duplicate updates and memory waste
+    int last_ml_frame_id_ = -1;
+    cv::Mat cached_depth_colored_;
+    cv::Mat cached_confidence_colored_;
 
 	// MinimalImageB3* internalVideoImg;
 	// MinimalImageB3* internalKFImg;
