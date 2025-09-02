@@ -58,7 +58,7 @@ KeyFrameDisplay::KeyFrameDisplay()
 
 	my_scaledTH =1e10;
 	my_absTH = 1e10;
-	my_displayMode = 1;
+	my_displayMode = 0;
 	my_minRelBS = 0;
 	my_sparsifyFactor = 1;
 	originFrame = nullptr;

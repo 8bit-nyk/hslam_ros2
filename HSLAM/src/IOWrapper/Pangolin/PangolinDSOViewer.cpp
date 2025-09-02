@@ -178,7 +178,7 @@ void PangolinDSOViewer::run()
 		BindToContext(main_window_name);
 
 	glEnable(GL_DEPTH_TEST);
-	glClearColor(0.36, 0.36, 0.55, 0.0);
+	glClearColor(1.0, 1.0, 1.0, 0.0);//(0.36, 0.36, 0.55, 0.0);
 	
 	// glEnable(GL_POINT_SMOOTH);
 	// glEnable(GL_BLEND);
@@ -186,9 +186,9 @@ void PangolinDSOViewer::run()
 	// Default hooks for exiting (Esc) and fullscreen (tab).
 	while( !pangolin::ShouldQuit() && running )
 	{
-		// Clear entire screen
+		// Clear entire screen to white
+		glClearColor(1.0, 1.0, 1.0, 0.0);//(0.36, 0.36, 0.55, 0.0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glClearColor(0.36, 0.36, 0.55, 0.0);
 
 		if (setting_render_display3D->Get())
 		{
