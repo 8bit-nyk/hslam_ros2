@@ -2002,6 +2002,30 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 							double min_depth, max_depth;
 							cv::minMaxLoc(ml_result.depth_map, &min_depth, &max_depth);
 							
+							// Save confidence map if available
+							if (!ml_result.confidence_map.empty()) {
+								// Create filename for confidence visualization  
+								char confidence_file[256];
+								snprintf(confidence_file, 256, "images_out/ml_confidence_%05d_%02d.png",
+										 fh->frameID, ml_depth_saved_count);
+								
+								// Normalize confidence [0,1] to [0,255] for visualization
+								cv::Mat conf_viz;
+								cv::normalize(ml_result.confidence_map, conf_viz, 0, 255, cv::NORM_MINMAX, CV_8U);
+								
+								// Apply HOT colormap (high confidence = bright)
+								cv::Mat conf_colored;
+								cv::applyColorMap(conf_viz, conf_colored, cv::COLORMAP_HOT);
+								cv::imwrite(confidence_file, conf_colored);
+								
+								// Get confidence statistics
+								cv::Scalar conf_mean, conf_std;
+								cv::meanStdDev(ml_result.confidence_map, conf_mean, conf_std);
+								
+								printf("makeKeyFrame: 💾 Saved ML confidence sample %d: %s (mean=%.3f, std=%.3f)\n",
+									   ml_depth_saved_count, confidence_file, conf_mean[0], conf_std[0]);
+							}
+							
 							printf("makeKeyFrame: 💾 Saved ML depth sample %d: %s (depth range: %.2f-%.2f)\n", 
 								   ml_depth_saved_count, depth_file, min_depth, max_depth);
 							ml_depth_saved_count++;
