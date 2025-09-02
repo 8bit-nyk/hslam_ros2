@@ -2764,37 +2764,39 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                         pixel_confidence = std::max(0.1f, std::min(1.0f, pixel_confidence));  // Clamp to [0.1, 1.0]
                     }
                     
-                    // PHASE 2: Improved uncertainty model (base + relative)
-                    const float base_uncertainty = 0.04f;  // 4cm minimum  
-                    const float relative_factor = 0.04f;   // 4% relative
-                    float uncertainty_m = base_uncertainty + depth * relative_factor;
-                    
-                    // PHASE 2: CRITICAL - Transform metric uncertainty to inverse depth uncertainty
-                    // Uncertainty propagation: d(1/depth)/d(depth) = -1/depth²
-                    // So uncertainty in inverse depth = uncertainty_m / depth²
+                    // Confidence-based uncertainty model (uniform across all depths)
+                    // This approach uses the ML confidence map directly without problematic depth² scaling
                     const float idepth = 1.0f / depth;
-                    float idepth_uncertainty = uncertainty_m / (depth * depth);
                     
-                    // PHASE 2: Modulate uncertainty by confidence (low confidence = higher uncertainty)
-                    float effective_idepth_uncertainty = idepth_uncertainty / pixel_confidence;
+                    // Base uncertainty in inverse depth space (not metric)
+                    // This provides consistent bounds regardless of depth
+                    const float base_idepth_uncertainty = 0.05f;
+                    
+                    // Scale by confidence: high confidence = tighter bounds, low confidence = looser bounds
+                    // pixel_confidence is already clamped to [0.1, 1.0] at line 2764
+                    float effective_idepth_uncertainty = base_idepth_uncertainty / pixel_confidence;
+                    
+                    // Optional gentle depth-adaptive scaling for numerical stability at extreme distances
+                    float depth_factor = 1.0f + (depth / 100.0f);
+                    effective_idepth_uncertainty *= depth_factor;
                     
                     // PHASE 2: Store ML bounds with proper uncertainty propagation
                     impt->idepth_min = idepth - effective_idepth_uncertainty;
                     impt->idepth_max = idepth + effective_idepth_uncertainty;
                     impt->idepth_GT = idepth;
                     impt->ml_confidence = pixel_confidence;           // Store per-pixel confidence
-                    impt->ml_uncertainty_m = uncertainty_m;          // Store metric uncertainty
+                    impt->ml_uncertainty_m = effective_idepth_uncertainty;  // Store effective inverse depth uncertainty (not metric)
                     
                     // ML depth integration complete for this point
                     
-                    // Debug output for ML bounds verification (COMMENTED OUT for cleaner testing)
-                    // if(ml_depth_points < 20 || ml_depth_points % 100 == 0) {
-                    //     printf("ML_BOUNDS_DEBUG Point %d: depth=%.2fm, uncertainty=%.2fm (%.1f%%), "
-                    //            "depth_bounds=[%.2fm, %.2fm], idepth_bounds=[%.4f, %.4f]\n",
-                    //            ml_depth_points, depth, u, (u/depth)*100.0f,
-                    //            std::max(0.05f, depth - u), depth + u,
-                    //            idepth_min_ml, idepth_max_ml);
-                    // }
+                    // Debug output for new confidence-based bounds
+                    if(ml_depth_points < 10 || (ml_depth_points % 500 == 0)) {
+                        printf("ML_BOUNDS_CONFIDENCE Point %d: depth=%.2fm, confidence=%.2f, "
+                               "idepth=%.6f, uncertainty=%.6f, bounds=[%.6f, %.6f]\n",
+                               ml_depth_points, depth, pixel_confidence,
+                               idepth, effective_idepth_uncertainty,
+                               impt->idepth_min, impt->idepth_max);
+                    }
                     
                     ml_depth_points++;                    // unchanged
                 }
@@ -3000,12 +3002,13 @@ bool FullSystem::isMLDepthValid(float ml_depth, float expected_range) {
         return false;
     }
     
-    // Scene-dependent range validation
-    if (ml_depth < 0.1f || ml_depth > expected_range) {
+    // Remove hard cutoff - only validate minimum depth for numerical stability
+    // Allow any reasonable positive depth value
+    if (ml_depth < 0.1f) {
         return false;
     }
     
-    // Additional validation based on dataset characteristics
+    // No upper limit - let the system handle far points naturally
     // For EuRoC (indoor aerial): typical range 1-15m
     // For KITTI (outdoor): typical range 2-80m  
     // For TUM (indoor): typical range 0.5-8m
