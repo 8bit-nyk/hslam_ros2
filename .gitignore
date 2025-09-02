@@ -36,7 +36,7 @@ result.txt
 
 HSLAM/Thirdparty/CompiledLibs/
 HSLAM/build/
-HSLAM/run_scripts/
+# HSLAM/run_scripts/
 HSLAM/results/
 HSLAM/models/
 HSLAM/logs
