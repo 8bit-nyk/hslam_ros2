@@ -79,12 +79,20 @@ PangolinDSOViewer::PangolinDSOViewer(int w, int h, bool startRunThread)
 	FeatureFrame = &Display("FeatureFrame").SetAspect(w/(float)h);
     DepthKfImage = std::unique_ptr<InternalImage>(new InternalImage());
 	DepthKeyFrame = &Display("DepthKeyFrame").SetAspect(w/(float)h);
-
+	
+	// Setup clean ML panels (separate from direct/indirect)
+	MLDepthImage = std::unique_ptr<InternalImage>(new InternalImage());
+	MLDepthFrame = &Display("MLDepthFrame").SetAspect(w/(float)h);
+	MLConfidenceImage = std::unique_ptr<InternalImage>(new InternalImage());
+	MLConfidenceFrame = &Display("MLConfidenceFrame").SetAspect(w/(float)h);
+	
     pangolin::CreateDisplay()
 		  .SetBounds(0.0, 0.2, pangolin::Attach::Pix(0.0), 1.0)
 		  .SetLayout(pangolin::LayoutEqual)
-		  .AddDisplay(*DepthKeyFrame)
-		  .AddDisplay(*FeatureFrame)
+		  .AddDisplay(*FeatureFrame)      // Panel 1: Indirect Features (red)
+		  .AddDisplay(*DepthKeyFrame)     // Panel 2: Direct Points (green)
+		  .AddDisplay(*MLDepthFrame)      // Panel 3: ML Depth (JET colormap)
+		  .AddDisplay(*MLConfidenceFrame) // Panel 4: ML Confidence (HOT colormap)
 		  .SetHandler(new pangolin::HandlerResize());
 
 	// parameter reconfigure gui
@@ -238,11 +246,19 @@ void PangolinDSOViewer::run()
 		}
 
 
+		// Panel 1: Indirect Features (red dots)
 		if(setting_render_displayVideo->Get())
 			renderInternalFrame(FrameImage, FeatureFrame);
 		
+		// Panel 2: Direct Points (green dots)
 		if(setting_render_displayDepth->Get())
 			renderInternalFrame(DepthKfImage, DepthKeyFrame);
+		
+		// Panel 3: ML Depth Map (JET colormap) 
+		renderInternalFrame(MLDepthImage, MLDepthFrame);
+		
+		// Panel 4: ML Confidence Map (HOT colormap)
+		renderInternalFrame(MLConfidenceImage, MLConfidenceFrame);
 		
 
 	    // update parameters
@@ -318,6 +334,8 @@ void PangolinDSOViewer::reset_internal()
 	boost::unique_lock<boost::mutex> lk(openImagesMutex);
 	FrameImage.reset(); FrameImage = std::unique_ptr<InternalImage>(new InternalImage());
     DepthKfImage.reset(); DepthKfImage = std::unique_ptr<InternalImage>(new InternalImage());
+    MLDepthImage.reset(); MLDepthImage = std::unique_ptr<InternalImage>(new InternalImage());
+    MLConfidenceImage.reset(); MLConfidenceImage = std::unique_ptr<InternalImage>(new InternalImage());
 	lk.unlock();
 
 	globalmap.reset();
@@ -693,7 +711,6 @@ void PangolinDSOViewer::publishGlobalMap(std::shared_ptr<Map> _globalMap)
 
 void PangolinDSOViewer::pushLiveFrame(FrameHessian* image, int nIndmatches)
 {
-	
     if(disableAllDisplay) return;
 	vCurrMatches = image->shell->frame->tMapPoints;
 	vCurrKeys = image->shell->frame->mvKeys;
@@ -701,7 +718,26 @@ void PangolinDSOViewer::pushLiveFrame(FrameHessian* image, int nIndmatches)
 
 	if (!(setting_render_displayVideo->Get()))
 		return;
+		
+	// Panel 1: Show indirect features (red dots) - unchanged original behavior
 	setInternalImageData(FrameImage, image);
+}
+
+void PangolinDSOViewer::updateMLVisualization(FrameHessian* fh) {
+    if(disableAllDisplay) return;
+    
+    if (fh->hasMLDepth()) {
+        auto ml_depth = fh->getMLDepth();
+        auto ml_confidence = fh->getMLConfidenceMap();
+        
+        cv::Mat depth_mat = (ml_depth && !ml_depth->empty()) ? *ml_depth : cv::Mat();
+        cv::Mat conf_mat = (ml_confidence && !ml_confidence->empty()) ? *ml_confidence : cv::Mat();
+        
+        printf("[DEBUG_VIEWER] Updating ML visualization: depth=%dx%d, confidence=%dx%d\n",
+               depth_mat.cols, depth_mat.rows, conf_mat.cols, conf_mat.rows);
+        
+        updateMLPanels(depth_mat, conf_mat);
+    }
 }
 
 bool PangolinDSOViewer::needPushDepthImage()
@@ -710,19 +746,18 @@ bool PangolinDSOViewer::needPushDepthImage()
 }
 void PangolinDSOViewer::pushDepthImage(MinimalImageB3* image)
 {
-
     if(!setting_render_displayDepth->Get()) return;
     if(disableAllDisplay) return;
 
-	setInternalImageData(DepthKfImage, image->data);
-	
-	boost::unique_lock<boost::mutex> lk(openImagesMutex);
-	struct timeval time_now;
-	gettimeofday(&time_now, NULL);
-	lastNMappingMs.push_back(((time_now.tv_sec-last_map.tv_sec)*1000.0f + (time_now.tv_usec-last_map.tv_usec)/1000.0f));
-	if(lastNMappingMs.size() > 10) lastNMappingMs.pop_front();
-	last_map = time_now;
-
+    // Panel 2: Show direct points (green dots) - unchanged original behavior  
+    setInternalImageData(DepthKfImage, image->data);
+    
+    boost::unique_lock<boost::mutex> lk(openImagesMutex);
+    struct timeval time_now;
+    gettimeofday(&time_now, NULL);
+    lastNMappingMs.push_back(((time_now.tv_sec-last_map.tv_sec)*1000.0f + (time_now.tv_usec-last_map.tv_usec)/1000.0f));
+    if(lastNMappingMs.size() > 10) lastNMappingMs.pop_front();
+    last_map = time_now;
 }
 
 void PangolinDSOViewer::setInternalImageData(std::unique_ptr<InternalImage> &InternalImage, Vec3b* Img)
@@ -821,6 +856,55 @@ void PangolinDSOViewer::renderInternalFrame(std::unique_ptr<InternalImage> &Imag
         CanvasFrame->Activate();
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
         ImageToRender->FeatureFrameTexture.RenderToViewportFlipY();
+    }
+}
+
+// ML depth/confidence visualization utilities - leveraging existing colormap logic
+cv::Mat PangolinDSOViewer::createDepthVisualization(const cv::Mat& depth_map) {
+    if (depth_map.empty()) {
+        return cv::Mat();
+    }
+    
+    // Use EXACT same colormap logic as FullSystem.cpp:1992-1999
+    cv::Mat depth_viz;
+    cv::normalize(depth_map, depth_viz, 0, 255, cv::NORM_MINMAX, CV_8U);
+    cv::Mat depth_colored;
+    cv::applyColorMap(depth_viz, depth_colored, cv::COLORMAP_JET);  // Blue→Red spectrum
+    
+    return depth_colored;
+}
+
+cv::Mat PangolinDSOViewer::createConfidenceVisualization(const cv::Mat& confidence_map) {
+    if (confidence_map.empty()) {
+        return cv::Mat();
+    }
+    
+    // Use EXACT same colormap logic as FullSystem.cpp:2012-2018
+    cv::Mat conf_viz;
+    cv::normalize(confidence_map, conf_viz, 0, 255, cv::NORM_MINMAX, CV_8U);
+    cv::Mat conf_colored;
+    cv::applyColorMap(conf_viz, conf_colored, cv::COLORMAP_HOT);  // Black→Yellow→White
+    
+    return conf_colored;
+}
+
+void PangolinDSOViewer::updateMLPanels(const cv::Mat& depth_map, const cv::Mat& confidence_map) {
+    // Panel 3: ML Depth Map (JET colormap) - completely separate from direct/indirect
+    if (!depth_map.empty()) {
+        cv::Mat depth_colored = createDepthVisualization(depth_map);
+        if (!depth_colored.empty()) {
+            setInternalImageData(MLDepthImage, (Vec3b*)depth_colored.data);
+            printf("[DEBUG_VIEWER] Updated Panel 3 with ML depth visualization\n");
+        }
+    }
+    
+    // Panel 4: ML Confidence Map (HOT colormap) - completely separate from direct/indirect
+    if (!confidence_map.empty()) {
+        cv::Mat conf_colored = createConfidenceVisualization(confidence_map);
+        if (!conf_colored.empty()) {
+            setInternalImageData(MLConfidenceImage, (Vec3b*)conf_colored.data);
+            printf("[DEBUG_VIEWER] Updated Panel 4 with ML confidence visualization\n");
+        }
     }
 }
 

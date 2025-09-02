@@ -46,6 +46,7 @@
 #include "FullSystem/PixelSelector2.h"
 #include "FullSystem/ResidualProjections.h"
 #include "FullSystem/ImmaturePoint.h"
+#include "IOWrapper/Pangolin/PangolinDSOViewer.h"
 
 #include "FullSystem/CoarseTracker.h"
 #include "FullSystem/CoarseInitializer.h"
@@ -1924,8 +1925,17 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					   
 				// Continue with ML result processing if successful
 				if (ml_result.success && !ml_result.depth_map.empty()) {
-					fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms);
+					fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms, ml_result.confidence_map);
 					fh->setMLPending(false);  // Clear pending flag
+					
+					// Update ML visualization immediately
+					for (IOWrap::Output3DWrapper *ow : outputWrapper) {
+						IOWrap::PangolinDSOViewer* pangolin_viewer = dynamic_cast<IOWrap::PangolinDSOViewer*>(ow);
+						if (pangolin_viewer) {
+							pangolin_viewer->updateMLVisualization(fh);
+							printf("[DEBUG_FS] Updated ML visualization for keyframe %d\n", fh->frameID);
+						}
+					}
 					
 					// DEPRECATED: Immediate scale alignment - kept for debugging/monitoring
 					// With ML at initialization, scale should be correct from start

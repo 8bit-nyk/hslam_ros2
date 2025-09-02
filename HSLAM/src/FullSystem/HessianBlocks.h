@@ -156,6 +156,7 @@ struct FrameHessian
 
 	// ML Depth Integration Fields (Phase 2.7 - Frame-Integrated Architecture)
 	std::shared_ptr<cv::Mat> ml_depth_map_;			// ML-estimated depth map (shared ownership)
+	std::shared_ptr<cv::Mat> ml_confidence_map_;	// ML confidence map (shared ownership)
 	std::atomic<bool> has_ml_depth_{false};			// Flag indicating ML depth availability
 	std::atomic<bool> ml_pending_{false};			// ML request submitted but not complete
 	int ml_request_frame_id_ = -1;					// Tracks ML request by absolute frame ID
@@ -271,6 +272,7 @@ struct FrameHessian
 		ab_exposure(0.0),
 		idx(0),
 		ml_depth_map_(nullptr),
+		ml_confidence_map_(nullptr),
 		has_ml_depth_(false),
 		ml_pending_(false)
 	{
@@ -334,12 +336,20 @@ struct FrameHessian
 		boost::unique_lock<boost::mutex> lock(ml_mutex_);
 		return has_ml_depth_.load() ? ml_depth_map_ : nullptr;
 	}
+	
+	inline std::shared_ptr<cv::Mat> getMLConfidenceMap() const {
+		boost::unique_lock<boost::mutex> lock(ml_mutex_);
+		return has_ml_depth_.load() ? ml_confidence_map_ : nullptr;
+	}
 
-	inline void setMLDepth(const cv::Mat& depth, float confidence, double inference_time) {
+	inline void setMLDepth(const cv::Mat& depth, float confidence, double inference_time, const cv::Mat& confidence_map = cv::Mat()) {
 		if (!depth.empty()) {
 			{
 				boost::unique_lock<boost::mutex> lock(ml_mutex_);
 				ml_depth_map_ = std::make_shared<cv::Mat>(depth.clone());
+				if (!confidence_map.empty()) {
+					ml_confidence_map_ = std::make_shared<cv::Mat>(confidence_map.clone());
+				}
 			}
 			ml_confidence_.store(confidence);
 			ml_inference_time_ms_.store(inference_time);
@@ -352,6 +362,7 @@ struct FrameHessian
 		{
 			boost::unique_lock<boost::mutex> lock(ml_mutex_);
 			ml_depth_map_.reset();
+			ml_confidence_map_.reset();
 		}
 		has_ml_depth_.store(false);
 		ml_pending_.store(false);

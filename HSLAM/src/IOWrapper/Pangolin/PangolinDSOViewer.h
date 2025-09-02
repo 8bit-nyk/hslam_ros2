@@ -71,6 +71,7 @@ public:
 	virtual void publishGlobalMap(std::shared_ptr<Map> _globalMap) override;
 
 	virtual void pushLiveFrame(FrameHessian* image, int nIndmatches) override;
+	void updateMLVisualization(FrameHessian* fh);  // New method for direct ML updates
     virtual void pushDepthImage(MinimalImageB3* image) override;
     virtual bool needPushDepthImage() override;
 
@@ -100,9 +101,21 @@ private:
 
 	std::unique_ptr<InternalImage> DepthKfImage;
 	pangolin::View *DepthKeyFrame;
+	
+	// Clean ML depth and confidence panels (separate from direct/indirect)
+	std::unique_ptr<InternalImage> MLDepthImage;
+	pangolin::View *MLDepthFrame;
+	std::unique_ptr<InternalImage> MLConfidenceImage;
+	pangolin::View *MLConfidenceFrame;
+	
 	void renderInternalFrame(std::unique_ptr<InternalImage> &ImageToRender, pangolin::View* CanvasFrame);
     void setInternalImageData(std::unique_ptr<InternalImage> &InternalImage, Vec3b* Img);
     void setInternalImageData(std::unique_ptr<InternalImage> &InternalImage, FrameHessian* image);
+    
+    // Clean ML visualization utilities  
+    cv::Mat createDepthVisualization(const cv::Mat& depth_map);
+    cv::Mat createConfidenceVisualization(const cv::Mat& confidence_map);
+    void updateMLPanels(const cv::Mat& depth_map, const cv::Mat& confidence_map);
 
 	// MinimalImageB3* internalVideoImg;
 	// MinimalImageB3* internalKFImg;
