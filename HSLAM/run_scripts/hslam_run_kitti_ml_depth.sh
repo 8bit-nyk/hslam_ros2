@@ -24,7 +24,10 @@ vocab_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/orbvoc.dbow3"
 
 # ML model configuration (same as EuRoC/TUM)
 ml_model_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/models/metric3d-vit-small/onnx/model.onnx"
-ml_strategy="keyframe_only"
+
+# ML Ablation Study Configuration
+ml_strategy="${ML_STRATEGY:-keyframe_only}"  # "keyframe_only" or "snapshot_mode"
+ml_snapshot_rate="${ML_SNAPSHOT_RATE:-5}"    # ML inference every N keyframes (for snapshot_mode)
 ml_benchmark=""  # Set to non-empty to enable benchmarking
 
 # GPU configuration (same as production EuRoC/TUM)
@@ -81,6 +84,11 @@ show_help() {
     echo "  $0 07 --endindex 100         # Process first 100 frames only"
     echo "  $0 07 --benchmark            # Enable ML performance benchmarking"
     echo ""
+    echo "Ablation Study Examples:"
+    echo "  ML_STRATEGY=snapshot_mode ML_SNAPSHOT_RATE=5 $0 07   # ML every 5 keyframes"
+    echo "  ML_STRATEGY=snapshot_mode ML_SNAPSHOT_RATE=10 $0 07  # ML every 10 keyframes"
+    echo "  ML_STRATEGY=keyframe_only $0 07                      # ML at every keyframe (baseline)"
+    echo ""
     echo "This script generates trajectory WITH ML depth integration (Metric3D)"
     echo "Results saved in: $results_directory/hslam-kitti-ml-depth-{dataset}-{timestamp}/"
     echo ""
@@ -93,6 +101,9 @@ show_help() {
     echo "ML Configuration:"
     echo "  Model: $ml_model_path"
     echo "  Strategy: $ml_strategy"
+    if [ "$ml_strategy" = "snapshot_mode" ]; then
+        echo "  Snapshot Rate: Every $ml_snapshot_rate keyframes ($(echo "scale=1; 100.0 / $ml_snapshot_rate" | bc)% coverage)"
+    fi
     echo "  Input Size: 616x1064 (ViT model with aspect ratio preservation)"
     if [ -n "$ml_gpu_enabled" ]; then
         echo "  Device: GPU (CUDA) - 37ms inference"
@@ -270,7 +281,8 @@ main() {
         --colour \
         --ml-depth \
         --ml-model $ml_model_path \
-        --ml-strategy $ml_strategy"
+        --ml-strategy $ml_strategy \
+        --ml-snapshot-interval $ml_snapshot_rate"
     
     # Add GPU flags if enabled
     if [ -n "$ml_gpu_enabled" ]; then

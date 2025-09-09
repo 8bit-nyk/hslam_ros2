@@ -1859,9 +1859,36 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	fh->frameID = allKeyFramesHistory.size();
 	
 
+	// =================== ABLATION STUDY: ML FREQUENCY CONTROL ===================
+	// Increment keyframe counter for ablation tracking
+	keyframe_counter_++;
+	
+	// Determine if ML inference should run based on strategy
+	bool should_run_ml = false;
+	
+	if (ml_config_.inference_strategy == "snapshot_mode") {
+		// Snapshot mode: Run ML every N keyframes
+		should_run_ml = ((keyframe_counter_ - 1) % ml_config_.snapshot_rate == 0);
+		
+		if (should_run_ml) {
+			printf("[ML_ABLATION] Keyframe %zu: RUNNING ML inference (snapshot rate=%d)\n", 
+			       keyframe_counter_, ml_config_.snapshot_rate);
+			last_ml_keyframe_ = keyframe_counter_;
+		} else {
+			size_t next_ml_kf = ((keyframe_counter_ - 1) / ml_config_.snapshot_rate + 1) 
+			                    * ml_config_.snapshot_rate + 1;
+			printf("[ML_ABLATION] Keyframe %zu: SKIPPING ML (last ML at KF %zu, next at KF %zu)\n", 
+			       keyframe_counter_, last_ml_keyframe_, next_ml_kf);
+		}
+	} else {
+		// Default keyframe_only mode: Run ML at every keyframe
+		should_run_ml = true;
+		last_ml_keyframe_ = keyframe_counter_;
+	}
+
 	// =================== ML DEPTH PROCESSOR INTEGRATION ===================
 	// Direct synchronous ML depth processing for current keyframe
-	if (ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady()) {
+	if (ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady() && should_run_ml) {
 		// Signal that ML processing is starting
 		{
 			boost::unique_lock<boost::mutex> lock(ml_processing_mutex_);
@@ -1911,6 +1938,9 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 			
 			// Count this as an attempted keyframe (after validation passes)
 			ml_metrics_.ml_keyframes_attempted++;
+			
+			// Track ML inference for ablation study
+			ml_inference_counter_++;
 			
 			try {
 				auto start_time = std::chrono::high_resolution_clock::now();
@@ -1975,6 +2005,23 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					// Update metrics
 					ml_metrics_.ml_keyframes_successful++;
 					ml_metrics_.ml_depth_utilization = (float)ml_metrics_.ml_keyframes_successful / allKeyFramesHistory.size();
+					
+					// Update ablation study metrics
+					ml_metrics_.frames_skipped = keyframe_counter_ - ml_inference_counter_;
+					
+					// Print ablation statistics periodically
+					if (keyframe_counter_ % 10 == 0 || keyframe_counter_ <= 5) {
+						printf("[ML_ABLATION_STATS] Progress: %zu keyframes, %zu ML inferences (%.1f%% coverage)\n",
+						       keyframe_counter_, ml_inference_counter_,
+						       100.0f * ml_inference_counter_ / keyframe_counter_);
+						
+						if (ml_config_.inference_strategy == "snapshot_mode") {
+							float expected_coverage = 100.0f / ml_config_.snapshot_rate;
+							float actual_coverage = 100.0f * ml_inference_counter_ / keyframe_counter_;
+							printf("[ML_ABLATION_STATS] Expected coverage: %.1f%%, Actual: %.1f%%\n",
+							       expected_coverage, actual_coverage);
+						}
+					}
 			
 				// DEBUG: Save ML depth maps for visual inspection (when --save flag is enabled)
 				if (debugSaveImages) {
@@ -4229,6 +4276,38 @@ void FullSystem::printInitializationPerformance() const
 	printf("Scale Factor: %.4f\n", init_scale_factor_);
 	printf("Initial Points: %d\n", init_points_count_);
 	printf("=================================\n");
+}
+
+void FullSystem::printAblationStatistics() const
+{
+	if (ml_config_.inference_strategy != "snapshot_mode") {
+		return;
+	}
+	
+	printf("\n");
+	printf("========================================\n");
+	printf("   ML INFERENCE ABLATION STUDY RESULTS  \n");
+	printf("========================================\n");
+	printf("Strategy: %s\n", ml_config_.inference_strategy.c_str());
+	printf("Snapshot Rate: Every %d keyframes\n", ml_config_.snapshot_rate);
+	printf("\n");
+	printf("KEYFRAME STATISTICS:\n");
+	printf("  Total Keyframes: %zu\n", keyframe_counter_);
+	printf("  ML Inferences: %zu\n", ml_inference_counter_);
+	printf("  Skipped: %zu\n", keyframe_counter_ - ml_inference_counter_);
+	printf("\n");
+	printf("COVERAGE ANALYSIS:\n");
+	printf("  Expected Coverage: %.1f%%\n", 100.0f / ml_config_.snapshot_rate);
+	printf("  Actual Coverage: %.1f%%\n", 
+	       keyframe_counter_ > 0 ? 100.0f * ml_inference_counter_ / keyframe_counter_ : 0.0f);
+	printf("  Inference Reduction: %.1f%%\n", 
+	       100.0f * (keyframe_counter_ - ml_inference_counter_) / std::max(keyframe_counter_, size_t(1)));
+	printf("\n");
+	printf("PERFORMANCE METRICS:\n");
+	printf("  ML Success Rate: %.1f%%\n", 
+	       ml_inference_counter_ > 0 ? 100.0f * ml_metrics_.ml_keyframes_successful / ml_inference_counter_ : 0.0f);
+	printf("  Avg ML Time: %.1f ms\n", ml_metrics_.avg_ml_inference_time_ms);
+	printf("========================================\n");
 }
 
 // =================== MLDepthProcessor Initialization ===================

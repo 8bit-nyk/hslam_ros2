@@ -253,6 +253,11 @@ public:
 	};
 	MLMetrics ml_metrics_;
 	
+	// Ablation study tracking counters
+	size_t keyframe_counter_ = 0;        // Total keyframes created
+	size_t ml_inference_counter_ = 0;    // ML inferences performed
+	size_t last_ml_keyframe_ = 0;        // Last keyframe that had ML inference
+	
 	// Initialization performance tracking
 	std::chrono::high_resolution_clock::time_point init_start_time_;
 	double ml_init_processing_time_ms_ = 0.0;
@@ -287,6 +292,10 @@ public:
 		int input_width = 518;
 		int input_height = 518;
 		bool benchmark_enabled = false;
+		
+		// Ablation study parameters
+		std::string inference_strategy = "keyframe_only";  // "keyframe_only" or "snapshot_mode"
+		int snapshot_rate = 1;  // ML inference every N keyframes (1 = every keyframe)
 		
 	};
 	
@@ -324,6 +333,7 @@ public:
 	size_t getTotalFrameCount() const;
 	void printKeyframeStats() const;
 	void printInitializationPerformance() const;
+	void printAblationStatistics() const;
 	
 private:
 	// Helper methods for ML integration

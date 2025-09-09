@@ -174,6 +174,18 @@ int main(int argc, char **argv)
 	int ml_snapshot_interval = result["ml-snapshot-interval"].as<int>();
 	bool ml_benchmark_enabled = result["ml-benchmark"].as<bool>();
 	
+	// Validate and normalize ML strategy parameters for ablation study
+	if (ml_strategy != "keyframe_only" && ml_strategy != "snapshot_mode") {
+		printf("WARNING: Invalid ml-strategy '%s', using 'keyframe_only'\n", ml_strategy.c_str());
+		ml_strategy = "keyframe_only";
+	}
+	
+	// Validate snapshot interval (repurpose as snapshot_rate for keyframes)
+	if (ml_snapshot_interval < 1) {
+		printf("WARNING: Invalid snapshot rate %d, using 1\n", ml_snapshot_interval);
+		ml_snapshot_interval = 1;
+	}
+	
 	// GPU acceleration options (Phase 3)
 	bool ml_gpu_enabled = result["ml-gpu"].as<bool>();
 	bool ml_fp16_enabled = result["ml-fp16"].as<bool>();
@@ -318,7 +330,9 @@ int main(int argc, char **argv)
 		printf("  Model: %s\n", ml_model_path.c_str());
 		printf("  Strategy: %s\n", ml_strategy.c_str());
 		if(ml_strategy == "snapshot_mode") {
-			printf("  Snapshot interval: %d frames\n", ml_snapshot_interval);
+			printf("  Snapshot rate: Every %d keyframes\n", ml_snapshot_interval);
+			printf("  Expected ML reduction: %.1f%%\n", 
+			       100.0f * (ml_snapshot_interval - 1) / ml_snapshot_interval);
 		}
 		
 		// Create ML configuration using FullSystem's MLConfig
@@ -335,6 +349,10 @@ int main(int argc, char **argv)
 		ml_config.input_width = 518;   // Metric3D model requirement
 		ml_config.input_height = 518;  // Metric3D model requirement
 		ml_config.benchmark_enabled = ml_benchmark_enabled;
+		
+		// Ablation study configuration
+		ml_config.inference_strategy = ml_strategy;
+		ml_config.snapshot_rate = ml_snapshot_interval;
 		
 		if(ml_gpu_enabled) {
 			printf("  GPU Acceleration: Enabled (Device %d, Memory: %zu MB, FP16: %s)\n",
@@ -628,6 +646,10 @@ int main(int argc, char **argv)
                             ml_config.input_height = 518;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
                             
+                            // Ablation study configuration
+                            ml_config.inference_strategy = ml_strategy;
+                            ml_config.snapshot_rate = ml_snapshot_interval;
+                            
                             // Reinitialize MLDepthProcessor
                             if(!fullSystem->initializeMLDepthProcessor(ml_config)) {
                                 printf("WARNING: Failed to reinitialize ML depth processor after reset\n");
@@ -781,6 +803,10 @@ int main(int argc, char **argv)
                             ml_config.input_width = 518;
                             ml_config.input_height = 518;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
+                            
+                            // Ablation study configuration
+                            ml_config.inference_strategy = ml_strategy;
+                            ml_config.snapshot_rate = ml_snapshot_interval;
                             
                             // Reinitialize MLDepthProcessor
                             if(!fullSystem->initializeMLDepthProcessor(ml_config)) {
