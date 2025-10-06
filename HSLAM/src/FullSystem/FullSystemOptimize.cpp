@@ -648,8 +648,8 @@ float FullSystem::optimize(int mnumOptIts)
                     ml_points_count = total_ml_points;
                 }
                 float scale_drift = (curr_avg_depth / init_avg_depth - 1.0f) * 100.0f;
-                printf("[SCALE_MONITOR] Iter %d: avg_depth=%.2fm, drift=%.1f%%, ML_points=%d/%d\n",
-                       iteration, curr_avg_depth, scale_drift, total_ml_points, valid_points);
+                // printf("[SCALE_MONITOR] Iter %d: avg_depth=%.2fm, drift=%.1f%%, ML_points=%d/%d\n",
+                //        iteration, curr_avg_depth, scale_drift, total_ml_points, valid_points);
             }
         }
 

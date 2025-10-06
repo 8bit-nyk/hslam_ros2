@@ -216,12 +216,12 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 		p->ml_uncertainty = (point->ml_uncertainty_m > 0) ? point->ml_uncertainty_m : 0.1f;
 		
 		// PHASE2_DEBUG: Log final adaptive weight for verification  
-		static int weight_transfer_count = 0;
-		if (weight_transfer_count < 3) {
-			printf("PHASE2_DEBUG: Final adaptive weight %d: conf=%.3f -> weight=%.3f (base=%.3f)\n",
-			       weight_transfer_count, adaptive_confidence, p->ml_weight, setting_mlDepthWeight);
-			weight_transfer_count++;
-		}
+		// static int weight_transfer_count = 0;
+		// if (weight_transfer_count < 3) {
+		// 	printf("PHASE2_DEBUG: Final adaptive weight %d: conf=%.3f -> weight=%.3f (base=%.3f)\n",
+		// 	       weight_transfer_count, adaptive_confidence, p->ml_weight, setting_mlDepthWeight);
+		// 	weight_transfer_count++;
+		// }
 	}
 
 	p->lastResiduals[0].first = 0;

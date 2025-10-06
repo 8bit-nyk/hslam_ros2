@@ -91,14 +91,14 @@ void EFPoint::takeData()
 		ml_reference = data->ml_idepth_reference;
 		
 		// PHASE2_DEBUG: Log adaptive weight usage in bundle adjustment
-		static int bundle_adjust_debug_count = 0;
-		if (bundle_adjust_debug_count < 3) {
-			bool using_adaptive = (data->ml_weight > 0);
-			printf("PHASE2_DEBUG: Bundle adjustment %d: %s weight=%.6f (fallback=%.6f)\n",
-			       bundle_adjust_debug_count, using_adaptive ? "ADAPTIVE" : "FALLBACK", 
-			       ml_weight_base, setting_idepthFixPrior);
-			bundle_adjust_debug_count++;
-		}
+		// static int bundle_adjust_debug_count = 0;
+		// if (bundle_adjust_debug_count < 3) {
+		// 	bool using_adaptive = (data->ml_weight > 0);
+		// 	printf("PHASE2_DEBUG: Bundle adjustment %d: %s weight=%.6f (fallback=%.6f)\n",
+		// 	       bundle_adjust_debug_count, using_adaptive ? "ADAPTIVE" : "FALLBACK", 
+		// 	       ml_weight_base, setting_idepthFixPrior);
+		// 	bundle_adjust_debug_count++;
+		// }
 	} else {
 		ml_priorF = 0;
 		ml_reference = 0;

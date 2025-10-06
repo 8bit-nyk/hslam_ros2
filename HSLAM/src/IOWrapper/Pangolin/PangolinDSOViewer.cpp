@@ -114,7 +114,7 @@ PangolinDSOViewer::PangolinDSOViewer(int w, int h, bool startRunThread)
 	settings_showActiveConstraints = new pangolin::Var<bool> ("ui.ActiveConst",false,true);
 	settings_showAllConstraints = new pangolin::Var<bool> ("ui.AllConst",false,true);
 	settings_drawIndCov = new pangolin::Var<bool> ("ui.IndCov",false,true);
-	settings_drawIndMap = new pangolin::Var<bool> ("ui.IndMap",true,true);
+	settings_drawIndMap = new pangolin::Var<bool> ("ui.IndMap",false,true);
 	settings_drawExtractedFeats = new pangolin::Var<bool> ("ui.Extracted Features",false,true);
 	settings_drawFrameMatches = new pangolin::Var<bool> ("ui.Map Matches",true,true);
 	settings_drawMatchRays = new pangolin::Var<bool> ("ui.Match Rays",false,true);

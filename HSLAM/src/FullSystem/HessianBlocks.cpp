@@ -68,12 +68,12 @@ PointHessian::PointHessian(const ImmaturePoint* const rawPoint, CalibHessian* Hc
 		ml_weight = setting_mlDepthWeight * confidence;  // Scale base weight by confidence
 		
 		// PHASE2_DEBUG: Log confidence transfer for verification
-		static int confidence_transfer_count = 0;
-		if (confidence_transfer_count < 3) {
-			printf("PHASE2_DEBUG: PointHessian confidence transfer %d: conf=%.3f, unc_m=%.3f, weight=%.3f\n",
-			       confidence_transfer_count, confidence, ml_uncertainty, ml_weight);
-			confidence_transfer_count++;
-		}
+		// static int confidence_transfer_count = 0;
+		// if (confidence_transfer_count < 3) {
+		// 	printf("PHASE2_DEBUG: PointHessian confidence transfer %d: conf=%.3f, unc_m=%.3f, weight=%.3f\n",
+		// 	       confidence_transfer_count, confidence, ml_uncertainty, ml_weight);
+		// 	confidence_transfer_count++;
+		// }
 	} else {
 		ml_idepth_reference = 0.0f;
 		ml_uncertainty = 0.0f;

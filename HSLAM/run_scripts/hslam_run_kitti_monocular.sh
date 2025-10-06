@@ -12,14 +12,14 @@ results_directory="$HOME/Dev/hslam_ros2_ws/src/HSLAM/results"
 repetitions=1
 
 # Default dataset (can be overridden via command line)
-DEFAULT_DATASET="07"
+DEFAULT_DATASET="00"
 DATASET_NUM="${1:-$DEFAULT_DATASET}"
 
 # Dataset paths
 DATASET_BASE="$HOME/datasets/KITTI"
 dataset_path="$DATASET_BASE/$DATASET_NUM"
-image_path="$dataset_path/image_2"  # RGB images from KITTI
-calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti04-12.txt"
+image_path="$dataset_path/image_1"  # RGB images from KITTI
+calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti00-02.txt"
 vocab_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/orbvoc.dbow3"
 
 # Processing configuration

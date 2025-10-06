@@ -11,7 +11,7 @@ results_directory="$HOME/Dev/hslam_ros2_ws/src/HSLAM/results"
 repetitions=1
 
 # Default dataset (can be overridden via command line)
-DEFAULT_DATASET="freiburg1_desk"
+DEFAULT_DATASET="freiburg1_room"
 DATASET_NAME="${1:-$DEFAULT_DATASET}"
 
 # Dataset paths

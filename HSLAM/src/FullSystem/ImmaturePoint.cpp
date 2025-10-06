@@ -511,12 +511,12 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 		adaptive_confidence = std::max(0.1f, std::min(1.0f, adaptive_confidence));
 		
 		// PHASE2_DEBUG: Log first few adaptive confidence computations
-		static int adaptive_debug_count = 0;
-		if(adaptive_debug_count < 5) {
-			printf("PHASE2_DEBUG: Adaptive confidence point %d: ml=%.3f, texture=%.3f, agreement=%.3f, spatial=%.3f -> final=%.3f\n",
-			       adaptive_debug_count, ml_conf_factor, texture_factor, depth_agreement, spatial_factor, adaptive_confidence);
-			adaptive_debug_count++;
-		}
+		// static int adaptive_debug_count = 0;
+		// if(adaptive_debug_count < 5) {
+		// 	printf("PHASE2_DEBUG: Adaptive confidence point %d: ml=%.3f, texture=%.3f, agreement=%.3f, spatial=%.3f -> final=%.3f\n",
+		// 	       adaptive_debug_count, ml_conf_factor, texture_factor, depth_agreement, spatial_factor, adaptive_confidence);
+		// 	adaptive_debug_count++;
+		// }
 	}
 	
 	// PHASE 1 HYBRID BOUNDS: Combine photometric and ML bounds at tracing time
@@ -549,12 +549,12 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 			idepth_max = ml_trust * ml_max + photometric_trust * photometric_max;
 			
 			// PHASE2_DEBUG: Log adaptive blending for first few points
-			static int blend_debug_count = 0;
-			if(blend_debug_count < 3) {
-				printf("PHASE2_DEBUG: Adaptive blending point %d: ML trust=%.3f (was 0.30), bounds=[%.3f,%.3f]\n",
-				       blend_debug_count, ml_trust, idepth_min, idepth_max);
-				blend_debug_count++;
-			}
+			// static int blend_debug_count = 0;
+			// if(blend_debug_count < 3) {
+			// 	printf("PHASE2_DEBUG: Adaptive blending point %d: ML trust=%.3f (was 0.30), bounds=[%.3f,%.3f]\n",
+			// 	       blend_debug_count, ml_trust, idepth_min, idepth_max);
+			// 	blend_debug_count++;
+			// }
 		}
 		trace_count++;
 	}

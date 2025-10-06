@@ -1976,10 +1976,10 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 				
 					// PHASE 2: Confidence map now stored directly in FrameHessian (no duplicate storage)
 					if (!ml_result.confidence_map.empty()) {
-						printf("PHASE2_DEBUG: Confidence map %dx%d stored in FrameHessian (no duplicate)\n", 
-						       ml_result.confidence_map.cols, ml_result.confidence_map.rows);
+						// printf("PHASE2_DEBUG: Confidence map %dx%d stored in FrameHessian (no duplicate)\n", 
+						//        ml_result.confidence_map.cols, ml_result.confidence_map.rows);
 					} else {
-						printf("PHASE2_DEBUG: No confidence map available from ML inference\n");
+						// printf("PHASE2_DEBUG: No confidence map available from ML inference\n");
 					}
 				
 					// PHASE 3: Forward ML depth to CoarseTracker for frame-to-frame tracking (KEYFRAMES ONLY)
@@ -2146,14 +2146,14 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	fh->frameEnergyTH = frameHessians.back()->frameEnergyTH;
 	
 	// DEBUG_INIT: Track optimization before/after metric scale initialization
-	printf("[DEBUG_INIT] Before optimization: keyframes=%zu, using_metric_scale=%s, scale_factor=%.3f\n", 
-		   allKeyFramesHistory.size(), using_metric_scale_ ? "YES" : "NO", init_scale_factor_);
+	// printf("[DEBUG_INIT] Before optimization: keyframes=%zu, using_metric_scale=%s, scale_factor=%.3f\n", 
+	// 	   allKeyFramesHistory.size(), using_metric_scale_ ? "YES" : "NO", init_scale_factor_);
 	
 	float rmse = optimize(setting_maxOptIterations);
 	
 	// DEBUG_INIT: Log optimization results for analysis
-	printf("[DEBUG_INIT] Optimization result: RMSE=%.2f, keyframes=%zu, points=%zu/%zu\n", 
-		   rmse, allKeyFramesHistory.size(), ef->nPoints, ef->nFrames * setting_desiredPointDensity);
+	// printf("[DEBUG_INIT] Optimization result: RMSE=%.2f, keyframes=%zu, points=%zu/%zu\n", 
+	//	   rmse, allKeyFramesHistory.size(), ef->nPoints, ef->nFrames * setting_desiredPointDensity);
 
 
 
@@ -2165,9 +2165,9 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	int max_keyframes = use_ml_tolerant_thresholds ? 6 : 4; // Allow more keyframes with ML
 	
 	// DEBUG_INIT: Show failure detection parameters
-	printf("[DEBUG_INIT] Failure detection: RMSE=%.2f, keyframes=%zu/%d, ML_mode=%s, slack=%.1f\n", 
-		   rmse, allKeyFramesHistory.size(), max_keyframes, 
-		   use_ml_tolerant_thresholds ? "YES" : "NO", benchmark_initializerSlackFactor);
+	// printf("[DEBUG_INIT] Failure detection: RMSE=%.2f, keyframes=%zu/%d, ML_mode=%s, slack=%.1f\n", 
+	//	   rmse, allKeyFramesHistory.size(), max_keyframes, 
+	//	   use_ml_tolerant_thresholds ? "YES" : "NO", benchmark_initializerSlackFactor);
 	
 	if(allKeyFramesHistory.size() <= max_keyframes)
 	{
@@ -2209,8 +2209,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		}
 		
 		// DEBUG_INIT: Show threshold comparison
-		printf("[DEBUG_INIT] Threshold check: RMSE=%.2f vs threshold=%.2f (%s)\n", 
-			   rmse, threshold, should_reset ? "EXCEEDED - RESET" : "OK");
+		// printf("[DEBUG_INIT] Threshold check: RMSE=%.2f vs threshold=%.2f (%s)\n", 
+		//	   rmse, threshold, should_reset ? "EXCEEDED - RESET" : "OK");
 		
 		if (should_reset) {
 			printf("I THINK INITIALIZATINO FAILED! Resetting. (ML-tolerant mode: %s, RMSE: %.2f, keyframes: %zu)\n", 
@@ -2471,16 +2471,16 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	
 	// SCALE MONITORING: Track direct metric initialization
 	if (usingMetricScale) {
-		printf("[SCALE_MONITOR] ✅ DIRECT METRIC INITIALIZATION ENABLED\n");
-		printf("[SCALE_MONITOR] System initialized directly in metric scale: %.3f meters\n", ml_mean_depth);
-		printf("[SCALE_MONITOR] Translation and depths scaled to metric from start\n");
-		printf("[SCALE_MONITOR] Scale factor: 1.0 (no conversion needed)\n");
-		printf("[SCALE_MONITOR] ML confidence: %.2f, threshold: %.2f\n", 
-			   coarseInitializer->mlConfidence, setting_mlInitConfidenceThreshold);
-		printf("[SCALE_MONITOR] Expected: Direct ML depth usage, consistent RMSE\n");
+		// printf("[SCALE_MONITOR] ✅ DIRECT METRIC INITIALIZATION ENABLED\n");
+		// printf("[SCALE_MONITOR] System initialized directly in metric scale: %.3f meters\n", ml_mean_depth);
+		// printf("[SCALE_MONITOR] Translation and depths scaled to metric from start\n");
+		// printf("[SCALE_MONITOR] Scale factor: 1.0 (no conversion needed)\n");
+		// printf("[SCALE_MONITOR] ML confidence: %.2f, threshold: %.2f\n", 
+			//    coarseInitializer->mlConfidence, setting_mlInitConfidenceThreshold);
+		// printf("[SCALE_MONITOR] Expected: Direct ML depth usage, consistent RMSE\n");
 	} else {
-		printf("[SCALE_MONITOR] Using standard photometric scale: %.3f\n", rescaleFactor);
-		printf("[SCALE_MONITOR] Scale alignment may be needed if ML depth becomes available\n");
+		// printf("[SCALE_MONITOR] Using standard photometric scale: %.3f\n", rescaleFactor);
+		// printf("[SCALE_MONITOR] Scale alignment may be needed if ML depth becomes available\n");
 	}
 
 	// randomly sub-select the points I need.
@@ -2497,19 +2497,19 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	if (usingMetricScale) {
 		// Convert translation to metric scale during initialization
 		float metric_scale_factor = ml_mean_depth / photometricScale;
-		printf("[DEBUG_INIT] DIRECT METRIC: Scaling translation to metric (factor=%.6f)\n", metric_scale_factor);
-		printf("[DEBUG_INIT] Pre-metric translation: %.6f\n", firstToNew.translation().norm());
+		// printf("[DEBUG_INIT] DIRECT METRIC: Scaling translation to metric (factor=%.6f)\n", metric_scale_factor);
+		// printf("[DEBUG_INIT] Pre-metric translation: %.6f\n", firstToNew.translation().norm());
 		
 		firstToNew.translation() *= metric_scale_factor;
 		
-		printf("[DEBUG_INIT] Post-metric translation: %.6f\n", firstToNew.translation().norm());
-		printf("[DEBUG_INIT] System initialized directly in metric scale (no conversion needed)\n");
+		// printf("[DEBUG_INIT] Post-metric translation: %.6f\n", firstToNew.translation().norm());
+		// printf("[DEBUG_INIT] System initialized directly in metric scale (no conversion needed)\n");
 	} else {
 		// Standard monocular - apply photometric scale normalization
-		printf("[DEBUG_INIT] Pre-scale translation magnitude: %.6f\n", firstToNew.translation().norm());
+		// printf("[DEBUG_INIT] Pre-scale translation magnitude: %.6f\n", firstToNew.translation().norm());
 		firstToNew.translation() /= rescaleFactor;
-		printf("[DEBUG_INIT] Post-scale translation magnitude: %.6f (rescale=%.3f)\n", 
-			   firstToNew.translation().norm(), rescaleFactor);
+		// printf("[DEBUG_INIT] Post-scale translation magnitude: %.6f (rescale=%.3f)\n", 
+			//    firstToNew.translation().norm(), rescaleFactor);
 	}
 
 
@@ -2556,21 +2556,21 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 			
 			// DEBUG_INIT: Log direct metric approach
 			static int debug_point_count_metric = 0;
-			if (debug_point_count_metric < 5) {
-				printf("[DEBUG_INIT] DIRECT METRIC Point %d: original_iR=%.6f, metric_idepth=%.6f (factor=%.3f, depth=%.3fm)\n", 
-					   debug_point_count_metric, original_idepth, final_idepth, metric_scale_factor, 1.0f/final_idepth);
-				debug_point_count_metric++;
-			}
+			// if (debug_point_count_metric < 5) {
+			// 	printf("[DEBUG_INIT] DIRECT METRIC Point %d: original_iR=%.6f, metric_idepth=%.6f (factor=%.3f, depth=%.3fm)\n", 
+			// 		   debug_point_count_metric, original_idepth, final_idepth, metric_scale_factor, 1.0f/final_idepth);
+			// 	debug_point_count_metric++;
+			// }
 		} else {
 			// Standard monocular - apply photometric scaling
 			final_idepth = original_idepth * rescaleFactor;
 			// DEBUG_INIT: Log standard scaling 
 			static int debug_point_count_std = 0;
-			if (debug_point_count_std < 5) {
-				printf("[DEBUG_INIT] STANDARD Point %d: original_iR=%.6f, scaled_idepth=%.6f (factor=%.3f, depth=%.3fm)\n", 
-					   debug_point_count_std, original_idepth, final_idepth, rescaleFactor, 1.0f/final_idepth);
-				debug_point_count_std++;
-			}
+			// if (debug_point_count_std < 5) {
+			// 	printf("[DEBUG_INIT] STANDARD Point %d: original_iR=%.6f, scaled_idepth=%.6f (factor=%.3f, depth=%.3fm)\n", 
+			// 		   debug_point_count_std, original_idepth, final_idepth, rescaleFactor, 1.0f/final_idepth);
+			// 	debug_point_count_std++;
+			// }
 		}
 		
 		ph->setIdepthScaled(final_idepth);
@@ -2801,8 +2801,8 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                     
                     // Monitor first ML point usage
                     if(ml_depth_points == 0) {
-                        printf("[SCALE_MONITOR] First ML point: raw=%.2fm, used=%.2fm (direct usage, system in metric)\n", 
-                               raw_ml_depth, depth);
+                        // printf("[SCALE_MONITOR] First ML point: raw=%.2fm, used=%.2fm (direct usage, system in metric)\n", 
+                        //        raw_ml_depth, depth);
                     }
                     // PHASE 2: Extract per-pixel ML confidence if available
                     float pixel_confidence = 1.0f;  // Default confidence
@@ -2837,13 +2837,13 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                     // ML depth integration complete for this point
                     
                     // Debug output for new confidence-based bounds
-                    if(ml_depth_points < 10 || (ml_depth_points % 500 == 0)) {
-                        printf("ML_BOUNDS_CONFIDENCE Point %d: depth=%.2fm, confidence=%.2f, "
-                               "idepth=%.6f, uncertainty=%.6f, bounds=[%.6f, %.6f]\n",
-                               ml_depth_points, depth, pixel_confidence,
-                               idepth, effective_idepth_uncertainty,
-                               impt->idepth_min, impt->idepth_max);
-                    }
+                    // if(ml_depth_points < 10 || (ml_depth_points % 500 == 0)) {
+                    //     printf("ML_BOUNDS_CONFIDENCE Point %d: depth=%.2fm, confidence=%.2f, "
+                    //            "idepth=%.6f, uncertainty=%.6f, bounds=[%.6f, %.6f]\n",
+                    //            ml_depth_points, depth, pixel_confidence,
+                    //            idepth, effective_idepth_uncertainty,
+                    //            impt->idepth_min, impt->idepth_max);
+                    // }
                     
                     ml_depth_points++;                    // unchanged
                 }
@@ -4314,6 +4314,9 @@ void FullSystem::printAblationStatistics() const
 bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 {
 	try {
+		// Store configuration for use in ablation study logic
+		ml_config_ = config;
+		
 		// Convert FullSystem::MLConfig to ML::MLInference::InferenceConfig
 		ML::MLInference::InferenceConfig ml_config;
 		ml_config.model_path = config.model_path;
