@@ -13,42 +13,69 @@ fi
 mkdir -p $SCRIPTPATH/CompiledLibs
 InstallDir=$SCRIPTPATH/CompiledLibs
 
-# Source ROS2 Humble setup script
-source /opt/ros/humble/setup.bash
-
 #install system wide dependencies
 #================================
 export DEBIAN_FRONTEND=noninteractive
-sudo apt -y install libgl1-mesa-dev libglew-dev libsuitesparse-dev libeigen3-dev libboost-all-dev cmake build-essential git libzip-dev ccache freeglut3-dev libgoogle-glog-dev libatlas-base-dev ninja-build
+sudo apt -y install libgl1-mesa-dev libglew-dev libsuitesparse-dev libeigen3-dev libboost-all-dev cmake build-essential git libzip-dev ccache freeglut3-dev libgoogle-glog-dev libatlas-base-dev ninja-build unzip wget
 
 #install libceres for compatibility with ubuntu 22:
-#cd $SCRIPTPATH/Thirdparty/
-#wget ceres-solver.org/ceres-solver-1.14.0.tar.gz
-#tar -zxf ceres-solver-1.14.0.tar.gz && 
-cd ceres-solver-1.14.0 && mkdir build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DCXX11=ON && make -j $(nproc) && make install && cd .. && rm -r build && cd .. && rm ceres-solver-1.14.0.tar.gz && rm -r ceres-solver-1.14.0
+echo -e "Setting up Ceres Solver\n"
+cd $SCRIPTPATH
+if [ ! -d "ceres-solver-1.14.0" ]; then
+    echo "Downloading Ceres Solver..."
+    wget http://ceres-solver.org/ceres-solver-1.14.0.tar.gz
+    tar -zxf ceres-solver-1.14.0.tar.gz
+    echo "Ceres Solver downloaded"
+else
+    echo "Ceres Solver source already exists"
+fi
+
+cd ceres-solver-1.14.0 && mkdir -p build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DCXX11=ON && make -j $(nproc) && make install
+cd ../.. && rm -rf ceres-solver-1.14.0/build
+echo "Ceres Solver build complete"
 
 #optional libs to record pangolin gui
 sudo apt -y install ffmpeg libavcodec-dev libavutil-dev libavformat-dev libswscale-dev libavdevice-dev
 
-#if you have OpenCV3.4 comment out the following and specify the directory later
-#sudo apt -y install libjpeg8-dev libpng-dev libtiff5-dev libtiff-dev libavcodec-dev libavformat-dev libv4l-dev libgtk2.0-dev qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools v4l-utils
+# OpenCV build with contrib modules
+echo -e "Setting up OpenCV\n"
 cvVersion=4.9.0
-# if [ ! -d "$SCRIPTPATH/opencv-${cvVersion}" ]; 
-# then : 
-#   echo -e "Need to download OpenCV\n"
-#   DL_opencv="https://github.com/opencv/opencv/archive/${cvVersion}.zip"
-#   DL_contrib="https://github.com/opencv/opencv_contrib/archive/${cvVersion}.zip"
-#   cd $SCRIPTPATH/Thirdparty/
-#   wget -O opencv.zip "${DL_opencv}" && unzip opencv.zip && rm opencv.zip
-#   wget -O opencv_contrib.zip "${DL_contrib}" && unzip opencv_contrib.zip && rm opencv_contrib.zip
-# else
-#   echo -e "OpenCV already downloaded\n"
-  
-# fi
+cd $SCRIPTPATH
 
-cd $SCRIPTPATH/opencv-${cvVersion} && mkdir -p build && cd build &&cmake .. -DCMAKE_BUILD_TYPE=$BuildType -DCMAKE_INSTALL_PREFIX=$InstallDir -DWITH_V4L=ON -DWITH_CUDA=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_TESTS=OFF -DWITH_QT=ON -DCMAKE_CXX_FLAGS=-std=c++11 -DWITH_OPENGL=ON -DOPENCV_EXTRA_MODULES_PATH=$SCRIPTPATH/opencv-${cvVersion}/opencv_contrib-${cvVersion}/modules -DOPENCV_ENABLE_NONFREE=ON -DCeres_DIR=$InstallDir/lib/cmake/Ceres && make -j $(nproc) && make install && cd .. && rm -r build
-#end comment out OpenCV
+if [ ! -d "opencv-${cvVersion}" ]; then
+    echo "Downloading OpenCV ${cvVersion}..."
+    DL_opencv="https://github.com/opencv/opencv/archive/${cvVersion}.zip"
+    DL_contrib="https://github.com/opencv/opencv_contrib/archive/${cvVersion}.zip"
+
+    wget -O opencv.zip "${DL_opencv}" && unzip opencv.zip && rm opencv.zip
+    wget -O opencv_contrib.zip "${DL_contrib}" && unzip opencv_contrib.zip && rm opencv_contrib.zip
+
+    # Move contrib into opencv directory
+    mv opencv_contrib-${cvVersion} opencv-${cvVersion}/
+    echo "OpenCV ${cvVersion} downloaded"
+else
+    echo "OpenCV ${cvVersion} already exists"
+fi
+
+echo -e "Compiling OpenCV ${cvVersion}\n"
+cd $SCRIPTPATH/opencv-${cvVersion} && mkdir -p build && cd build
+cmake .. \
+    -DCMAKE_BUILD_TYPE=$BuildType \
+    -DCMAKE_INSTALL_PREFIX=$InstallDir \
+    -DWITH_V4L=ON \
+    -DWITH_CUDA=OFF \
+    -DBUILD_PERF_TESTS=OFF \
+    -DBUILD_TESTS=OFF \
+    -DWITH_QT=ON \
+    -DCMAKE_CXX_FLAGS=-std=c++11 \
+    -DWITH_OPENGL=ON \
+    -DOPENCV_EXTRA_MODULES_PATH=$SCRIPTPATH/opencv-${cvVersion}/opencv_contrib-${cvVersion}/modules \
+    -DOPENCV_ENABLE_NONFREE=ON \
+    -DCeres_DIR=$InstallDir/lib/cmake/Ceres
+make -j $(nproc) && make install
+cd .. && rm -rf build
+echo "OpenCV build complete"
 
 #Build Thirdparty libs	
 #=====================
