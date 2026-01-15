@@ -13,7 +13,7 @@ This hybrid approach leverages the strengths of both direct and indirect SLAM me
 ### Key Features
 
 - **Production-Ready Performance**: 12-20 FPS on TUM RGBD, EuRoC MAV, and KITTI datasets
-- **GPU-Accelerated ML Depth**: 44ms inference time with CUDA support (vs 650ms CPU)
+- **GPU-Accelerated ML Depth**: 44ms inference time with CUDA support on NVIDIA RTX A4500 Laptop GPU (vs 650ms on Intel i9-12950HX CPU)
 - **Metric Scale Estimation**: ML depth provides metric scale initialization
 - **Loop Closure Detection**: DBoW3-based place recognition with 1000 ORB features
 - **Real-time Visualization**: Pangolin-based 3D display with trajectory and point cloud
@@ -63,7 +63,7 @@ Please cite these papers if used in academic context:
 ### Tested Environment
 - **OS**: Ubuntu 22.04 LTS
 - **Compiler**: GCC 11+ with C++17 support
-- **CMake**: Version 2.9 or higher
+- **CMake**: Version 3.0 or higher
 - **GPU** (Optional): NVIDIA GPU with CUDA support for ML depth acceleration
 
 ### Required System Dependencies
@@ -532,7 +532,15 @@ sudo apt install nvidia-cuda-toolkit
 
 ### Custom Camera Calibration
 
-Create a camera calibration file (format: `fx fy cx cy k`):
+**TUM/KITTI Format** (simple pinhole model):
+```
+fx fy cx cy k
+width height
+distortion_model
+output_width output_height
+```
+
+Example (`fx fy cx cy k`):
 ```
 517.3 516.5 318.6 255.3 0.0
 640 480
@@ -540,27 +548,47 @@ none
 640 480
 ```
 
+**EuRoC Format** (RadTan distortion model):
+```
+RadTan fx fy cx cy k1 k2 p1 p2
+width height
+crop_params
+output_width output_height
+```
+
 Run with custom calibration:
 ```bash
 ./build/bin/HSLAM \
-    calib=path/to/camera.txt \
-    files=path/to/images \
-    vocab=misc/orbvoc.dbow3 \
-    mlmodel=models/metric3d-vit-small/onnx/model.onnx \
-    mlstrategy=keyframe_only
+    --calib path/to/camera.txt \
+    --files path/to/images \
+    --vocab misc/orbvoc.dbow3 \
+    --ml-model models/metric3d-vit-small/onnx/model.onnx \
+    --ml-strategy keyframe_only
 ```
 
 ### ML Depth Configuration
 
-Available ML strategies (set via `mlstrategy` parameter):
-- `keyframe_only`: Integrate ML depth on keyframes only (recommended)
-- `frame_to_frame`: Integrate ML depth on all frames (slower)
-- `disabled`: Disable ML depth integration
+Core ML parameters:
+- `--ml-depth`: Enable ML depth estimation (boolean)
+- `--ml-model`: Path to ONNX ML depth model (default: `models/metric3d-vit-small/onnx/model.onnx`)
+- `--ml-init`: Enable ML depth for metric scale initialization (default: true)
 
-GPU settings:
-- `mlgpu=true`: Enable GPU acceleration
-- `mlgpudevice=0`: Select GPU device ID
-- `mlgpumemory=2048`: GPU memory limit in MB
+Available ML strategies (set via `--ml-strategy` parameter):
+- `keyframe_only`: Integrate ML depth on keyframes only (recommended, default)
+- `snapshot_mode`: Integrate ML depth every N keyframes (configurable)
+- `every_frame`: Integrate ML depth on all frames (not validated, experimental)
+
+Snapshot mode configuration:
+- `--ml-snapshot-interval`: Frames between ML inference in snapshot mode (default: 5)
+
+GPU acceleration settings:
+- `--ml-gpu`: Enable GPU acceleration (boolean)
+- `--ml-gpu-device`: Select GPU device ID (default: 0)
+- `--ml-gpu-memory`: GPU memory limit in MB (default: 2048)
+- `--ml-fp16`: Enable FP16 optimization for GPU inference (boolean)
+
+Performance monitoring:
+- `--ml-benchmark`: Enable ML performance benchmarking (boolean)
 
 ---
 
