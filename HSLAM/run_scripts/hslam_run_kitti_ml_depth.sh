@@ -19,7 +19,12 @@ DATASET_NUM="${1:-$DEFAULT_DATASET}"
 DATASET_BASE="$HOME/datasets/KITTI"
 dataset_path="$DATASET_BASE/$DATASET_NUM"
 image_path="$dataset_path/image_1"  # RGB images from KITTI
-calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti00-02.txt"
+# Select calibration file based on sequence number
+case "$DATASET_NUM" in
+    00|01|02) calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti00-02.txt" ;;
+    03)       calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti03.txt" ;;
+    *)        calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti04-12.txt" ;;
+esac
 vocab_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/orbvoc.dbow3"
 
 # ML model configuration (same as EuRoC/TUM)
