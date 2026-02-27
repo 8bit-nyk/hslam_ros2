@@ -107,8 +107,8 @@ FullSystem::FullSystem()
 		retstat += system("rm -rf logs");
 		retstat += system("mkdir logs");
 
-		retstat += system("rm -rf mats");
-		retstat += system("mkdir mats");
+		// retstat += system("rm -rf mats");  // DSO legacy: mats/ directory unused in HSLAM
+		// retstat += system("mkdir mats");
 
 		calibLog = new std::ofstream();
 		calibLog->open("logs/calibLog.txt", std::ios::trunc | std::ios::out);
@@ -122,30 +122,31 @@ FullSystem::FullSystem()
 		coarseTrackingLog->open("logs/coarseTrackingLog.txt", std::ios::trunc | std::ios::out);
 		coarseTrackingLog->precision(10);
 
-		eigenAllLog = new std::ofstream();
-		eigenAllLog->open("logs/eigenAllLog.txt", std::ios::trunc | std::ios::out);
-		eigenAllLog->precision(10);
+		// DSO legacy: Hessian eigenvalue/nullspace diagnostics — printEigenValLine() is commented out, these are never written
+		// eigenAllLog = new std::ofstream();
+		// eigenAllLog->open("logs/eigenAllLog.txt", std::ios::trunc | std::ios::out);
+		// eigenAllLog->precision(10);
 
-		eigenPLog = new std::ofstream();
-		eigenPLog->open("logs/eigenPLog.txt", std::ios::trunc | std::ios::out);
-		eigenPLog->precision(10);
+		// eigenPLog = new std::ofstream();
+		// eigenPLog->open("logs/eigenPLog.txt", std::ios::trunc | std::ios::out);
+		// eigenPLog->precision(10);
 
-		eigenALog = new std::ofstream();
-		eigenALog->open("logs/eigenALog.txt", std::ios::trunc | std::ios::out);
-		eigenALog->precision(10);
+		// eigenALog = new std::ofstream();
+		// eigenALog->open("logs/eigenALog.txt", std::ios::trunc | std::ios::out);
+		// eigenALog->precision(10);
 
-		DiagonalLog = new std::ofstream();
-		DiagonalLog->open("logs/diagonal.txt", std::ios::trunc | std::ios::out);
-		DiagonalLog->precision(10);
+		// DiagonalLog = new std::ofstream();
+		// DiagonalLog->open("logs/diagonal.txt", std::ios::trunc | std::ios::out);
+		// DiagonalLog->precision(10);
 
-		variancesLog = new std::ofstream();
-		variancesLog->open("logs/variancesLog.txt", std::ios::trunc | std::ios::out);
-		variancesLog->precision(10);
+		// variancesLog = new std::ofstream();
+		// variancesLog->open("logs/variancesLog.txt", std::ios::trunc | std::ios::out);
+		// variancesLog->precision(10);
 
-
-		nullspacesLog = new std::ofstream();
-		nullspacesLog->open("logs/nullspacesLog.txt", std::ios::trunc | std::ios::out);
-		nullspacesLog->precision(10);
+		// nullspacesLog = new std::ofstream();
+		// nullspacesLog->open("logs/nullspacesLog.txt", std::ios::trunc | std::ios::out);
+		// nullspacesLog->precision(10);
+		eigenAllLog=0; eigenPLog=0; eigenALog=0; DiagonalLog=0; variancesLog=0; nullspacesLog=0;
 	}
 	else
 	{
@@ -202,9 +203,6 @@ FullSystem::FullSystem()
 	ml_reference_frame_id_ = -1;      // Already initialized in header, but be explicit
 	ml_reference_confidence_ = 0.0f;
 	ml_reference_time_ = 0.0;
-	
-	printf("DEBUG: FullSystem constructor - ML reference initialized: empty=%d, frame_id=%d\n",
-	       ml_reference_depth_.empty(), ml_reference_frame_id_);
 
 	ef = new EnergyFunctional();
 	ef->red = &this->treadReduce;
@@ -241,12 +239,13 @@ FullSystem::~FullSystem()
 		numsLog->close(); delete numsLog;
 		coarseTrackingLog->close(); delete coarseTrackingLog;
 		//errorsLog->close(); delete errorsLog;
-		eigenAllLog->close(); delete eigenAllLog;
-		eigenPLog->close(); delete eigenPLog;
-		eigenALog->close(); delete eigenALog;
-		DiagonalLog->close(); delete DiagonalLog;
-		variancesLog->close(); delete variancesLog;
-		nullspacesLog->close(); delete nullspacesLog;
+		// DSO legacy logs disabled (never written — printEigenValLine is commented out)
+		// eigenAllLog->close(); delete eigenAllLog;
+		// eigenPLog->close(); delete eigenPLog;
+		// eigenALog->close(); delete eigenALog;
+		// DiagonalLog->close(); delete DiagonalLog;
+		// variancesLog->close(); delete variancesLog;
+		// nullspacesLog->close(); delete nullspacesLog;
 
 	}
 
@@ -1354,7 +1353,7 @@ void FullSystem::TrackMonocularWithML(const cv::Mat& rgb_color, ImageAndExposure
             currentMLDepthImage = ml_depth_image;
             static bool first_match_logged = false;
             if (!first_match_logged) {
-                printf("✅ ML depth resolution matches HSLAM (%dx%d) - optimal pipeline\n", wG[0], hG[0]);
+                printf("ML depth resolution matches HSLAM (%dx%d) - optimal pipeline\n", wG[0], hG[0]);
                 first_match_logged = true;
             }
         }
@@ -1963,7 +1962,6 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						IOWrap::PangolinDSOViewer* pangolin_viewer = dynamic_cast<IOWrap::PangolinDSOViewer*>(ow);
 						if (pangolin_viewer) {
 							pangolin_viewer->updateMLVisualization(fh);
-							printf("[DEBUG_FS] Updated ML visualization for keyframe %d\n", fh->frameID);
 						}
 					}
 					
@@ -1996,8 +1994,11 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						// Forward to BOTH CoarseTracker instances (CRITICAL for trajectory quality)
 						coarseTracker->setExternalDepthImage(ml_depth_for_tracker);
 						coarseTracker_forNewKF->setExternalDepthImage(ml_depth_for_tracker);
+
+						// Phase 5: Scale drift diagnostics (pure instrumentation, no trajectory impact)
+						monitorScaleDrift(fh, ml_depth_for_tracker);
 					}
-					
+
 					// TEMP_DEBUG_REPETITIVE: Commented out for cleaner testing output
 					// printf("makeKeyFrame: ✅ ML processing successful for frame %d (%.1fms inference, conf=%.2f, total=%.1fms)\n",
 					//	   fh->frameID, ml_result.inference_time_ms, ml_result.confidence, (float)processing_time);
@@ -2009,18 +2010,17 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					// Update ablation study metrics
 					ml_metrics_.frames_skipped = keyframe_counter_ - ml_inference_counter_;
 					
-					// Print ablation statistics periodically
-					if (keyframe_counter_ % 10 == 0 || keyframe_counter_ <= 5) {
+					// Print ablation statistics periodically (snapshot_mode only)
+					if (ml_config_.inference_strategy == "snapshot_mode" &&
+					    (keyframe_counter_ % 10 == 0 || keyframe_counter_ <= 5)) {
 						printf("[ML_ABLATION_STATS] Progress: %zu keyframes, %zu ML inferences (%.1f%% coverage)\n",
 						       keyframe_counter_, ml_inference_counter_,
 						       100.0f * ml_inference_counter_ / keyframe_counter_);
-						
-						if (ml_config_.inference_strategy == "snapshot_mode") {
-							float expected_coverage = 100.0f / ml_config_.snapshot_rate;
-							float actual_coverage = 100.0f * ml_inference_counter_ / keyframe_counter_;
-							printf("[ML_ABLATION_STATS] Expected coverage: %.1f%%, Actual: %.1f%%\n",
-							       expected_coverage, actual_coverage);
-						}
+
+						float expected_coverage = 100.0f / ml_config_.snapshot_rate;
+						float actual_coverage = 100.0f * ml_inference_counter_ / keyframe_counter_;
+						printf("[ML_ABLATION_STATS] Expected coverage: %.1f%%, Actual: %.1f%%\n",
+						       expected_coverage, actual_coverage);
 					}
 			
 				// DEBUG: Save ML depth maps for visual inspection (when --save flag is enabled)
@@ -2068,21 +2068,21 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 								cv::Scalar conf_mean, conf_std;
 								cv::meanStdDev(ml_result.confidence_map, conf_mean, conf_std);
 								
-								printf("makeKeyFrame: 💾 Saved ML confidence sample %d: %s (mean=%.3f, std=%.3f)\n",
+								printf("makeKeyFrame: [SAVE] ML confidence sample %d: %s (mean=%.3f, std=%.3f)\n",
 									   ml_depth_saved_count, confidence_file, conf_mean[0], conf_std[0]);
 							}
 							
-							printf("makeKeyFrame: 💾 Saved ML depth sample %d: %s (depth range: %.2f-%.2f)\n", 
+							printf("makeKeyFrame: [SAVE] ML depth sample %d: %s (depth range: %.2f-%.2f)\n", 
 								   ml_depth_saved_count, depth_file, min_depth, max_depth);
 							ml_depth_saved_count++;
 							
 						} catch (const cv::Exception& e) {
-							printf("makeKeyFrame: ⚠️ Failed to save ML depth map: %s\n", e.what());
+							printf("makeKeyFrame: WARNING - Failed to save ML depth map: %s\n", e.what());
 						}
 					}
 				}
 				} else {
-					printf("makeKeyFrame: ❌ ML processing failed for frame %d: %s\n", 
+					printf("makeKeyFrame: ERROR - ML processing failed for frame %d: %s\n", 
 						   fh->frameID, ml_result.error_message.c_str());
 					fh->setMLPending(false);  // Clear pending flag on failure
 				}
@@ -2462,11 +2462,11 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	}
 	
 	// VALIDATION DEBUG: Show initial triangulation quality  
-	printf("🔍 VALIDATION: Triangulation Scale = %.4f (%.1f%% difference from 1.0 - good for geometry)\n", 
+	printf("[VALIDATION] Triangulation Scale = %.4f (%.1f%% difference from 1.0 - good for geometry)\n", 
 		   rescaleFactor, fabs(rescaleFactor - 1.0) * 100.0);
-	printf("🔍 VALIDATION: Using %s initialization\n",
+	printf("[VALIDATION] Using %s initialization\n",
 		   usingMetricScale ? "DIRECT METRIC (ML depth sets scale from start)" : "PHOTOMETRIC");
-	printf("🔍 VALIDATION: ML Initialization %s\n",
+	printf("[VALIDATION] ML Initialization %s\n",
 		   setting_useMLForInitialization ? "ENABLED" : "DISABLED");
 	
 	// SCALE MONITORING: Track direct metric initialization
@@ -3008,7 +3008,7 @@ void FullSystem::alignScalesImmediately(const cv::Mat& ml_depth) {
     // Mark as aligned
     scale_aligned_ = true;
     
-    printf("[IMMEDIATE_SCALE] ✅ Scale aligned on first ML keyframe!\n");
+    printf("[IMMEDIATE_SCALE] Scale aligned on first ML keyframe\n");
     printf("[IMMEDIATE_SCALE] Init scale: %.3f, ML median: %.2fm, factor: %.3f\n", 
            init_scale_factor_, ml_median_depth, ml_to_slam_scale_factor_);
     printf("[IMMEDIATE_SCALE] Samples used: %zu/%d pixels\n", 
@@ -3105,7 +3105,7 @@ void FullSystem::applyMetricScaleConversion() {
     // Mark as aligned and log completion
     scale_aligned_ = true;
     
-    printf("[METRIC_CONVERSION] ✅ Conversion complete - map now in metric coordinates\n");
+    printf("[METRIC_CONVERSION] Conversion complete - map now in metric coordinates\n");
     printf("[METRIC_CONVERSION] All poses and landmarks converted to meter units\n");
 }
 
@@ -4333,22 +4333,17 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 		ml_config.input_height = 518;  // Metric3D model requirement for quality inference
 		ml_config.benchmark_enabled = config.benchmark_enabled;
 		
-		printf("initializeMLDepthProcessor: Initializing simplified ML processor...\n");
-		printf("  Model path: %s\n", ml_config.model_path.c_str());
-		printf("  GPU enabled: %s\n", ml_config.enable_gpu ? "YES" : "NO");
-		printf("  Input resolution: %dx%d\n", ml_config.input_width, ml_config.input_height);
-		
 		// Create MLDepthProcessor instance
 		ml_processor_ = std::make_unique<ML::MLDepthProcessor>(ml_config);
 		
 		// Initialize the processor
 		if (!ml_processor_->initialize()) {
-			printf("initializeMLDepthProcessor: ❌ Failed to initialize ML processor\n");
+			printf("initializeMLDepthProcessor: ERROR - Failed to initialize ML processor\n");
 			ml_processor_.reset();
 			return false;
 		}
 		
-		printf("initializeMLDepthProcessor: ✅ MLDepthProcessor initialized successfully\n");
+		printf("initializeMLDepthProcessor: MLDepthProcessor initialized successfully\n");
 		
 		// CRITICAL: Enable ML depth processing flag
 		ml_depth_enabled_ = true;
@@ -4356,12 +4351,12 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 		return true;
 		
 	} catch (const std::exception& e) {
-		printf("initializeMLDepthProcessor: ❌ Exception during initialization: %s\n", e.what());
+		printf("initializeMLDepthProcessor: ERROR - Exception during initialization: %s\n", e.what());
 		ml_processor_.reset();
 		ml_depth_enabled_ = false;
 		return false;
 	} catch (...) {
-		printf("initializeMLDepthProcessor: ❌ Unknown exception during initialization\n");
+		printf("initializeMLDepthProcessor: ERROR - Unknown exception during initialization\n");
 		ml_processor_.reset();
 		ml_depth_enabled_ = false;
 		return false;
@@ -4392,7 +4387,7 @@ bool FullSystem::performMLWarmup(const cv::Mat& warmup_image)
 			warmup_confidence_ = warmup_result.confidence;
 			warmup_results_available_ = true;
 			
-			printf("✅ GPU warmup complete - stored metric scale: %.2fm\n", warmup_mean_depth_);
+			printf("GPU warmup complete - stored metric scale: %.2fm\n", warmup_mean_depth_);
 			return true;
 		} else {
 			printf("ERROR: ML warmup inference failed\n");
@@ -4403,6 +4398,75 @@ bool FullSystem::performMLWarmup(const cv::Mat& warmup_image)
 		printf("ERROR: Exception during ML warmup: %s\n", e.what());
 		return false;
 	}
+}
+
+// Phase 5: Scale drift diagnostics — pure instrumentation, no trajectory impact
+void FullSystem::monitorScaleDrift(FrameHessian* newKF, const cv::Mat& mlDepth)
+{
+	if (mlDepth.empty() || !newKF) return;
+
+	Mat33f K = Mat33f::Identity();
+	K(0,0) = Hcalib.fxl(); K(1,1) = Hcalib.fyl();
+	K(0,2) = Hcalib.cxl(); K(1,2) = Hcalib.cyl();
+	Mat33f Ki = K.inverse();
+
+	std::vector<float> scale_ratios;  // Signal 1: SLAM_depth / ML_depth
+	float total_residual = 0.0f;      // Signal 2: mean |idepth - ml_ref| / ml_ref
+	int residual_count = 0;
+
+	for (FrameHessian* host : frameHessians) {
+		SE3 hostToNew = newKF->PRE_worldToCam * host->PRE_camToWorld;
+		Mat33f KRKi = K * hostToNew.rotationMatrix().cast<float>() * Ki;
+		Vec3f Kt = K * hostToNew.translation().cast<float>();
+
+		for (PointHessian* ph : host->pointHessians) {
+			if (!ph->hasMLDepth || ph->idepth <= 0) continue;
+
+			// Signal 2: residual magnitude for ALL ML points
+			if (ph->ml_idepth_reference > 0) {
+				float rel_residual = std::abs(ph->idepth - ph->ml_idepth_reference) / ph->ml_idepth_reference;
+				total_residual += rel_residual;
+				residual_count++;
+			}
+
+			// Signal 1: project into new KF's ML depth map
+			float Ku, Kv;
+			if (!projectPoint(ph->u, ph->v, ph->idepth_scaled, KRKi, Kt, Ku, Kv)) continue;
+			int ui = (int)(Ku + 0.5f), vi = (int)(Kv + 0.5f);
+			if (ui < 1 || vi < 1 || ui >= mlDepth.cols - 1 || vi >= mlDepth.rows - 1) continue;
+
+			float mlDepthVal = mlDepth.at<float>(vi, ui);
+			if (mlDepthVal <= 0 || !std::isfinite(mlDepthVal)) continue;
+
+			float slamDepth = 1.0f / ph->idepth;
+			float ratio = slamDepth / mlDepthVal;
+			if (std::isfinite(ratio) && ratio > 0) scale_ratios.push_back(ratio);
+		}
+	}
+
+	// Compute median live scale ratio
+	float live_ratio = 1.0f;
+	if (scale_ratios.size() >= 10) {
+		size_t mid = scale_ratios.size() / 2;
+		std::nth_element(scale_ratios.begin(), scale_ratios.begin() + mid, scale_ratios.end());
+		live_ratio = scale_ratios[mid];
+	}
+
+	// EMA update
+	scale_ema_ = 0.9f * scale_ema_ + 0.1f * live_ratio;
+	float drift_pct = (scale_ema_ - 1.0f) * 100.0f;
+	float mean_residual = (residual_count > 0) ? (total_residual / residual_count) : 0.0f;
+	scale_monitor_count_++;
+
+	// Log scale drift every 10 keyframes (pure diagnostic, no trajectory impact)
+	if (scale_monitor_count_ % 10 == 0) {
+		printf("[SCALE_DRIFT] KF%d: live_ratio=%.4f ema=%.4f drift=%+.1f%% | mean_residual=%.4f (%d pts) | %zu projections\n",
+		       newKF->frameID, live_ratio, scale_ema_, drift_pct, mean_residual, residual_count, scale_ratios.size());
+	}
+
+	// NOTE: Global scale correction (Option 2) was tested here with thresholds 5%, 10%, 30%.
+	// Results were inconclusive (KITTI ATE: 12.15/13.10/12.34 vs 12.59 baseline — no clear trend).
+	// Reverted to diagnostic-only. See DEBUG_SPECIALIST_ENTRY_POINT.md for full findings.
 }
 
 // ML Reference Frame Management (CoarseTracker-style thread safety)

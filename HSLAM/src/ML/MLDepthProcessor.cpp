@@ -17,18 +17,9 @@ bool MLDepthProcessor::initialize() {
         return false;
     }
     
-    printf("MLDepthProcessor: Initializing simplified synchronous processor...\n");
-    
     // Initialize the underlying ML inference engine
     bool success = ml_inference_->initialize();
-    if (success) {
-        printf("MLDepthProcessor: Initialization successful\n");
-        printf("  - Model: %s\n", config_.model_path.c_str());
-        printf("  - Input size: %dx%d\n", config_.input_width, config_.input_height);
-        printf("  - GPU enabled: %s\n", config_.enable_gpu ? "Yes" : "No");
-        printf("  - Processing mode: Synchronous (no background threads)\n");
-        
-    } else {
+    if (!success) {
         printf("ERROR: MLDepthProcessor - Failed to initialize ML inference\n");
     }
     
@@ -144,8 +135,10 @@ MLDepthProcessor::ProcessingResult MLDepthProcessor::processKeyframeDetailed(con
         cv::Scalar mean_depth_scalar = cv::mean(result.depth_map);
         detailed_result.mean_depth = static_cast<float>(mean_depth_scalar[0]);
         
-        printf("MLDepthProcessor: Detailed processing successful (%.1fms, range: %.2f-%.2fm)\n", 
-               detailed_result.inference_time_ms, min_depth, max_depth);
+        if (detailed_result.inference_time_ms > 60.0f) {
+            printf("MLDepthProcessor: Slow inference warning (%.1fms, expected ~40ms, range: %.2f-%.2fm)\n",
+                   detailed_result.inference_time_ms, min_depth, max_depth);
+        }
     } else {
         detailed_result.success = false;
         detailed_result.confidence = 0.0f;

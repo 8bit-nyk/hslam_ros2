@@ -335,6 +335,11 @@ public:
 	void printInitializationPerformance() const;
 	void printAblationStatistics() const;
 	
+	// Scale drift diagnostics (Phase 5): pure instrumentation, no trajectory impact
+	void monitorScaleDrift(FrameHessian* newKF, const cv::Mat& mlDepth);
+	float scale_ema_ = 1.0f;
+	int scale_monitor_count_ = 0;
+
 private:
 	// Helper methods for ML integration
 	bool shouldCreateKeyframe() const;  // Forward declare existing keyframe logic

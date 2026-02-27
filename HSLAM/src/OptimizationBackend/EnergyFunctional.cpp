@@ -434,14 +434,14 @@ double EnergyFunctional::calcLEnergyF_MT()
 				float distance_factor = 1.0f;  // No distance penalty
 				// ORIGINAL: float distance_factor = 1.0f / (1.0f + depth * 0.1f);
 				
-				// Robust factor: down-weight outliers to prevent systematic bias accumulation
-				// Keep the improved robust factor (0.5f) which is more permissive than the original 2.0f
+				// Gaussian robustification with tunable width: suppresses stale/outlier ML references
+				// Width controlled by setting_mlGaussianScale (smaller = wider = ML stays active longer)
+				// Phase 3 (per-point dynamic updates) was tried and reverted — it chased SLAM drift
 				float abs_residual = std::abs(ml_residual);
-				float robust_factor = std::exp(-abs_residual * abs_residual * 0.5f);
-				
-				// Apply ML weight with distance and robust factors
+				float robust_factor = std::exp(-abs_residual * abs_residual * setting_mlGaussianScale);
+
 				float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor;
-				
+
 				ml_energy += ml_weight * ml_residual * ml_residual;
 				ml_constraints++;
 			}

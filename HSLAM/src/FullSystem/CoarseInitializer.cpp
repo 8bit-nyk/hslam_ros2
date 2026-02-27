@@ -1225,8 +1225,13 @@ void CoarseInitializer::setMLDepth(const cv::Mat& mlDepth, float confidence, flo
 }
 
 /**
- * @brief Compute metric scale factor using ML mean depth directly (streamlined approach)
- * 
+ * @brief Compute metric scale factor using robust point-wise median scaling
+ *
+ * For each triangulated point i with inverse depth iR_i, look up the ML metric
+ * depth D_ML at (u,v) and compute ratio_i = D_ML_i * iR_i. The median of these
+ * ratios gives a scale factor with 50% outlier breakdown (robust to sky, reflections,
+ * depth discontinuities). Falls back to mlMeanDepth if too few correspondences.
+ *
  * @return float Metric scale factor, or -1 if computation failed
  */
 float CoarseInitializer::computeMetricScaleFactor()
@@ -1235,14 +1240,51 @@ float CoarseInitializer::computeMetricScaleFactor()
         printf("CoarseInitializer: No ML depth available for scale computation\n");
         return -1.0f;
     }
-    
-    // Streamlined approach: Use ML mean depth directly as metric scale
-    float metricScale = mlMeanDepth;
-    
-    printf("CoarseInitializer: Using ML mean depth as metric scale: %.3f\n", metricScale);
-    printf("CoarseInitializer: Streamlined approach - direct ML scale (no photometric comparison)\n");
-    
-    return metricScale;
+
+    if (firstFrameMLDepth.empty()) {
+        printf("CoarseInitializer: ML depth map missing, falling back to mean depth: %.3f\n", mlMeanDepth);
+        return mlMeanDepth;
+    }
+
+    // Collect per-point scale ratios: D_ML(u,v) * iR_DSO
+    // In inverse-depth space: if iR is DSO's inverse depth and D_ML is metric depth,
+    // their product D_ML * iR = metric_depth / photometric_depth = scale factor
+    std::vector<float> scale_ratios;
+    scale_ratios.reserve(numPoints[0]);
+
+    for (int i = 0; i < numPoints[0]; i++) {
+        float iR = points[0][i].iR;
+        if (iR <= 0 || !std::isfinite(iR)) continue;
+
+        int u = (int)(points[0][i].u + 0.5f);
+        int v = (int)(points[0][i].v + 0.5f);
+
+        if (u < 0 || v < 0 || u >= firstFrameMLDepth.cols || v >= firstFrameMLDepth.rows)
+            continue;
+
+        float mlDepth = firstFrameMLDepth.at<float>(v, u);
+        if (mlDepth <= 0 || !std::isfinite(mlDepth)) continue;
+
+        float ratio = mlDepth * iR;
+        if (std::isfinite(ratio) && ratio > 0)
+            scale_ratios.push_back(ratio);
+    }
+
+    if ((int)scale_ratios.size() < setting_mlInitMinPoints) {
+        printf("CoarseInitializer: Too few correspondences (%zu < %d), falling back to mean depth: %.3f\n",
+               scale_ratios.size(), setting_mlInitMinPoints, mlMeanDepth);
+        return mlMeanDepth;
+    }
+
+    // Median: 50% outlier breakdown point (Godard 2017, Tateno 2017)
+    size_t mid = scale_ratios.size() / 2;
+    std::nth_element(scale_ratios.begin(), scale_ratios.begin() + mid, scale_ratios.end());
+    float medianScale = scale_ratios[mid];
+
+    printf("CoarseInitializer: Robust median scale: %.3f (from %zu correspondences, mean was %.3f)\n",
+           medianScale, scale_ratios.size(), mlMeanDepth);
+
+    return medianScale;
 }
 
 }

@@ -28,8 +28,6 @@ bool MLInference::initialize() {
 
 #ifdef HAS_ONNXRUNTIME
     try {
-        printf("MLInference: Initializing ONNX Runtime...\n");
-        
         // Initialize ONNX Runtime environment
         onnx_env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "HSLAM_ML");
         
@@ -55,13 +53,6 @@ bool MLInference::initialize() {
                 cuda_options.do_copy_in_default_stream = 1;
                 
                 session_options_->AppendExecutionProvider_CUDA(cuda_options);
-                printf("MLInference: GPU inference enabled (device %d, memory limit: %.1f GB)\n", 
-                       config_.gpu_device_id, config_.gpu_memory_limit / (1024.0f * 1024.0f * 1024.0f));
-                       
-                // Enable FP16 optimization if requested
-                if(config_.enable_fp16) {
-                    printf("MLInference: FP16 optimization enabled\n");
-                }
             } catch(const std::exception& e) {
                 printf("WARNING: Failed to initialize GPU provider (%s), falling back to CPU\n", e.what());
                 config_.enable_gpu = false;
@@ -71,8 +62,6 @@ bool MLInference::initialize() {
             config_.enable_gpu = false;
         #endif
         }
-        
-        printf("MLInference: Loading model from %s\n", config_.model_path.c_str());
         
         // Check if model file exists
         std::ifstream model_file(config_.model_path);
@@ -126,17 +115,12 @@ bool MLInference::initialize() {
         }
         
         initialized_.store(true);
-        printf("MLInference: Initialized successfully\n");
-        printf("  Model: %s\n", config_.model_path.c_str());
-        printf("  Device: %s\n", config_.enable_gpu ? "GPU" : "CPU");
-        if(config_.enable_gpu) {
-            printf("  GPU Device ID: %d\n", config_.gpu_device_id);
-            printf("  GPU Memory Limit: %.1f GB\n", config_.gpu_memory_limit / (1024.0f * 1024.0f * 1024.0f));
-            printf("  FP16 Optimization: %s\n", config_.enable_fp16 ? "Enabled" : "Disabled");
-        }
-        printf("  Threads: %d\n", config_.num_threads);
-        printf("  Input size configured: %dx%d\n", config_.input_width, config_.input_height);
-        printf("  Model expects: 518x518 input, outputs: 252x252 (ViT architecture)\n");
+        printf("MLInference: Initialized (%s:%d | %.1fGB | FP16:%s | %dx%d)\n",
+               config_.enable_gpu ? "GPU" : "CPU",
+               config_.gpu_device_id,
+               config_.gpu_memory_limit / (1024.0f * 1024.0f * 1024.0f),
+               config_.enable_fp16 ? "on" : "off",
+               config_.input_width, config_.input_height);
         
         return true;
         
@@ -754,7 +738,7 @@ bool MLInference::validateModelSignature() const {
             return false;
         }
         
-        printf("MLInference: Model validation - %zu inputs, %zu outputs\n", input_count, output_count);
+        // Model validation passed (%zu inputs, %zu outputs)
         return true;
         
     } catch(const std::exception& e) {
@@ -797,8 +781,7 @@ void MLInference::setupInputOutputNames() {
             output_names_.push_back(name.c_str());
         }
         
-        printf("MLInference: Setup %zu input names, %zu output names\n", 
-               input_names_.size(), output_names_.size());
+        // Input/output names configured (%zu in, %zu out)
         
     } catch(const std::exception& e) {
         printf("MLInference: Error setting up input/output names: %s\n", e.what());

@@ -173,6 +173,7 @@ extern bool setting_onlyLogKFPoses;
 // ML Depth Integration Settings
 extern bool setting_preserveMLDepthBounds;
 extern float setting_mlDepthWeight;
+extern float setting_mlGaussianScale;
 
 // ML Initialization Settings
 extern bool setting_useMLForInitialization;      // Enable ML-based initialization

@@ -369,7 +369,7 @@ int main(int argc, char **argv)
 		printf("ML Depth Processor initialized successfully\n");
 		
 		// Perform ML warmup with real frame for effective GPU optimization
-		printf("🔥 Warming up ML processor with first real frame (one-time GPU initialization)...\n");
+		printf("GPU warmup: starting with first real frame (one-time GPU initialization)...\n");
 		auto warmup_start = std::chrono::high_resolution_clock::now();
 		
 		try {
@@ -380,7 +380,7 @@ int main(int argc, char **argv)
 				cv::Mat first_rgb = convertUndistortedToRGB(first_img);
 				
 				if (!first_rgb.empty()) {
-					printf("🔥 Processing first real frame for complete GPU optimization (expected ~6000ms)...\n");
+					printf("GPU warmup: processing first real frame (expected ~6000ms)...\n");
 					
 					// Process first real frame - this triggers full GPU kernel compilation
 					bool warmup_success = fullSystem->performMLWarmup(first_rgb);
@@ -389,8 +389,7 @@ int main(int argc, char **argv)
 						std::chrono::high_resolution_clock::now() - warmup_start).count();
 					
 					if (warmup_success) {
-						printf("✅ Real frame GPU warmup complete in %ldms\n", warmup_duration);
-						printf("🚀 GPU fully optimized - subsequent ML inferences will be fast (~40ms)\n");
+						printf("GPU warmup complete in %ldms - subsequent ML inferences ~40ms\n", warmup_duration);
 					} else {
 						printf("ERROR: Real frame warmup failed - disabling ML depth\n");
 						fullSystem->ml_depth_enabled_ = false;

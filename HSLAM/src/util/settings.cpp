@@ -221,6 +221,7 @@ bool setting_logStuff = true;
 // ML Depth Integration Settings
 bool setting_preserveMLDepthBounds = true;  // Preserve ML depth bounds during tracking
 float setting_mlDepthWeight = 2.0f;         // Weight for ML depth constraints in bundle adjustment (rebalanced to prevent ML energy dominance)
+float setting_mlGaussianScale = 0.01f;    // Near-flat Gaussian: ML constraints stay active at ~full weight. Validated on KITTI (12.28 ATE, -10%)
 
 // ML Initialization Settings
 bool setting_useMLForInitialization = true;        // Enable ML-based metric scale initialization
