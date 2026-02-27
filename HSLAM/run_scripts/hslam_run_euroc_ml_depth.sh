@@ -249,7 +249,6 @@ main() {
         --files $dataset_path/cam0/data \
         --calib $calib_path \
         --vocab $vocab_path \
-        --save \
         --colour \
         --ml-depth \
         --ml-model $ml_model_path \

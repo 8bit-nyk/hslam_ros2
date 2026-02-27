@@ -280,7 +280,6 @@ main() {
         --files $image_path \
         --calib $calib_path \
         --vocab $vocab_path \
-        --save \
         --colour \
         --ml-depth \
         --ml-model $ml_model_path \

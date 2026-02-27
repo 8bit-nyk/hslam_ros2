@@ -148,7 +148,6 @@ main() {
         --files $image_path \
         --calib $calib_path \
         --vocab $vocab_path \
-        --save \
         --colour \
         --loopclosure \
         --nogui=false"
