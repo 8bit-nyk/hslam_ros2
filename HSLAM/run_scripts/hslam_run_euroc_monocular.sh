@@ -181,7 +181,7 @@ main() {
             cmd="$cmd -v \"$vocab_path\" --loopclosure=true"
         fi
         
-        cmd="$cmd --preset=0 --mode=1 --quiet --nogui=false --outPC=true"
+        cmd="$cmd --preset=0 --mode=1 --quiet --nogui=false --outPC=true --nolog"
         
         # Add endindex if specified
         [ -n "$end_index" ] && cmd="$cmd --endindex $end_index"

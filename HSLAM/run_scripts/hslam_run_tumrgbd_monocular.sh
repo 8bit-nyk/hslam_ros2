@@ -117,7 +117,7 @@ main() {
             cmd="$cmd -v \"$vocab_path\" --loopclosure=true"
         fi
         
-        cmd="$cmd --preset=0 --mode=1 --quiet --nogui=false --outPC=true"
+        cmd="$cmd --preset=0 --mode=1 --quiet --nogui=false --outPC=true --nolog"
         
         print_info "Executing: $cmd"
         eval $cmd

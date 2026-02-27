@@ -496,8 +496,10 @@ int main(int argc, char **argv)
                 dataset_name = path_part; // Use the directory name as dataset name
             }
         }
-        HSLAM::FPSLogger::initialize("results", dataset_name);
-        HSLAM::FPSLogger::setDebugMode(false); // Disable debug mode by default
+        if(setting_logStuff) {
+            HSLAM::FPSLogger::initialize("results", dataset_name);
+            HSLAM::FPSLogger::setDebugMode(false);
+        }
         printf("FPSLogger: Initialized for dataset: %s\n", dataset_name.c_str());
 
         if (!associations.empty()) {
@@ -897,22 +899,23 @@ int main(int argc, char **argv)
         }
         
         // Finalize FPSLogger
-        HSLAM::FPSLogger::finalize();
+        if(setting_logStuff) HSLAM::FPSLogger::finalize();
         
         //fullSystem->printFrameLifetimes();
-        if(setting_logStuff)
-        {
-            std::ofstream tmlog;
-            tmlog.open("logs/time.txt", std::ios::trunc | std::ios::out);
-            if (!associations.empty()) {
-                tmlog << MilliSecondsTakenSingle/processedFrames << " " << MilliSecondsTakenMT / (float)processedFrames << "\n";
-            } else {
-                tmlog << 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC*reader->getNumImages()) << " "
-                      << ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f) / (float)reader->getNumImages() << "\n";
-            }
-            tmlog.flush();
-            tmlog.close();
-        }
+        // time.txt: two-number timing summary, fully redundant with fpsLog.txt and run_log
+        // if(setting_logStuff)
+        // {
+        //     std::ofstream tmlog;
+        //     tmlog.open("logs/time.txt", std::ios::trunc | std::ios::out);
+        //     if (!associations.empty()) {
+        //         tmlog << MilliSecondsTakenSingle/processedFrames << " " << MilliSecondsTakenMT / (float)processedFrames << "\n";
+        //     } else {
+        //         tmlog << 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC*reader->getNumImages()) << " "
+        //               << ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f) / (float)reader->getNumImages() << "\n";
+        //     }
+        //     tmlog.flush();
+        //     tmlog.close();
+        // }
 
 		if(!pauseEnd){
 		for(IOWrap::Output3DWrapper* ow : fullSystem->outputWrapper)

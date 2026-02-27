@@ -140,7 +140,7 @@ main() {
             cmd="$cmd -v \"$vocab_path\" --loopclosure=true"
         fi
         
-        cmd="$cmd --preset=0 --mode=1 --quiet --nogui=false --outPC=true"
+        cmd="$cmd --preset=0 --mode=1 --quiet --nogui=false --outPC=true --nolog"
         
         # Add end index if specified
         if [ -n "$end_index" ]; then

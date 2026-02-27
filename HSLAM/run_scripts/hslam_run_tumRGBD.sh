@@ -68,7 +68,8 @@ for ((i = 0; i < repetitions; i++)); do
             --preset=0 \
             --mode=1 \
             --quiet \
-            --outPC=true
+            --outPC=true \
+            --nolog
     else
         ./HSLAM \
             -f "$dataset_path" \
@@ -78,7 +79,8 @@ for ((i = 0; i < repetitions; i++)); do
             --mode=1 \
             --nogui \
             --quiet \
-            --outPC=true
+            --outPC=true \
+            --nolog
     fi
     
     exit_code=$?
@@ -111,8 +113,7 @@ for ((i = 0; i < repetitions; i++)); do
     fi
 
     if [ -d "mats" ]; then
-        mv "mats" "$destination_directory/mats_$i"
-        echo "Moved mats directory to: $destination_directory/mats_$i"
+        rm -rf "mats"
     fi
     
     echo "Results saved to: $destination_directory"

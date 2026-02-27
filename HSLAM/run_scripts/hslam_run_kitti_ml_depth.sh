@@ -299,7 +299,7 @@ main() {
     # Add other flags
     [ -n "$ml_benchmark" ] && cmd="$cmd --ml-benchmark"
     [ -n "$quiet_mode" ] && cmd="$cmd $quiet_mode"
-    cmd="$cmd --loopclosure --nogui=false"
+    cmd="$cmd --loopclosure --nogui=false --nolog"
     [ -n "$end_index" ] && cmd="$cmd --endindex $end_index"
     
     # Execute and log
@@ -367,10 +367,6 @@ main() {
     # Move and analyze log file
     if [ -f "$output_log" ]; then
         mv "$output_log" "$destination_directory/run_log_ml_depth_0.txt"
-        
-        # Extract ML statistics
-        echo "=== KITTI ML Depth Integration Statistics ===" > "$destination_directory/ml_stats_0.txt"
-        grep -E "(ML depth|Metric3D|inference time|benchmark)" "$destination_directory/run_log_ml_depth_0.txt" >> "$destination_directory/ml_stats_0.txt"
     fi
     
     # Move ML debug images if they exist
@@ -389,69 +385,6 @@ main() {
             print_success "Saved $ml_depth_count ML depth samples to: $destination_directory/debug_images/"
         fi
     fi
-    
-    # Create run summary
-    cat > "$destination_directory/run_summary.txt" << EOF
-HSLAM KITTI ML Depth Trajectory Generation Summary
-==================================================
-
-Mode: ML Depth SLAM (WITH Metric3D integration)
-Dataset: KITTI $DATASET_NUM
-Timestamp: $timestamp
-Dataset Path: $dataset_path
-RGB Images: $image_path/ (1226x370 color images)
-Timestamps: $times_file (converted from KITTI format)
-Calibration: $calib_path
-Ground Truth: $dataset_path/groundtruth.txt (if available)
-Loop Closure: $enable_loop_closure
-
-KITTI Dataset Info:
-- Total Images: $image_count
-- Camera: Color camera (RGB)
-- Original Resolution: 1226x370
-- Undistorted Resolution: 1216x368 (per calibration)
-- Rate: ~10 Hz
-
-ML Configuration:
-- Model: $(basename $ml_model_path)
-- Strategy: $ml_strategy
-- Input Size: 616x1064 (ViT model with aspect ratio preservation)
-- Device: $([ -n "$ml_gpu_enabled" ] && echo "GPU (CUDA) - 37ms inference" || echo "CPU - 650ms inference")
-- GPU Enabled: $([ -n "$ml_gpu_enabled" ] && echo "Yes" || echo "No")
-- FP16 Mode: $([ -n "$ml_fp16_enabled" ] && echo "Yes" || echo "No")
-
-Generated Files:
-- trajectory_ml_depth_0.txt  (ML depth trajectory in TUM format)
-- run_log_ml_depth_0.txt    (Complete execution log)
-- ml_stats_0.txt            (ML performance statistics)
-- debug_images/             (ML depth maps & SLAM debug images)
-- Point clouds (*.pcd)
-- System logs (logs_*)
-- Internal matrices (mats_*)
-
-Exit Code: $exit_code
-
-Validation Checklist:
-- [ ] ML model loads successfully
-- [ ] Model validation passes
-- [ ] Performance benchmark completes
-- [ ] ML depth integration active
-- [ ] Trajectory file generated
-- [ ] Performance acceptable for real-time
-- [ ] KITTI RGB images processed correctly
-- [ ] Aspect ratio preservation working
-
-Evaluation:
-To evaluate trajectory against ground truth (if available), use:
-  evo_ape kitti $dataset_path/groundtruth.txt trajectory_ml_depth_0.txt --plot
-
-Notes:
-- KITTI dataset uses wider aspect ratio (1226x370) than TUM/EuRoC
-- ML inference time should be < 50ms for real-time performance
-- Metric3D preprocessing handles aspect ratio preservation automatically
-- KITTI timestamps converted from relative to TUM format
-- RGB images provide richer information for ML depth estimation
-EOF
     
     # Create symlink to latest results
     latest_link="$results_directory/latest-kitti-ml-depth"

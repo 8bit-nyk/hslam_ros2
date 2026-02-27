@@ -265,7 +265,7 @@ main() {
     # Add other flags
     [ -n "$ml_benchmark" ] && cmd="$cmd --ml-benchmark"
     [ -n "$quiet_mode" ] && cmd="$cmd $quiet_mode"
-    cmd="$cmd --loopclosure --nogui=false"  # Back to headless mode due to X11 error
+    cmd="$cmd --loopclosure --nogui=false --nolog"  # Back to headless mode due to X11 error
     [ -n "$end_index" ] && cmd="$cmd --endindex $end_index"
     
     # Execute and log
@@ -338,10 +338,6 @@ main() {
     # Move and analyze log file
     if [ -f "$output_log" ]; then
         mv "$output_log" "$destination_directory/run_log_ml_depth_0.txt"
-        
-        # Extract ML statistics
-        echo "=== ML Depth Integration Statistics ===" > "$destination_directory/ml_stats_0.txt"
-        grep -E "(ML depth|Metric3D|inference time|benchmark)" "$destination_directory/run_log_ml_depth_0.txt" >> "$destination_directory/ml_stats_0.txt"
     fi
     
     # Move ML benchmark images if they exist
@@ -375,65 +371,6 @@ main() {
             print_info "  • SLAM debug images: $other_debug_count predicted frames"
         fi
     fi
-    
-    # Create run summary
-    cat > "$destination_directory/run_summary.txt" << EOF
-HSLAM EuRoC ML Depth Trajectory Generation Summary
-=================================================
-
-Mode: ML Depth SLAM (WITH Metric3D integration)
-Dataset: $DATASET_NAME
-Timestamp: $timestamp
-Dataset Path: $dataset_path
-Images: $dataset_path/cam0/data/
-Timestamps: $dataset_path/cam0/times.txt
-Calibration: $calib_path
-Ground Truth: $dataset_path/state_groundtruth_estimate0/data.csv
-Loop Closure: $enable_loop_closure
-
-EuRoC Dataset Info:
-- Total Images: $image_count
-- Camera: VI-Sensor cam0 (MT9M034)
-- Resolution: 752x480 (cropped to 640x480)
-- Rate: 20 Hz
-
-ML Configuration:
-- Model: $(basename $ml_model_path)
-- Strategy: $ml_strategy
-- Input Size: 518x518
-- Device: $([ -n "$ml_gpu_enabled" ] && echo "GPU (CUDA) - 44ms inference" || echo "CPU - 650ms inference")
-- GPU Enabled: $([ -n "$ml_gpu_enabled" ] && echo "Yes" || echo "No")
-- FP16 Mode: $([ -n "$ml_fp16_enabled" ] && echo "Yes" || echo "No")
-
-Generated Files:
-- trajectory_ml_depth_0.txt  (ML depth trajectory in TUM format)
-- run_log_ml_depth_0.txt    (Complete execution log)
-- ml_stats_0.txt            (ML performance statistics)
-- debug_images/             (ML depth maps & SLAM debug images, when --save used)
-- Point clouds (*.pcd)
-- System logs (logs_*)
-- Internal matrices (mats_*)
-
-Exit Code: $exit_code
-
-Validation Checklist:
-- [ ] ML model loads successfully
-- [ ] Model validation passes
-- [ ] Performance benchmark completes
-- [ ] ML depth integration active
-- [ ] Trajectory file generated
-- [ ] Performance acceptable for real-time
-
-Evaluation:
-To evaluate trajectory against ground truth, use:
-  evo_ape euroc $dataset_path/state_groundtruth_estimate0/data.csv trajectory_ml_depth_0.txt --plot
-
-Notes:
-- ML inference time should be < 50ms for real-time performance
-- Current GPU implementation achieves ~44ms inference time
-- Check ml_stats_0.txt for detailed ML performance metrics
-- EuRoC timestamps are automatically handled by HSLAM DatasetReader
-EOF
     
     # Create symlink to latest results
     latest_link="$results_directory/latest-euroc-ml-depth"

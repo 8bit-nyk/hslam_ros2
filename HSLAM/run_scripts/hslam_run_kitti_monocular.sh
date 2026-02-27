@@ -154,6 +154,7 @@ main() {
     
     [ -n "$quiet_mode" ] && cmd="$cmd $quiet_mode"
     [ -n "$end_index" ] && cmd="$cmd --endindex $end_index"
+    cmd="$cmd --nolog"
     
     eval "$cmd 2>&1" | tee $output_log
     exit_code=${PIPESTATUS[0]}

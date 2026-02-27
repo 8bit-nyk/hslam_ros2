@@ -296,7 +296,7 @@ main() {
     # Add other flags
     [ -n "$ml_benchmark" ] && cmd="$cmd --ml-benchmark"
     [ -n "$quiet_mode" ] && cmd="$cmd $quiet_mode"
-    cmd="$cmd --loopclosure --nogui=false"
+    cmd="$cmd --loopclosure --nogui=false --nolog"
     [ -n "$end_index" ] && cmd="$cmd --endindex $end_index"
     
     # Add ML init flag based on configuration
@@ -381,10 +381,6 @@ main() {
     # Move and analyze log file
     if [ -f "$output_log" ]; then
         mv "$output_log" "$destination_directory/run_log_ml_depth_0.txt"
-        
-        # Extract ML statistics
-        echo "=== ML Depth Integration Statistics ===" > "$destination_directory/ml_stats_0.txt"
-        grep -E "(ML depth|Metric3D|inference time|benchmark)" "$destination_directory/run_log_ml_depth_0.txt" >> "$destination_directory/ml_stats_0.txt"
     fi
     
     # Move ML benchmark images if they exist
@@ -417,57 +413,6 @@ main() {
             print_info "  • SLAM debug images: $other_debug_count predicted frames"
         fi
     fi
-    
-    # Create run summary
-    cat > "$destination_directory/run_summary.txt" << EOF
-HSLAM Boreas ML Depth Trajectory Generation Summary
-=================================================
-
-Mode: ML Depth SLAM (WITH Metric3D integration)
-Sequence: $SEQUENCE_NAME
-Timestamp: $timestamp
-Dataset Path: $dataset_path
-Image Path: $image_path
-Calibration: $calib_path
-Loop Closure: $enable_loop_closure
-
-Dataset Statistics:
-- Total Images: $image_count
-- Image Format: PNG (640x480)
-- Timestamps: Converted from Boreas microseconds to TUM format
-
-ML Configuration:
-- Model: $(basename $ml_model_path)
-- Strategy: $ml_strategy
-- Input Size: 518x518
-- Device: $([ -n "$ml_gpu_enabled" ] && echo "GPU (CUDA) - 44ms inference" || echo "CPU - 650ms inference")
-- GPU Enabled: $([ -n "$ml_gpu_enabled" ] && echo "Yes" || echo "No")
-- FP16 Mode: $([ -n "$ml_fp16_enabled" ] && echo "Yes" || echo "No")
-
-Generated Files:
-- trajectory_ml_depth_0.txt  (ML depth trajectory)
-- run_log_ml_depth_0.txt    (Complete execution log)
-- ml_stats_0.txt            (ML performance statistics)
-- debug_images/             (ML depth maps & SLAM debug images, when --save used)
-- Point clouds (*.pcd)
-- System logs (logs_*)
-- Internal matrices (mats_*)
-
-Exit Code: $exit_code
-
-Validation Checklist:
-- [ ] ML model loads successfully
-- [ ] Model validation passes
-- [ ] Performance benchmark completes
-- [ ] ML depth integration active
-- [ ] Trajectory file generated
-- [ ] Performance acceptable for real-time
-
-Notes:
-- ML inference time should be < 50ms for real-time performance
-- Current CPU implementation may be slow (500-800ms expected)
-- Check ml_stats_0.txt for detailed ML performance metrics
-EOF
     
     # Create symlink to latest results
     latest_link="$results_directory/latest-boreas-ml-depth"

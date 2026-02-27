@@ -58,7 +58,8 @@ main() {
             --loopclosure=True \
             --preset=0 \
             --mode=2 \
-            --nogui=true"
+            --nogui=true \
+            --nolog"
 
         print_info "Executing: $cmd"
         eval $cmd
@@ -84,7 +85,7 @@ main() {
         fi
 
         if [ -d "mats" ]; then
-            mv "mats" "$destination_directory/mats_tumvo_$i"
+            rm -rf "mats"
         fi
 
         # Create run summary
@@ -102,8 +103,6 @@ Loop Closure: true
 Generated Files:
 - trajectory_tumvo_$i.txt  (TUM VO trajectory)
 - Point clouds (*.pcd)
-- System logs (logs_*)
-- Internal matrices (mats_*)
 
 Exit Code: $exit_code
 EOF

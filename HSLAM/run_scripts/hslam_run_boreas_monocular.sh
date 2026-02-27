@@ -208,7 +208,7 @@ main() {
             cmd="$cmd -v \"$vocab_path\" --loopclosure=true"
         fi
         
-        cmd="$cmd --preset=0 --mode=1 --nogui=false --outPC=true"
+        cmd="$cmd --preset=0 --mode=1 --nogui=false --outPC=true --nolog"
         
         # Add optional flags
         [ -n "$quiet_mode" ] && cmd="$cmd $quiet_mode"

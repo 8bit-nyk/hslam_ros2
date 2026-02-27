@@ -126,7 +126,7 @@ main() {
             cmd="$cmd -v \"$vocab_path\" --loopclosure=true"
         fi
         
-        cmd="$cmd --preset=0 --mode=1 --quiet --outPC=true" # --nogui"
+        cmd="$cmd --preset=0 --mode=1 --quiet --outPC=true --nolog" # --nogui"
         
         print_info "Executing: $cmd"
         print_warning "Note: RGB-D mode may experience crashes during cleanup phase"
