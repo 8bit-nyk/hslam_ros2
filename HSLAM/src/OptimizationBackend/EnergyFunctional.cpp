@@ -417,47 +417,66 @@ double EnergyFunctional::calcLEnergyF_MT()
 	int ml_constraints = 0;
 	int total_points = 0;
 	int points_with_depth_prior = 0;
-	
+
+	// DIAG_BA: Track residual/weight breakdown
+	double sum_abs_residual = 0;
+	double sum_rel_residual = 0;
+	double sum_robust_factor = 0;
+	double sum_ml_weight = 0;
+	float max_abs_residual = 0;
+
 	for(EFFrame* f : frames) {
 		for(EFPoint* p : f->points) {
 			total_points++;
 			// Add ML depth residual if point has ML depth prior
 			if(p->data->hasMLDepth) points_with_depth_prior++;
 			if(p->data->hasMLDepth && setting_mlDepthWeight > 0) {
-				float ml_residual = p->data->idepth - p->ml_reference;  // ML residual relative to ML reference
-				
-				// Conservative ML weighting: prevent systematic drift while using ML guidance
-				float current_idepth = p->data->idepth + p->deltaF;
-				float depth = (current_idepth > 1e-6f) ? (1.0f / current_idepth) : 1000.0f;
-				
-				// EXPERIMENT: Remove distance penalty completely - test if this is the bottleneck
-				float distance_factor = 1.0f;  // No distance penalty
-				// ORIGINAL: float distance_factor = 1.0f / (1.0f + depth * 0.1f);
-				
+				// RELATIVE NORMALIZATION: residual is (idepth - ref) / ref
+				// This makes residuals dimensionless — a 10% depth error produces the same
+				// residual magnitude whether depth is 2m (TUM) or 200m (KITTI).
+				// Fixes ML energy being drowned on outdoor scenes (was 0.0% on KITTI).
+				float ml_residual_rel = (p->ml_reference > 1e-8f)
+					? (p->data->idepth - p->ml_reference) / p->ml_reference
+					: 0.0f;
+
 				// Gaussian robustification with tunable width: suppresses stale/outlier ML references
 				// Width controlled by setting_mlGaussianScale (smaller = wider = ML stays active longer)
-				// Phase 3 (per-point dynamic updates) was tried and reverted — it chased SLAM drift
-				float abs_residual = std::abs(ml_residual);
+				float abs_residual = std::abs(ml_residual_rel);
 				float robust_factor = std::exp(-abs_residual * abs_residual * setting_mlGaussianScale);
 
-				float ml_weight = setting_mlDepthWeight * distance_factor * robust_factor;
+				float ml_weight = setting_mlDepthWeight * robust_factor;
 
-				ml_energy += ml_weight * ml_residual * ml_residual;
+				ml_energy += ml_weight * ml_residual_rel * ml_residual_rel;
 				ml_constraints++;
+
+				// DIAG_BA: Accumulate diagnostics
+				sum_abs_residual += abs_residual;
+				sum_rel_residual += abs_residual;  // Already relative
+				sum_robust_factor += robust_factor;
+				sum_ml_weight += ml_weight;
+				if(abs_residual > max_abs_residual) max_abs_residual = abs_residual;
 			}
 		}
 	}
-	// TEMP_DEBUG_ENERGY: Store photometric energy before adding ML energy  
+	// TEMP_DEBUG_ENERGY: Store photometric energy before adding ML energy
 	float photometric_energy = E;
 	E += ml_energy;
-	
+
 	// Energy balance monitoring (reduced frequency for cleaner output)
 	static int debug_counter = 0;
 	if(debug_counter++ % 50 == 0 && ml_constraints > 0) {
 		float total_energy = E;
 		float ml_ratio = (ml_energy/total_energy)*100.0f;
-		printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n", 
+		float mean_abs_res = sum_abs_residual / ml_constraints;
+		float mean_rel_res = sum_rel_residual / ml_constraints;
+		float mean_robust = sum_robust_factor / ml_constraints;
+		float mean_weight = sum_ml_weight / ml_constraints;
+		printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n",
 			   photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
+		printf("[ENERGY_DETAIL] mean_abs_res=%.4f, mean_rel_res=%.2f%%, max_abs_res=%.4f, "
+			   "mean_robust=%.3f, mean_weight=%.4f\n",
+			   mean_abs_res, mean_rel_res * 100.0f, max_abs_residual,
+			   mean_robust, mean_weight);
 	}
 
 	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,

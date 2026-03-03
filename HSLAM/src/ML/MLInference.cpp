@@ -696,9 +696,6 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
     // printf("ML depth postprocess: range=[%.2f, %.2f], mean=%.2f\n", min_depth, max_depth, mean_depth[0]);
     
     // Quality validation
-    if (min_depth < 0.0 || max_depth > 100.0) {
-        printf("WARNING: Depth values outside reasonable range (0-100m)\n");
-    }
     if (std::abs(min_depth - max_depth) < 1e-6) {
         printf("ERROR: All depth values are nearly identical (%.6f) - processing may have failed\n", min_depth);
     }

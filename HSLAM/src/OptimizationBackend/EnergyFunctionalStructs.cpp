@@ -84,21 +84,13 @@ void EFPoint::takeData()
 	if(setting_solverMode & SOLVER_REMOVE_POSEPRIOR) priorF=0;
 	
 	// ML depth prior calculation (separate from indirect priors)
+	// DECOUPLED DESIGN: Hessian uses original absolute-scale prior (no 1/ref² amplification)
+	// to avoid locking far points rigidly. The energy calculation in calcLEnergyF_MT()
+	// independently uses relative residuals for scale-invariant step acceptance.
 	if (data->hasMLDepth) {
-		// Use adaptive weight computed in PointHessian, or fallback to default
 		float ml_weight_base = (data->ml_weight > 0) ? data->ml_weight : setting_idepthFixPrior;
 		ml_priorF = ml_weight_base * SCALE_IDEPTH * SCALE_IDEPTH;
 		ml_reference = data->ml_idepth_reference;
-		
-		// PHASE2_DEBUG: Log adaptive weight usage in bundle adjustment
-		// static int bundle_adjust_debug_count = 0;
-		// if (bundle_adjust_debug_count < 3) {
-		// 	bool using_adaptive = (data->ml_weight > 0);
-		// 	printf("PHASE2_DEBUG: Bundle adjustment %d: %s weight=%.6f (fallback=%.6f)\n",
-		// 	       bundle_adjust_debug_count, using_adaptive ? "ADAPTIVE" : "FALLBACK", 
-		// 	       ml_weight_base, setting_idepthFixPrior);
-		// 	bundle_adjust_debug_count++;
-		// }
 	} else {
 		ml_priorF = 0;
 		ml_reference = 0;

@@ -1260,11 +1260,9 @@ void CoarseTracker::makeCoarseDepthL0Enhanced(std::vector<FrameHessian*> frameHe
  */
 void CoarseTracker::integrateExternalDepthL0()
 {
-    const float MIN_DEPTH = 0.1f;  // Minimum valid depth (TUM dataset appropriate)
-    const float MAX_DEPTH = 10.0f; // Maximum valid depth (TUM dataset appropriate)
-    
     int integrated_count = 0;
     int fused_count = 0;
+    float reliability_sum = 0.0f;  // DIAG_PHASE3: track mean reliability
     
     // ONLY process pixels that already have photometric depth (sparse fusion)
     for(int v = 0; v < h[0]; v++) {
@@ -1303,13 +1301,29 @@ void CoarseTracker::integrateExternalDepthL0()
             idepth[0][idx] = combined_idepth * combined_weight;
             weightSums[0][idx] = combined_weight;
             
+            reliability_sum += ml_reliability;  // DIAG_PHASE3
             fused_count++;
         }
     }
-    
+
     last_stats.pixels_from_external_depth = 0;  // No new pixels added, only fusion
     last_stats.pixels_fused = fused_count;
-    
+
+    // DIAG_PHASE3: Log fusion stats to confirm Phase 3 is actually contributing
+    static int phase3_log_counter = 0;
+    if(phase3_log_counter++ % 10 == 0) {
+        int total_photometric_pixels = 0;
+        for(int i = 0; i < w[0]*h[0]; i++)
+            if(weightSums[0][i] > 0) total_photometric_pixels++;
+
+        float mean_reliability = (fused_count > 0) ? reliability_sum / fused_count : 0.0f;
+        printf("[PHASE3] fused=%d/%d photometric pixels (%.1f%%), reliability=%.3f, eff_weight=%.1f%%, image=%dx%d\n",
+               fused_count, total_photometric_pixels,
+               total_photometric_pixels > 0 ? 100.0f * fused_count / total_photometric_pixels : 0.0f,
+               mean_reliability, 100.0f * 0.2f * mean_reliability,
+               w[0], h[0]);
+    }
+
     // Debug-only logging for external depth integration details
     HSLAM::DepthLogger::logExternalDepthDetails(0, fused_count);
 }

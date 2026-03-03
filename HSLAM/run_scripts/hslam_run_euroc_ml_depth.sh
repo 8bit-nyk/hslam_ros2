@@ -265,7 +265,7 @@ main() {
     # Add other flags
     [ -n "$ml_benchmark" ] && cmd="$cmd --ml-benchmark"
     [ -n "$quiet_mode" ] && cmd="$cmd $quiet_mode"
-    cmd="$cmd --loopclosure --nogui=false --nolog"  # Back to headless mode due to X11 error
+    cmd="$cmd --loopclosure --nogui=true --nolog"  # Back to headless mode due to X11 error
     [ -n "$end_index" ] && cmd="$cmd --endindex $end_index"
     
     # Execute and log

@@ -241,7 +241,7 @@ main() {
     # Add other flags
     [ -n "$ml_benchmark" ] && cmd="$cmd --ml-benchmark"
     [ -n "$quiet_mode" ] && cmd="$cmd $quiet_mode"
-    cmd="$cmd --loopclosure --nogui=false --nolog"  # Back to headless mode due to X11 error
+    cmd="$cmd --loopclosure --nogui=true --nolog"  # Back to headless mode due to X11 error
     [ -n "$end_index" ] && cmd="$cmd --endindex $end_index"
     
     # Add ML init flag based on configuration
@@ -361,7 +361,7 @@ main() {
     fi
     
     # Create symlink to latest results
-    latest_link="$results_directory/latest-ml-depth"
+    latest_link="$results_directory/latest-tum-ml-depth"
     ln -sfn "$destination_directory" "$latest_link"
     
     print_success "Results saved to: $destination_directory"
