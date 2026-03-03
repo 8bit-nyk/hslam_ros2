@@ -120,6 +120,10 @@ public:
 	  Eigen::aligned_allocator<std::pair<const uint64_t, Eigen::Vector2i>>
 	  > connectivityMap;
 
+	// Exposed for per-scene weight calibration (Step 3)
+	double last_photometric_energy_ = 0;
+	double last_ml_energy_ = 0;
+
 private:
 
 	VecX getStitchedDeltaF() const;

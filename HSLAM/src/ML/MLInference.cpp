@@ -1194,13 +1194,14 @@ cv::Mat MLInference::processUncertaintyToConfidence(const std::vector<float>& un
     cv::Mat uncertainty_map(height, width, CV_32FC1);
     std::memcpy(uncertainty_map.ptr<float>(), uncertainty_output.data(), uncertainty_output.size() * sizeof(float));
     
-    // PHASE2_DEBUG: Analyze uncertainty before conversion
+    // Step 0 RESOLVED (Mar 3, 2026): Case B confirmed. Raw range [0.7, 26.6] = uncertainty.
+    // Sigmoid 1/(1+val/5) is correct. Uncomment below to re-verify if model changes.
     // cv::Scalar unc_mean, unc_std;
     // cv::meanStdDev(uncertainty_map, unc_mean, unc_std);
     // double unc_min, unc_max;
     // cv::minMaxLoc(uncertainty_map, &unc_min, &unc_max);
-    // printf("PHASE2_DEBUG: Raw uncertainty - Min: %.3f, Max: %.3f, Mean: %.3f, Std: %.3f\n", 
-    //        unc_min, unc_max, unc_mean[0], unc_std[0]);
+    // printf("[UNCERTAINTY_RAW] Size: %dx%d, Range: [%.3f, %.3f], Mean: %.3f, Std: %.3f\n",
+    //        width, height, unc_min, unc_max, unc_mean[0], unc_std[0]);
     
     // Convert uncertainty to confidence [0,1]
     // High uncertainty = low confidence
@@ -1217,12 +1218,12 @@ cv::Mat MLInference::processUncertaintyToConfidence(const std::vector<float>& un
         }
     }
     
-    // PHASE2_DEBUG: Analyze confidence after conversion
+    // Step 0 RESOLVED: Confidence output [0.16, 0.87] with mean ~0.44. Correct.
     // cv::Scalar conf_mean, conf_std;
     // cv::meanStdDev(confidence_map, conf_mean, conf_std);
     // double conf_min, conf_max;
     // cv::minMaxLoc(confidence_map, &conf_min, &conf_max);
-    // printf("PHASE2_DEBUG: Converted confidence - Min: %.3f, Max: %.3f, Mean: %.3f, Std: %.3f\n",
+    // printf("[UNCERTAINTY_CONF] Range: [%.3f, %.3f], Mean: %.3f, Std: %.3f\n",
     //        conf_min, conf_max, conf_mean[0], conf_std[0]);
     
     // Remove padding if it was applied (similar to depth processing)

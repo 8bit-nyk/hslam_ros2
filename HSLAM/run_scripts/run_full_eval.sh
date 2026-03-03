@@ -13,9 +13,10 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EVO_EVAL_SCRIPT="/home/aub/Dev/evo/hslam_evaluation/scripts/run_hslam_eval_all.sh"
+EVO_ACTIVATE="/home/aub/Dev/evo/activate_evo.sh"
 
 SKIP_TUM=false; SKIP_KITTI=false; SKIP_EUROC=false
-EVO_ARGS=()
+EVO_ARGS=(-a "$EVO_ACTIVATE")
 
 usage() {
     cat <<EOF

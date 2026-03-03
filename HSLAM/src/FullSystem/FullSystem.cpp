@@ -1997,6 +1997,56 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 						// Phase 5: Scale drift diagnostics (pure instrumentation, no trajectory impact)
 						monitorScaleDrift(fh, ml_depth_for_tracker);
+
+						// Per-scene ML weight calibration (after warmup, sample CALIBRATION_WINDOW keyframes)
+						if (!ml_weight_calib_.is_calibrated && ef) {
+							ml_weight_calib_.kf_count++;
+							if (ml_weight_calib_.kf_count <= MLWeightCalibration::WARMUP_KEYFRAMES) {
+								printf("[WEIGHT_CALIB] Warmup KF%d (skipping)\n", ml_weight_calib_.kf_count);
+							} else {
+								double photo_e = ef->last_photometric_energy_;
+								double ml_e = ef->last_ml_energy_;
+								// Require minimum photometric energy to filter init transient
+								if (photo_e >= MLWeightCalibration::MIN_PHOTO_ENERGY) {
+									ml_weight_calib_.photo_energy_samples.push_back(photo_e);
+									ml_weight_calib_.ml_energy_samples.push_back(ml_e);
+									int n = ml_weight_calib_.photo_energy_samples.size();
+									double total = photo_e + ml_e;
+									printf("[WEIGHT_CALIB] Sample %d: photo=%.1f, ml=%.1f, ratio=%.1f%%\n",
+										   n, photo_e, ml_e, (total > 0) ? ml_e/total*100.0 : 0.0);
+									if (n >= MLWeightCalibration::CALIBRATION_WINDOW) {
+										std::vector<double> ratios;
+										for (int i = 0; i < n; i++) {
+											double t = ml_weight_calib_.photo_energy_samples[i]
+														 + ml_weight_calib_.ml_energy_samples[i];
+											if (t > 0) ratios.push_back(ml_weight_calib_.ml_energy_samples[i] / t);
+											else ratios.push_back(0.0);
+										}
+										std::sort(ratios.begin(), ratios.end());
+										double median_ratio = ratios[ratios.size() / 2];
+										float multiplier;
+										if (median_ratio < 1e-6) {
+											// ML energy effectively zero — apply max boost
+											multiplier = MLWeightCalibration::MAX_WEIGHT_MULTIPLIER;
+										} else {
+											multiplier = MLWeightCalibration::TARGET_ML_RATIO / median_ratio;
+											multiplier = std::min(multiplier, MLWeightCalibration::MAX_WEIGHT_MULTIPLIER);
+										}
+										float new_weight = setting_mlDepthWeight * multiplier;
+										new_weight = std::max(new_weight, MLWeightCalibration::MIN_WEIGHT);
+										printf("[WEIGHT_CALIB] Calibrated: median_ratio=%.4f, multiplier=%.1f, "
+											   "weight %.2f -> %.2f\n", median_ratio, multiplier,
+											   setting_mlDepthWeight, new_weight);
+										setting_mlDepthWeight = new_weight;
+										ml_weight_calib_.calibrated_weight = new_weight;
+										ml_weight_calib_.is_calibrated = true;
+									}
+								} else {
+									printf("[WEIGHT_CALIB] KF%d: photo=%.1f too low, skipping\n",
+										   ml_weight_calib_.kf_count, photo_e);
+								}
+							}
+						}
 					}
 
 					// TEMP_DEBUG_REPETITIVE: Commented out for cleaner testing output

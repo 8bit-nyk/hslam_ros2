@@ -340,6 +340,22 @@ public:
 	float scale_ema_ = 1.0f;
 	int scale_monitor_count_ = 0;
 
+	// Per-scene ML weight calibration (Step 3): compute once during first N keyframes
+	struct MLWeightCalibration {
+		std::vector<double> photo_energy_samples;
+		std::vector<double> ml_energy_samples;
+		float calibrated_weight = -1.0f;
+		bool is_calibrated = false;
+		int kf_count = 0;
+		static constexpr int WARMUP_KEYFRAMES = 5;
+		static constexpr int CALIBRATION_WINDOW = 10;
+		static constexpr float MIN_PHOTO_ENERGY = 10.0f;
+		static constexpr float TARGET_ML_RATIO = 0.20f;
+		static constexpr float MAX_WEIGHT_MULTIPLIER = 50.0f;
+		static constexpr float MIN_WEIGHT = 0.1f;
+	};
+	MLWeightCalibration ml_weight_calib_;
+
 private:
 	// Helper methods for ML integration
 	bool shouldCreateKeyframe() const;  // Forward declare existing keyframe logic

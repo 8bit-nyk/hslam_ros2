@@ -430,37 +430,36 @@ double EnergyFunctional::calcLEnergyF_MT()
 			total_points++;
 			// Add ML depth residual if point has ML depth prior
 			if(p->data->hasMLDepth) points_with_depth_prior++;
-			if(p->data->hasMLDepth && setting_mlDepthWeight > 0) {
-				// RELATIVE NORMALIZATION: residual is (idepth - ref) / ref
-				// This makes residuals dimensionless — a 10% depth error produces the same
-				// residual magnitude whether depth is 2m (TUM) or 200m (KITTI).
-				// Fixes ML energy being drowned on outdoor scenes (was 0.0% on KITTI).
-				float ml_residual_rel = (p->ml_reference > 1e-8f)
-					? (p->data->idepth - p->ml_reference) / p->ml_reference
-					: 0.0f;
+			if(p->data->hasMLDepth && p->data->ml_weight > 0) {
+				// Absolute residual in inverse-depth space (Key Lesson #5: relative residuals
+				// break trajectory scale to ~0.55 on all datasets)
+				float ml_residual = p->data->idepth - p->ml_reference;
 
 				// Gaussian robustification with tunable width: suppresses stale/outlier ML references
 				// Width controlled by setting_mlGaussianScale (smaller = wider = ML stays active longer)
-				float abs_residual = std::abs(ml_residual_rel);
+				float abs_residual = std::abs(ml_residual);
 				float robust_factor = std::exp(-abs_residual * abs_residual * setting_mlGaussianScale);
 
-				float ml_weight = setting_mlDepthWeight * robust_factor;
+				float ml_weight = p->data->ml_weight * robust_factor;
 
-				ml_energy += ml_weight * ml_residual_rel * ml_residual_rel;
+				ml_energy += ml_weight * ml_residual * ml_residual;
 				ml_constraints++;
 
 				// DIAG_BA: Accumulate diagnostics
 				sum_abs_residual += abs_residual;
-				sum_rel_residual += abs_residual;  // Already relative
+				float rel_residual = (p->ml_reference > 1e-8f) ? abs_residual / p->ml_reference : 0.0f;
+				sum_rel_residual += rel_residual;
 				sum_robust_factor += robust_factor;
 				sum_ml_weight += ml_weight;
 				if(abs_residual > max_abs_residual) max_abs_residual = abs_residual;
 			}
 		}
 	}
-	// TEMP_DEBUG_ENERGY: Store photometric energy before adding ML energy
+	// Store photometric energy before adding ML energy
 	float photometric_energy = E;
 	E += ml_energy;
+	last_photometric_energy_ = photometric_energy;
+	last_ml_energy_ = ml_energy;
 
 	// Energy balance monitoring (reduced frequency for cleaner output)
 	static int debug_counter = 0;
