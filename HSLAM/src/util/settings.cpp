@@ -219,14 +219,17 @@ bool setting_onlyLogKFPoses = true;
 bool setting_logStuff = true;
 
 // ML Depth Integration Settings
-bool setting_preserveMLDepthBounds = true;  // Preserve ML depth bounds during tracking
+bool setting_preserveMLDepthBounds = false;  // TEST: Both Phase 1+3 disabled
 float setting_mlDepthWeight = 2.0f;         // Weight for ML depth constraints in bundle adjustment (rebalanced to prevent ML energy dominance)
 float setting_mlGaussianScale = 0.01f;    // Near-flat Gaussian: ML constraints stay active at ~full weight. Validated on KITTI (12.28 ATE, -10%)
+bool setting_disablePhase2BA = true;       // TEST: Disable Phase 2 (BA energy+Hessian)
+bool setting_disablePhase3Tracker = true;  // TEST: Disable Phase 3 to isolate Phase 1
 
 // ML Initialization Settings
 bool setting_useMLForInitialization = true;        // Enable ML-based metric scale initialization
 float setting_mlInitConfidenceThreshold = 0.5f;   // Min confidence for ML scale usage
-int setting_mlInitMinPoints = 20;                  // Min points for robust scale estimation  
+int setting_mlInitMinPoints = 20;                  // Min points for robust scale estimation
+float setting_mlInitMinGoodRatio = 0.3f;           // Min fraction of well-triangulated points for reliable ML init
 bool setting_mlReinitializationEnabled = true;    // Enable ML depth for re-initialization
 
 bool goStepByStep = false;

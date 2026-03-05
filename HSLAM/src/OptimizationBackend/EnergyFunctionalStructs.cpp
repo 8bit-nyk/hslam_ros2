@@ -87,7 +87,7 @@ void EFPoint::takeData()
 	// DECOUPLED DESIGN: Hessian uses original absolute-scale prior (no 1/ref² amplification)
 	// to avoid locking far points rigidly. The energy calculation in calcLEnergyF_MT()
 	// independently uses relative residuals for scale-invariant step acceptance.
-	if (data->hasMLDepth) {
+	if (data->hasMLDepth && !setting_disablePhase2BA) {
 		float ml_weight_base = (data->ml_weight > 0) ? data->ml_weight : setting_idepthFixPrior;
 		ml_priorF = ml_weight_base * SCALE_IDEPTH * SCALE_IDEPTH;
 		ml_reference = data->ml_idepth_reference;

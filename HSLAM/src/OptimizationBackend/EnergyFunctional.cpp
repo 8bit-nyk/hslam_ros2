@@ -430,7 +430,7 @@ double EnergyFunctional::calcLEnergyF_MT()
 			total_points++;
 			// Add ML depth residual if point has ML depth prior
 			if(p->data->hasMLDepth) points_with_depth_prior++;
-			if(p->data->hasMLDepth && p->data->ml_weight > 0) {
+			if(p->data->hasMLDepth && p->data->ml_weight > 0 && !setting_disablePhase2BA) {
 				// Absolute residual in inverse-depth space (Key Lesson #5: relative residuals
 				// break trajectory scale to ~0.55 on all datasets)
 				float ml_residual = p->data->idepth - p->ml_reference;

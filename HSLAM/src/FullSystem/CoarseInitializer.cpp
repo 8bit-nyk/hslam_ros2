@@ -1252,8 +1252,18 @@ float CoarseInitializer::computeMetricScaleFactor()
     std::vector<float> scale_ratios;
     scale_ratios.reserve(numPoints[0]);
 
-    for (int i = 0; i < numPoints[0]; i++) {
+    int totalPoints = numPoints[0];
+    int skippedBad = 0, skippedHessian = 0, skippedDefault = 0;
+
+    for (int i = 0; i < totalPoints; i++) {
+        // [INIT_FILTER] Skip untriangulated points — same criteria as propagateDown (line 832)
+        if (!points[0][i].isGood) { skippedBad++; continue; }
+        if (points[0][i].lastHessian < 0.1f) { skippedHessian++; continue; }
+
         float iR = points[0][i].iR;
+        // Skip points still at/near the default iR=1.0 — these were never properly
+        // triangulated (propagateDown can mark isGood=true with inherited default values)
+        if (fabsf(iR - 1.0f) < 0.01f) { skippedDefault++; continue; }
         if (iR <= 0 || !std::isfinite(iR)) continue;
 
         int u = (int)(points[0][i].u + 0.5f);
@@ -1270,6 +1280,9 @@ float CoarseInitializer::computeMetricScaleFactor()
             scale_ratios.push_back(ratio);
     }
 
+    printf("[INIT_FILTER] %zu well-triangulated points used / %d total (skipped: %d bad, %d low-hessian, %d default-iR)\n",
+           scale_ratios.size(), totalPoints, skippedBad, skippedHessian, skippedDefault);
+
     if ((int)scale_ratios.size() < setting_mlInitMinPoints) {
         printf("CoarseInitializer: Too few correspondences (%zu < %d), falling back to mean depth: %.3f\n",
                scale_ratios.size(), setting_mlInitMinPoints, mlMeanDepth);
@@ -1281,8 +1294,13 @@ float CoarseInitializer::computeMetricScaleFactor()
     std::nth_element(scale_ratios.begin(), scale_ratios.begin() + mid, scale_ratios.end());
     float medianScale = scale_ratios[mid];
 
-    printf("CoarseInitializer: Robust median scale: %.3f (from %zu correspondences, mean was %.3f)\n",
-           medianScale, scale_ratios.size(), mlMeanDepth);
+    // Compute mean for quality diagnostic
+    float sum = 0;
+    for (auto r : scale_ratios) sum += r;
+    float meanScale = sum / scale_ratios.size();
+
+    printf("[INIT_DIAG] Scale: median=%.3f, mean=%.3f, mean/median=%.2f (from %zu correspondences)\n",
+           medianScale, meanScale, meanScale / medianScale, scale_ratios.size());
 
     return medianScale;
 }

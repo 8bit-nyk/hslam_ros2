@@ -174,11 +174,14 @@ extern bool setting_onlyLogKFPoses;
 extern bool setting_preserveMLDepthBounds;
 extern float setting_mlDepthWeight;
 extern float setting_mlGaussianScale;
+extern bool setting_disablePhase2BA;   // Disable ML energy + Hessian prior in BA
+extern bool setting_disablePhase3Tracker;  // Disable ML depth fusion in CoarseTracker
 
 // ML Initialization Settings
 extern bool setting_useMLForInitialization;      // Enable ML-based initialization
 extern float setting_mlInitConfidenceThreshold;  // Min confidence for ML scale
 extern int setting_mlInitMinPoints;              // Min points for scale estimation
+extern float setting_mlInitMinGoodRatio;         // Min fraction of well-triangulated points for ML init
 extern bool setting_mlReinitializationEnabled;   // Enable for re-init
 
 extern bool debugSaveImages;

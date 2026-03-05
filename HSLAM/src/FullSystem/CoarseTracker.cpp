@@ -1103,7 +1103,7 @@ void CoarseTracker::makeCoarseDepthL0Enhanced(std::vector<FrameHessian*> frameHe
     }
     
     // Step 3: Integrate external depth if available
-    if(hasExternalDepth()) {
+    if(hasExternalDepth() && !setting_disablePhase3Tracker) {
         integrateExternalDepthL0();
     }
     

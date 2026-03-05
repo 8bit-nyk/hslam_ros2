@@ -1999,7 +1999,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						monitorScaleDrift(fh, ml_depth_for_tracker);
 
 						// Per-scene ML weight calibration (after warmup, sample CALIBRATION_WINDOW keyframes)
-						if (!ml_weight_calib_.is_calibrated && ef) {
+						// Skip calibration when Phase 2 BA is disabled
+						if (!setting_disablePhase2BA && !ml_weight_calib_.is_calibrated && ef) {
 							ml_weight_calib_.kf_count++;
 							if (ml_weight_calib_.kf_count <= MLWeightCalibration::WARMUP_KEYFRAMES) {
 								printf("[WEIGHT_CALIB] Warmup KF%d (skipping)\n", ml_weight_calib_.kf_count);
@@ -2460,18 +2461,33 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	float ml_mean_depth = -1.0f;
 	
 	// Always compute photometric scale (for good initialization geometry)
+	// Only use well-triangulated points (same filter as computeMetricScaleFactor)
 	float sumID=1e-5, numID=1e-5;
+	int goodPointCount = 0;
 	for(int i=0;i<coarseInitializer->numPoints[0];i++)
 	{
+		if (!coarseInitializer->points[0][i].isGood) continue;
+		if (coarseInitializer->points[0][i].lastHessian < 0.1f) continue;
+		if (fabsf(coarseInitializer->points[0][i].iR - 1.0f) < 0.01f) continue;
 		sumID += coarseInitializer->points[0][i].iR;
 		numID++;
+		goodPointCount++;
 	}
 	float photometricScale = 1 / (sumID / numID);
-	
+
+	// Quality gate: check fraction of well-triangulated points
+	int totalPoints = coarseInitializer->numPoints[0];
+	float goodRatio = (float)goodPointCount / totalPoints;
+
 	// Check if ML scale is available
 	float metricScaleFactor = coarseInitializer->computeMetricScaleFactor();
-	
-	if (setting_useMLForInitialization && metricScaleFactor > 0 && 
+	bool scaleReliable = (metricScaleFactor > 0) && (goodRatio >= setting_mlInitMinGoodRatio);
+
+	printf("[INIT_QUALITY] %d/%d points well-triangulated (%.1f%%). Scale %s.\n",
+		   goodPointCount, totalPoints, goodRatio * 100.0f,
+		   scaleReliable ? "RELIABLE" : "UNRELIABLE - falling back to photometric");
+
+	if (setting_useMLForInitialization && scaleReliable &&
 		coarseInitializer->mlConfidence > setting_mlInitConfidenceThreshold) {
 		// FIXED: Use photometric scale for geometry, store ML scale for metric conversion
 		rescaleFactor = photometricScale;  // Good geometry
@@ -2547,19 +2563,16 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	if (usingMetricScale) {
 		// Convert translation to metric scale during initialization
 		float metric_scale_factor = ml_mean_depth / photometricScale;
-		// printf("[DEBUG_INIT] DIRECT METRIC: Scaling translation to metric (factor=%.6f)\n", metric_scale_factor);
-		// printf("[DEBUG_INIT] Pre-metric translation: %.6f\n", firstToNew.translation().norm());
-		
+		printf("[INIT_DIAG] photometricScale=%.6f, metricScaleFactor(median)=%.6f\n", photometricScale, metricScaleFactor);
+		printf("[INIT_DIAG] metric_scale_factor (ml/photo) = %.6f\n", metric_scale_factor);
+		printf("[INIT_DIAG] Pre-metric translation norm: %.6f\n", firstToNew.translation().norm());
+
 		firstToNew.translation() *= metric_scale_factor;
-		
-		// printf("[DEBUG_INIT] Post-metric translation: %.6f\n", firstToNew.translation().norm());
-		// printf("[DEBUG_INIT] System initialized directly in metric scale (no conversion needed)\n");
+
+		printf("[INIT_DIAG] Post-metric translation norm: %.6f\n", firstToNew.translation().norm());
 	} else {
 		// Standard monocular - apply photometric scale normalization
-		// printf("[DEBUG_INIT] Pre-scale translation magnitude: %.6f\n", firstToNew.translation().norm());
 		firstToNew.translation() /= rescaleFactor;
-		// printf("[DEBUG_INIT] Post-scale translation magnitude: %.6f (rescale=%.3f)\n", 
-			//    firstToNew.translation().norm(), rescaleFactor);
 	}
 
 
@@ -2626,6 +2639,22 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		ph->setIdepthScaled(final_idepth);
 		ph->setIdepthZero(ph->idepth);
 		ph->setPointStatus(PointHessian::ACTIVE);
+
+		// INIT_DIAG: Log first 5 points to verify scale math
+		static int init_diag_count = 0;
+		if (init_diag_count < 5 && usingMetricScale) {
+			int u = (int)(point->u + 0.5f);
+			int v = (int)(point->v + 0.5f);
+			float mlD = 0;
+			if (u >= 0 && v >= 0 && u < coarseInitializer->firstFrameMLDepth.cols &&
+				v < coarseInitializer->firstFrameMLDepth.rows)
+				mlD = coarseInitializer->firstFrameMLDepth.at<float>(v, u);
+			printf("[INIT_DIAG] Point %d: iR=%.6f, final_idepth=%.6f (depth=%.2fm), mlDepth=%.2fm, ratio=%.3f\n",
+				   init_diag_count, original_idepth, final_idepth,
+				   final_idepth > 0 ? 1.0f/final_idepth : -1,
+				   mlD, mlD > 0 && final_idepth > 0 ? (1.0f/final_idepth)/mlD : -1);
+			init_diag_count++;
+		}
 		
 		// Set appropriate depth prior flags based on point type
 		if (ph->my_type > 4) {
