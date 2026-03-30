@@ -121,7 +121,8 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 
 	if(!snapped)
 	{
-		// Set all the points to default values
+		// Reset to ML-seeded values (or default 1.0 if not seeded)
+		// iR is NOT reset — preserves ML-seeded depth
 		thisToNext.translation().setZero();
 		for(int lvl=0;lvl<pyrLevelsUsed;lvl++)
 		{
@@ -129,8 +130,7 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			Pnt* ptsl = points[lvl];
 			for(int i=0;i<npts;i++)
 			{
-				ptsl[i].iR = 1;
-				ptsl[i].idepth_new = 1;
+				ptsl[i].idepth_new = ptsl[i].iR;  // Reset to ML seed (not 1.0)
 				ptsl[i].lastHessian = 0;
 			}
 		}
@@ -248,8 +248,13 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			if(accept)
 			{
 
-				if(resNew[1] == alphaK*numPoints[lvl]) // Stop init if values good enough
+				if(resNew[1] == alphaK*numPoints[lvl] && frameID >= 2) // Stop init if values good enough (min 2 frames)
+				{
 					snapped = true;
+					printf("[SNAP_DIAG] Snapped at frameID=%d, lvl=%d, ||t||=%.6f, alphaEnergy=%.3f\n",
+						   frameID, lvl, refToNew_current.translation().norm(),
+						   (float)resNew[1]);
+				}
 				// Update H, b, and residual
 				H = H_new;
 				b = b_new;
@@ -300,6 +305,21 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 		snappedAt = frameID;
 
 	debugPlot(0,wraps);
+
+	// [GAUGE_DRIFT] Monitor how far optimized depths have drifted from ML seed
+	if (snapped && frameID == snappedAt + 5) {
+		float sumRatio = 0; int nRatio = 0;
+		for (int i = 0; i < numPoints[0]; i++) {
+			if (points[0][i].isGood && points[0][i].iR > 0) {
+				sumRatio += points[0][i].idepth / points[0][i].iR;
+				nRatio++;
+			}
+		}
+		if (nRatio > 0) {
+			printf("[GAUGE_DRIFT] mean(idepth/iR) = %.4f (1.0 = no drift from ML seed, %d points)\n",
+				   sumRatio / nRatio, nRatio);
+		}
+	}
 
 	return snapped && frameID > snappedAt+5;
 }
@@ -583,7 +603,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 		}
 		else
 		{
-			point->energy_new[1] = (point->idepth_new-1)*(point->idepth_new-1);
+			point->energy_new[1] = (point->idepth_new - point->iR)*(point->idepth_new - point->iR);
 			accE[0].updateSingle((float)(point->energy_new[1]));
 		}
 	}
@@ -616,7 +636,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 		point->lastHessian_new = JbBuffer_new[i][9];
 
-		JbBuffer_new[i][8] += alphaOpt*(point->idepth_new - 1);
+		JbBuffer_new[i][8] += alphaOpt*(point->idepth_new - point->iR);
 		JbBuffer_new[i][9] += alphaOpt;
 
 		if(alphaOpt==0)
@@ -1225,6 +1245,78 @@ void CoarseInitializer::setMLDepth(const cv::Mat& mlDepth, float confidence, flo
 }
 
 /**
+ * @brief Seed all initializer points with ML inverse depth instead of default iR=1.0
+ *
+ * Called after setMLDepth(). For each point at each pyramid level, looks up the ML
+ * depth at the corresponding level-0 coordinates and sets iR = idepth = 1/mlDepth.
+ * Uses area-averaged ML depth pyramids for coarse levels to avoid depth discontinuity
+ * artifacts from nearest-neighbor lookup.
+ */
+void CoarseInitializer::seedPointsWithMLDepth()
+{
+    if (!hasMLDepth || firstFrameMLDepth.empty()) return;
+
+    // Build ML depth pyramid with area averaging for coarse levels
+    cv::Mat mlDepthPyr[PYR_LEVELS];
+    mlDepthPyr[0] = firstFrameMLDepth;
+    for (int lvl = 1; lvl < pyrLevelsUsed; lvl++) {
+        cv::resize(mlDepthPyr[lvl-1], mlDepthPyr[lvl],
+                   cv::Size(w[lvl], h[lvl]), 0, 0, cv::INTER_AREA);
+    }
+
+    int seeded = 0, fallback = 0;
+    for (int lvl = 0; lvl < pyrLevelsUsed; lvl++) {
+        int lvlSeeded = 0, lvlFallback = 0;
+        for (int i = 0; i < numPoints[lvl]; i++) {
+            Pnt& pt = points[lvl][i];
+
+            int u = (int)(pt.u + 0.5f);
+            int v = (int)(pt.v + 0.5f);
+
+            if (u < 0 || v < 0 || u >= mlDepthPyr[lvl].cols || v >= mlDepthPyr[lvl].rows) {
+                lvlFallback++;
+                continue;  // Keep iR = 1.0 default
+            }
+
+            float mlDepth = mlDepthPyr[lvl].at<float>(v, u);
+            if (mlDepth <= 0 || !std::isfinite(mlDepth) || mlDepth > 100.0f) {
+                lvlFallback++;
+                continue;  // Keep iR = 1.0 default
+            }
+
+            float mlIdepth = 1.0f / mlDepth;
+            pt.iR = mlIdepth;
+            pt.idepth = mlIdepth;
+            pt.idepth_new = mlIdepth;
+            lvlSeeded++;
+        }
+        seeded += lvlSeeded;
+        fallback += lvlFallback;
+    }
+    mlSeededInit = (seeded > 0);
+    printf("[ML_SEED] Seeded %d points with ML depth, %d kept default (across %d levels)\n",
+           seeded, fallback, pyrLevelsUsed);
+
+    // Log level-0 iR distribution
+    if (numPoints[0] > 0) {
+        float sum = 0, sum2 = 0; int n = 0;
+        for (int i = 0; i < numPoints[0]; i++) {
+            if (points[0][i].iR > 0) {
+                sum += points[0][i].iR;
+                sum2 += points[0][i].iR * points[0][i].iR;
+                n++;
+            }
+        }
+        if (n > 0) {
+            float mean = sum / n;
+            float stddev = sqrtf(fmaxf(0.0f, sum2 / n - mean * mean));
+            printf("[ML_SEED] Level-0 iR: mean=%.4f, stddev=%.4f (depth: mean=%.2fm)\n",
+                   mean, stddev, 1.0f / mean);
+        }
+    }
+}
+
+/**
  * @brief Compute metric scale factor using robust point-wise median scaling
  *
  * For each triangulated point i with inverse depth iR_i, look up the ML metric
@@ -1301,6 +1393,14 @@ float CoarseInitializer::computeMetricScaleFactor()
 
     printf("[INIT_DIAG] Scale: median=%.3f, mean=%.3f, mean/median=%.2f (from %zu correspondences)\n",
            medianScale, meanScale, meanScale / medianScale, scale_ratios.size());
+
+    // [ML_SEED_DIAG] Count how many points still match their ML seed vs photometrically refined
+    int matchesSeed = 0;
+    for (auto r : scale_ratios) {
+        if (fabsf(r - 1.0f) < 0.05f) matchesSeed++;
+    }
+    printf("[ML_SEED_DIAG] %d/%zu points unchanged from ML seed (ratio~1.0)\n",
+           matchesSeed, scale_ratios.size());
 
     return medianScale;
 }

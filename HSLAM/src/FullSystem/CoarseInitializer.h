@@ -90,7 +90,9 @@ public:
 	
 	// ML depth initialization methods
 	void setMLDepth(const cv::Mat& mlDepth, float confidence, float meanDepth = 0.0f);
+	void seedPointsWithMLDepth();  // Seed initializer points with ML inverse depth
 	float computeMetricScaleFactor();
+	bool mlSeededInit = false;    // True if points were seeded with ML depth
 
 	int frameID;
 	bool fixAffine;

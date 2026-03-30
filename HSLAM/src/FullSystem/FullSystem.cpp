@@ -1445,6 +1445,8 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					printf("[SCALE_INIT] Metric scale set from warmup: %.2fm (saved ~70ms processing)\n", 
 						   warmup_mean_depth_);
 					
+					// Seed initializer points with ML inverse depth
+					coarseInitializer->seedPointsWithMLDepth();
 					// Clear the stored results to free memory
 					warmup_depth_map_.release();
 					warmup_results_available_ = false;
@@ -1457,6 +1459,8 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 													 ml_result.mean_depth);
 						printf("[SCALE_INIT] ML depth set for initialization (mean=%.2fm, confidence=%.2f)\n", 
 							   ml_result.mean_depth, ml_result.confidence);
+						// Seed initializer points with ML inverse depth
+						coarseInitializer->seedPointsWithMLDepth();
 					} else {
 						printf("[SCALE_INIT] ML inference failed, falling back to photometric scale\n");
 					}
@@ -2488,8 +2492,11 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		   scaleReliable ? "RELIABLE" : "UNRELIABLE - falling back to photometric");
 
 	if (setting_useMLForInitialization && scaleReliable &&
-		coarseInitializer->mlConfidence > setting_mlInitConfidenceThreshold) {
-		// FIXED: Use photometric scale for geometry, store ML scale for metric conversion
+		coarseInitializer->mlConfidence > setting_mlInitConfidenceThreshold &&
+		!coarseInitializer->mlSeededInit) {
+		// Metric scaling only for non-seeded init (iR=1.0 default path).
+		// With ML-seeded init, iR already holds ML depths — use photometric
+		// normalization (arbitrary scale) and let evo Sim(3) handle scale.
 		rescaleFactor = photometricScale;  // Good geometry
 		ml_mean_depth = metricScaleFactor;  // Metric information
 		usingMetricScale = true;
