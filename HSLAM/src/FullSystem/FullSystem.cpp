@@ -2492,11 +2492,10 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		   scaleReliable ? "RELIABLE" : "UNRELIABLE - falling back to photometric");
 
 	if (setting_useMLForInitialization && scaleReliable &&
-		coarseInitializer->mlConfidence > setting_mlInitConfidenceThreshold &&
-		!coarseInitializer->mlSeededInit) {
-		// Metric scaling only for non-seeded init (iR=1.0 default path).
-		// With ML-seeded init, iR already holds ML depths — use photometric
-		// normalization (arbitrary scale) and let evo Sim(3) handle scale.
+		coarseInitializer->mlConfidence > setting_mlInitConfidenceThreshold) {
+		// Metric scaling applies to both seeded and non-seeded init paths.
+		// With relative seeding (iR=mlMeanDepth/mlDepth), computeMetricScaleFactor()
+		// returns mlMeanDepth directly — the ratio is clean and metric scaling is valid.
 		rescaleFactor = photometricScale;  // Good geometry
 		ml_mean_depth = metricScaleFactor;  // Metric information
 		usingMetricScale = true;

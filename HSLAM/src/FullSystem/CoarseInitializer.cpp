@@ -115,7 +115,9 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 
 
 	alphaK = 2.5*2.5;
-	alphaW = 150*150;
+	// Option B: weaker alpha prior (50*50 vs 150*150) to give photometric optimizer
+	// more freedom to move depths away from ML seed. Addresses tight gauge drift (0.99).
+	alphaW = (mlSeededInit) ? (50*50) : (150*150);
 	regWeight = 0.8;
 	couplingWeight = 1;
 
@@ -1284,7 +1286,10 @@ void CoarseInitializer::seedPointsWithMLDepth()
                 continue;  // Keep iR = 1.0 default
             }
 
-            float mlIdepth = 1.0f / mlDepth;
+            // Relative seeding: iR = mlMeanDepth/mlDepth so mean(iR) ≈ 1.0.
+            // Preserves photometricScale semantics and gives ML relative structure
+            // without committing to absolute ML scale (Option A).
+            float mlIdepth = (mlMeanDepth > 0.0f) ? (mlMeanDepth / mlDepth) : (1.0f / mlDepth);
             pt.iR = mlIdepth;
             pt.idepth = mlIdepth;
             pt.idepth_new = mlIdepth;
