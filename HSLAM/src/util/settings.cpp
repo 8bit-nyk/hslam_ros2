@@ -219,7 +219,7 @@ bool setting_onlyLogKFPoses = true;
 bool setting_logStuff = true;
 
 // ML Depth Integration Settings
-bool setting_preserveMLDepthBounds = false;  // TEST: Both Phase 1+3 disabled
+bool setting_preserveMLDepthBounds = true;   // Config D: Phase 1 re-enabled with ML seeding
 float setting_mlDepthWeight = 2.0f;         // Weight for ML depth constraints in bundle adjustment (rebalanced to prevent ML energy dominance)
 float setting_mlGaussianScale = 0.01f;    // Near-flat Gaussian: ML constraints stay active at ~full weight. Validated on KITTI (12.28 ATE, -10%)
 bool setting_disablePhase2BA = true;       // TEST: Disable Phase 2 (BA energy+Hessian)
