@@ -586,8 +586,14 @@ float FullSystem::optimize(int mnumOptIts)
 		// Check if the optimization is good enough to stop
 		bool canbreak = doStepFromBackup(stepsize,stepsize,stepsize,stepsize,stepsize);
 
-
-
+		// Direct.P2: Per-iteration self-gating weight refresh (Paper Eq. 5)
+		// GATED — Direct.P2 is permanently disabled (proved inert). This loop adds
+		// per-iteration overhead for negligible energy contribution. Kept for reference.
+		if(!setting_disableDirectP2BA) {
+			for(FrameHessian* fh2 : frameHessians)
+				for(PointHessian* ph : fh2->pointHessians)
+					if(ph->efPoint) ph->efPoint->takeData();
+		}
 
 
 

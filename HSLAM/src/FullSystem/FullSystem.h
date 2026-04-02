@@ -335,10 +335,13 @@ public:
 	void printInitializationPerformance() const;
 	void printAblationStatistics() const;
 	
-	// Scale drift diagnostics (Phase 5): pure instrumentation, no trajectory impact
+	// Scale drift diagnostics: pure instrumentation, no trajectory impact
 	void monitorScaleDrift(FrameHessian* newKF, const cv::Mat& mlDepth);
 	float scale_ema_ = 1.0f;
 	int scale_monitor_count_ = 0;
+	// ML probation (GATED — see monitorScaleDrift). Kept for potential indirect pipeline reuse.
+	std::vector<float> ml_fallback_ratios_;
+	bool ml_fallback_triggered_ = false;
 
 	// Per-scene ML weight calibration (Step 3): compute once during first N keyframes
 	struct MLWeightCalibration {

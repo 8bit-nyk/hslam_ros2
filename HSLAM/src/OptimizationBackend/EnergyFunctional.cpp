@@ -411,8 +411,7 @@ double EnergyFunctional::calcLEnergyF_MT()
 	
 	// ML energy calculation enabled (setting_forceAceptStep = false)
 	
-	// PHASE 2: Add ML depth constraints to bundle adjustment energy
-	// This constrains pose optimization to be consistent with ML depths
+	// Direct.P2: ML depth constraints in photometric BA energy (GATED — see notes above each block)
 	double ml_energy = 0;
 	int ml_constraints = 0;
 	int total_points = 0;
@@ -428,29 +427,29 @@ double EnergyFunctional::calcLEnergyF_MT()
 	for(EFFrame* f : frames) {
 		for(EFPoint* p : f->points) {
 			total_points++;
-			// Add ML depth residual if point has ML depth prior
+			// Direct.P2: ML depth energy in photometric BA
+			// GATED — proved inert (0.2-0.4% of total energy). See KEY_INSIGHTS.md §2.1.
+			// The self-gating code below is the full Paper Eq. 5 implementation, kept for reference.
 			if(p->data->hasMLDepth) points_with_depth_prior++;
-			if(p->data->hasMLDepth && p->data->ml_weight > 0 && !setting_disablePhase2BA) {
-				// Absolute residual in inverse-depth space (Key Lesson #5: relative residuals
-				// break trajectory scale to ~0.55 on all datasets)
+			if(p->data->hasMLDepth && p->data->ml_weight > 0 && !setting_disableDirectP2BA) {
+				// Paper Eq. 5: self-gating weight matching Hessian formulation
 				float ml_residual = p->data->idepth - p->ml_reference;
+				float tau = setting_mlSelfGateTau;
+				float self_gate = std::exp(-ml_residual * ml_residual / (2.0f * tau * tau));
+				float uncertainty_weight = 1.0f / (p->ml_sigma * p->ml_sigma);
+				float ml_conf = (p->data->ml_weight > 0) ? (p->data->ml_weight / setting_mlDepthWeight) : 0.5f;
+				float w_ML = ml_conf * uncertainty_weight * self_gate;
 
-				// Gaussian robustification with tunable width: suppresses stale/outlier ML references
-				// Width controlled by setting_mlGaussianScale (smaller = wider = ML stays active longer)
-				float abs_residual = std::abs(ml_residual);
-				float robust_factor = std::exp(-abs_residual * abs_residual * setting_mlGaussianScale);
-
-				float ml_weight = p->data->ml_weight * robust_factor;
-
-				ml_energy += ml_weight * ml_residual * ml_residual;
+				ml_energy += w_ML * ml_residual * ml_residual;
 				ml_constraints++;
 
 				// DIAG_BA: Accumulate diagnostics
+				float abs_residual = std::abs(ml_residual);
 				sum_abs_residual += abs_residual;
 				float rel_residual = (p->ml_reference > 1e-8f) ? abs_residual / p->ml_reference : 0.0f;
 				sum_rel_residual += rel_residual;
-				sum_robust_factor += robust_factor;
-				sum_ml_weight += ml_weight;
+				sum_robust_factor += self_gate;
+				sum_ml_weight += w_ML;
 				if(abs_residual > max_abs_residual) max_abs_residual = abs_residual;
 			}
 		}
@@ -472,8 +471,8 @@ double EnergyFunctional::calcLEnergyF_MT()
 		float mean_weight = sum_ml_weight / ml_constraints;
 		printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n",
 			   photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
-		printf("[ENERGY_DETAIL] mean_abs_res=%.4f, mean_rel_res=%.2f%%, max_abs_res=%.4f, "
-			   "mean_robust=%.3f, mean_weight=%.4f\n",
+		printf("[ML_SELFGATE] mean_abs_res=%.4f, mean_rel_res=%.2f%%, max_abs_res=%.4f, "
+			   "mean_selfgate=%.3f, mean_w_ML=%.4f\n",
 			   mean_abs_res, mean_rel_res * 100.0f, max_abs_residual,
 			   mean_robust, mean_weight);
 	}

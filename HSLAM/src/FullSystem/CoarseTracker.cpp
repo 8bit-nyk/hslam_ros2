@@ -1103,7 +1103,7 @@ void CoarseTracker::makeCoarseDepthL0Enhanced(std::vector<FrameHessian*> frameHe
     }
     
     // Step 3: Integrate external depth if available
-    if(hasExternalDepth() && !setting_disablePhase3Tracker) {
+    if(hasExternalDepth() && !setting_disableDirectP3Tracker) {
         integrateExternalDepthL0();
     }
     
@@ -1262,7 +1262,7 @@ void CoarseTracker::integrateExternalDepthL0()
 {
     int integrated_count = 0;
     int fused_count = 0;
-    float reliability_sum = 0.0f;  // DIAG_PHASE3: track mean reliability
+    float reliability_sum = 0.0f;  // DIAG_DIRECT_P3: track mean reliability
     
     // ONLY process pixels that already have photometric depth (sparse fusion)
     for(int v = 0; v < h[0]; v++) {
@@ -1301,7 +1301,7 @@ void CoarseTracker::integrateExternalDepthL0()
             idepth[0][idx] = combined_idepth * combined_weight;
             weightSums[0][idx] = combined_weight;
             
-            reliability_sum += ml_reliability;  // DIAG_PHASE3
+            reliability_sum += ml_reliability;  // DIAG_DIRECT_P3
             fused_count++;
         }
     }
@@ -1309,7 +1309,7 @@ void CoarseTracker::integrateExternalDepthL0()
     last_stats.pixels_from_external_depth = 0;  // No new pixels added, only fusion
     last_stats.pixels_fused = fused_count;
 
-    // DIAG_PHASE3: Log fusion stats to confirm Phase 3 is actually contributing
+    // DIAG_DIRECT_P3: Log fusion stats to confirm Direct.P3 is actually contributing
     static int phase3_log_counter = 0;
     if(phase3_log_counter++ % 10 == 0) {
         int total_photometric_pixels = 0;
@@ -1317,7 +1317,7 @@ void CoarseTracker::integrateExternalDepthL0()
             if(weightSums[0][i] > 0) total_photometric_pixels++;
 
         float mean_reliability = (fused_count > 0) ? reliability_sum / fused_count : 0.0f;
-        printf("[PHASE3] fused=%d/%d photometric pixels (%.1f%%), reliability=%.3f, eff_weight=%.1f%%, image=%dx%d\n",
+        printf("[DIRECT.P3] fused=%d/%d photometric pixels (%.1f%%), reliability=%.3f, eff_weight=%.1f%%, image=%dx%d\n",
                fused_count, total_photometric_pixels,
                total_photometric_pixels > 0 ? 100.0f * fused_count / total_photometric_pixels : 0.0f,
                mean_reliability, 100.0f * 0.2f * mean_reliability,

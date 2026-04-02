@@ -1884,9 +1884,10 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 			       keyframe_counter_, last_ml_keyframe_, next_ml_kf);
 		}
 	} else {
-		// Default keyframe_only mode: Run ML at every keyframe
-		should_run_ml = true;
-		last_ml_keyframe_ = keyframe_counter_;
+		// Default mode: Run ML every Nth keyframe (Paper Table V: N=2 optimal)
+		should_run_ml = ((keyframe_counter_ - 1) % setting_mlInferenceEveryN == 0);
+		if (should_run_ml)
+			last_ml_keyframe_ = keyframe_counter_;
 	}
 
 	// =================== ML DEPTH PROCESSOR INTEGRATION ===================
@@ -1984,7 +1985,7 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						// printf("PHASE2_DEBUG: No confidence map available from ML inference\n");
 					}
 				
-					// PHASE 3: Forward ML depth to CoarseTracker for frame-to-frame tracking (KEYFRAMES ONLY)
+					// Direct.P3: Forward ML depth to CoarseTracker for frame-to-frame tracking (KEYFRAMES ONLY)
 					if(initialized && !currentMLDepthImage.empty()) {
 						// Ensure ML depth dimensions match processing resolution
 						cv::Mat ml_depth_for_tracker;
@@ -1999,12 +2000,12 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						coarseTracker->setExternalDepthImage(ml_depth_for_tracker);
 						coarseTracker_forNewKF->setExternalDepthImage(ml_depth_for_tracker);
 
-						// Phase 5: Scale drift diagnostics (pure instrumentation, no trajectory impact)
+						// Scale drift diagnostics (pure instrumentation, no trajectory impact)
 						monitorScaleDrift(fh, ml_depth_for_tracker);
 
 						// Per-scene ML weight calibration (after warmup, sample CALIBRATION_WINDOW keyframes)
-						// Skip calibration when Phase 2 BA is disabled
-						if (!setting_disablePhase2BA && !ml_weight_calib_.is_calibrated && ef) {
+						// Skip calibration when Direct.P2 BA is disabled (which it permanently is)
+						if (!setting_disableDirectP2BA && !ml_weight_calib_.is_calibrated && ef) {
 							ml_weight_calib_.kf_count++;
 							if (ml_weight_calib_.kf_count <= MLWeightCalibration::WARMUP_KEYFRAMES) {
 								printf("[WEIGHT_CALIB] Warmup KF%d (skipping)\n", ml_weight_calib_.kf_count);
@@ -4549,9 +4550,34 @@ void FullSystem::monitorScaleDrift(FrameHessian* newKF, const cv::Mat& mlDepth)
 		       newKF->frameID, live_ratio, scale_ema_, drift_pct, mean_residual, residual_count, scale_ratios.size());
 	}
 
-	// NOTE: Global scale correction (Option 2) was tested here with thresholds 5%, 10%, 30%.
-	// Results were inconclusive (KITTI ATE: 12.15/13.10/12.34 vs 12.59 baseline — no clear trend).
-	// Reverted to diagnostic-only. See DEBUG_SPECIALIST_ENTRY_POINT.md for full findings.
+	// ML probation mechanism — GATED
+	// Originally designed to auto-enable Direct.P2 after ML consistency check passes,
+	// or disable Direct.P1 if ML is unreliable (e.g., EuRoC calibration flight).
+	// Gated because Direct.P2 is permanently disabled (proved inert). The concept of
+	// auto-detecting unreliable ML sequences is valuable and may be repurposed for the
+	// indirect pipeline. See KEY_INSIGHTS.md §2.1, IMPLEMENTATION_PLAN.md (indirect).
+	//
+	// if (!ml_fallback_triggered_ && scale_ratios.size() >= 10) {
+	// 	ml_fallback_ratios_.push_back(live_ratio);
+	// 	if (ml_fallback_ratios_.size() == 20) {
+	// 		float sum = 0, sum_sq = 0;
+	// 		for (float r : ml_fallback_ratios_) { sum += r; sum_sq += r * r; }
+	// 		float mean = sum / ml_fallback_ratios_.size();
+	// 		float variance = sum_sq / ml_fallback_ratios_.size() - mean * mean;
+	// 		bool ratio_unreliable = (mean < 0.65f || mean > 1.5f);
+	// 		if (variance > 0.3f || mean_residual > 0.5f || ratio_unreliable) {
+	// 			printf("[ML_FALLBACK] ML predictions unreliable (var=%.3f, mean_residual=%.3f, mean_ratio=%.3f). "
+	// 			       "Direct.P2 remains DISABLED, disabling Direct.P1 bounds.\n", variance, mean_residual, mean);
+	// 			setting_enableDirectP1Bounds = false;
+	// 			ml_fallback_triggered_ = true;
+	// 		} else {
+	// 			printf("[ML_FALLBACK] ML predictions OK (var=%.3f, mean_residual=%.3f, mean_ratio=%.3f). "
+	// 			       "ENABLING Direct.P2 self-gating BA.\n", variance, mean_residual, mean);
+	// 			setting_disableDirectP2BA = false;
+	// 			ml_fallback_triggered_ = true;
+	// 		}
+	// 	}
+	// }
 }
 
 // ML Reference Frame Management (CoarseTracker-style thread safety)

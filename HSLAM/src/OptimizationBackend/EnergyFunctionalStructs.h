@@ -120,6 +120,7 @@ public:
 	// ML Depth Integration Fields (separated from priorF)
 	float ml_priorF;       // NEW: For ML depth priors only
 	float ml_reference;    // NEW: ML reference depth (idepth_zero equivalent)
+	float ml_sigma;        // ML depth standard deviation (aleatoric uncertainty)
 
 
 	// constant info (never changes in-between).

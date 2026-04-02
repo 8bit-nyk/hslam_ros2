@@ -170,12 +170,15 @@ extern bool disableReconfigure;
 
 extern bool setting_onlyLogKFPoses;
 
-// ML Depth Integration Settings
-extern bool setting_preserveMLDepthBounds;
+// ML Depth Integration Settings — Direct Pipeline (Photometric/DSO)
+// Naming: "Direct.P0" = metric init, "Direct.P1" = depth bounds, "Direct.P2" = BA energy, "Direct.P3" = tracker fusion
+extern bool setting_enableDirectP1Bounds;     // Direct.P1: ML depth bounds on ImmaturePoint tracing
 extern float setting_mlDepthWeight;
 extern float setting_mlGaussianScale;
-extern bool setting_disablePhase2BA;   // Disable ML energy + Hessian prior in BA
-extern bool setting_disablePhase3Tracker;  // Disable ML depth fusion in CoarseTracker
+extern bool setting_disableDirectP2BA;        // Direct.P2: ML energy in photometric BA (INERT — see KEY_INSIGHTS.md §2.1)
+extern bool setting_disableDirectP3Tracker;   // Direct.P3: ML depth fusion in CoarseTracker (marginal)
+extern float setting_mlSelfGateTau;           // Direct.P2: self-gating width (Paper Eq. 5) — currently gated
+extern int setting_mlInferenceEveryN;         // Paper Table V: run ML every Nth keyframe (N=2 optimal)
 
 // ML Initialization Settings
 extern bool setting_useMLForInitialization;      // Enable ML-based initialization

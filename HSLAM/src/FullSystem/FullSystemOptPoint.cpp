@@ -129,7 +129,7 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 		float newIdepth = currentIdepth - step;
 		
 		// CRITICAL FIX: Enforce ML depth bounds during optimization
-		if(point->idepth_GT > 0 && setting_preserveMLDepthBounds) {
+		if(point->idepth_GT > 0 && setting_enableDirectP1Bounds) {
 			// Clamp optimization within ML depth bounds
 			if(newIdepth < point->idepth_min) {
 				newIdepth = point->idepth_min;
@@ -233,7 +233,7 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 		p->setIdepthZero(point->idepth_GT);  // ML depth as reference for bundle adjustment constraints
 		p->setIdepth(currentIdepth);         // Optimized depth as current estimate
 
-		// DIAG_PHASE0: Log ML reference vs optimized depth alignment at activation
+		// DIAG_DIRECT_P0: Log ML reference vs optimized depth alignment at activation
 		static int phase0_log_counter = 0;
 		static double phase0_ratio_sum = 0;
 		static int phase0_count = 0;
@@ -242,7 +242,7 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 		phase0_count++;
 		if(phase0_log_counter++ % 500 == 0) {
 			float mean_ratio = phase0_ratio_sum / phase0_count;
-			printf("[PHASE0] pt_activated: idepth_opt=%.4f, ml_ref=%.4f, ratio=%.3f | "
+			printf("[DIRECT.P0] pt_activated: idepth_opt=%.4f, ml_ref=%.4f, ratio=%.3f | "
 				   "running_mean_ratio=%.3f (%d pts)\n",
 				   currentIdepth, point->idepth_GT, ratio, mean_ratio, phase0_count);
 		}

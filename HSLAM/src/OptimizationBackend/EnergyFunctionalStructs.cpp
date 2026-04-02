@@ -83,13 +83,21 @@ void EFPoint::takeData()
 	// priorF = priorF + data->priorFromInd;  // Reserved for future indirect SLAM enhancements
 	if(setting_solverMode & SOLVER_REMOVE_POSEPRIOR) priorF=0;
 	
-	// ML depth prior calculation (separate from indirect priors)
-	// DECOUPLED DESIGN: Hessian uses original absolute-scale prior (no 1/ref² amplification)
-	// to avoid locking far points rigidly. The energy calculation in calcLEnergyF_MT()
-	// independently uses relative residuals for scale-invariant step acceptance.
-	if (data->hasMLDepth && !setting_disablePhase2BA) {
-		float ml_weight_base = (data->ml_weight > 0) ? data->ml_weight : setting_idepthFixPrior;
-		ml_priorF = ml_weight_base * SCALE_IDEPTH * SCALE_IDEPTH;
+	// Direct.P2: ML depth prior in photometric BA
+	// GATED — Direct.P2 proved inert: 0.2-0.4% of total energy even with full paper-spec
+	// self-gating (Paper Eq. 5). See KEY_INSIGHTS.md §2.1 for analysis.
+	// Kept for reference; re-enable by setting setting_disableDirectP2BA = false.
+	ml_sigma = std::max(data->ml_uncertainty, 0.01f);
+	if (data->hasMLDepth && !setting_disableDirectP2BA) {
+		// Paper Eq. 5: uncertainty-aware self-gating weight
+		// Recomputed each call so self-gating tracks current idepth during BA iterations
+		float ml_residual = data->idepth - data->ml_idepth_reference;
+		float tau = setting_mlSelfGateTau;
+		float self_gate = std::exp(-ml_residual * ml_residual / (2.0f * tau * tau));
+		float uncertainty_weight = 1.0f / (ml_sigma * ml_sigma);
+		float ml_conf = (data->ml_weight > 0) ? (data->ml_weight / setting_mlDepthWeight) : 0.5f;
+		float w_ML = ml_conf * uncertainty_weight * self_gate;
+		ml_priorF = w_ML * SCALE_IDEPTH * SCALE_IDEPTH;
 		ml_reference = data->ml_idepth_reference;
 	} else {
 		ml_priorF = 0;

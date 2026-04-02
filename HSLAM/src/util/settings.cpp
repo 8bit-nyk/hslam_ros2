@@ -218,12 +218,15 @@ bool outputPC = false;
 bool setting_onlyLogKFPoses = true;
 bool setting_logStuff = true;
 
-// ML Depth Integration Settings
-bool setting_preserveMLDepthBounds = true;   // Config D: Phase 1 re-enabled with ML seeding
-float setting_mlDepthWeight = 2.0f;         // Weight for ML depth constraints in bundle adjustment (rebalanced to prevent ML energy dominance)
-float setting_mlGaussianScale = 0.01f;    // Near-flat Gaussian: ML constraints stay active at ~full weight. Validated on KITTI (12.28 ATE, -10%)
-bool setting_disablePhase2BA = true;       // TEST: Disable Phase 2 (BA energy+Hessian)
-bool setting_disablePhase3Tracker = true;  // TEST: Disable Phase 3 to isolate Phase 1
+// ML Depth Integration Settings — Direct Pipeline (Photometric/DSO)
+// Direct.P0 = metric init (always on), Direct.P1 = depth bounds, Direct.P2 = BA energy, Direct.P3 = tracker
+bool setting_enableDirectP1Bounds = true;    // Direct.P1: Config D — ML depth bounds on ImmaturePoint tracing
+float setting_mlDepthWeight = 2.0f;         // Base weight for ML depth constraints (calibrated per-scene at runtime)
+float setting_mlGaussianScale = 0.01f;      // Near-flat Gaussian: ML constraints stay active. Validated on KITTI (-10% ATE)
+bool setting_disableDirectP2BA = true;      // Direct.P2: PERMANENTLY DISABLED — proved inert (0.2-0.4% energy). See KEY_INSIGHTS.md §2.1
+bool setting_disableDirectP3Tracker = true; // Direct.P3: Disabled — marginal benefit in ablation study
+float setting_mlSelfGateTau = 0.01f;        // Direct.P2: Paper Eq. 5 self-gating width (gated — P2 disabled)
+int setting_mlInferenceEveryN = 2;          // Paper Table V: ML every 2nd keyframe is optimal
 
 // ML Initialization Settings
 bool setting_useMLForInitialization = true;        // Enable ML-based metric scale initialization
