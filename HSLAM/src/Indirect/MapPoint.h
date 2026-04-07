@@ -28,6 +28,11 @@ namespace HSLAM
         float idepthH;
         std::shared_ptr<MapPoint> mpReplaced;
 
+        // ML depth fields (copied from PointHessian at construction)
+        float ml_idepth = 0;          // ML predicted inverse depth (in source frame)
+        float ml_uncertainty = 0;     // ML aleatoric uncertainty (std dev)
+        bool hasMLDepth = false;
+
     public:
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
         MapPoint(PointHessian *_ph, std::shared_ptr<Map> _globalMap);
@@ -123,6 +128,24 @@ namespace HSLAM
         {
             boost::lock_guard<boost::mutex> l(_mtx);
             return idepth;
+        }
+
+        inline float getMLIdepth()
+        {
+            boost::lock_guard<boost::mutex> l(_mtx);
+            return ml_idepth;
+        }
+
+        inline float getMLUncertainty()
+        {
+            boost::lock_guard<boost::mutex> l(_mtx);
+            return ml_uncertainty;
+        }
+
+        inline bool getHasMLDepth()
+        {
+            boost::lock_guard<boost::mutex> l(_mtx);
+            return hasMLDepth;
         }
 
         inline bool checkVar()

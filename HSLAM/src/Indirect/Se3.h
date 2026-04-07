@@ -378,6 +378,32 @@ namespace HSLAM
         HSLAM::camParams *_cam;
     };
 
+    // Indirect.P1: ML Depth Prior — unary edge on VertexSBAPointXYZ
+    // Measures: (estimated_inverse_depth - ml_inverse_depth) in anchor-normalized coords
+    // estimate()[2] = idepth / scale, so measurement must be ml_idepth / scale
+    class EdgeDepthPrior : public g2o::BaseUnaryEdge<1, double, VertexSBAPointXYZ>
+    {
+    public:
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+        EdgeDepthPrior() {}
+
+        void computeError() override
+        {
+            const VertexSBAPointXYZ* v = static_cast<const VertexSBAPointXYZ*>(_vertices[0]);
+            _error[0] = v->estimate()[2] - _measurement;
+        }
+
+        void linearizeOplus() override
+        {
+            _jacobianOplusXi = Eigen::Matrix<double, 1, 3>::Zero();
+            _jacobianOplusXi(0, 2) = 1.0;
+        }
+
+        bool read(std::istream& is) override { return true; }
+        bool write(std::ostream& os) const override { return true; }
+    };
+
 } // namespace HSLAM
 
 #endif

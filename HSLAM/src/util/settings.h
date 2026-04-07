@@ -180,6 +180,11 @@ extern bool setting_disableDirectP3Tracker;   // Direct.P3: ML depth fusion in C
 extern float setting_mlSelfGateTau;           // Direct.P2: self-gating width (Paper Eq. 5) — currently gated
 extern int setting_mlInferenceEveryN;         // Paper Table V: run ML every Nth keyframe (N=2 optimal)
 
+// ML Depth Integration Settings — Indirect Pipeline (Geometric/ORB)
+// Naming: "Indirect.P0" = MapPoint storage, "Indirect.P1" = BA depth prior, "Indirect.P2" = loop scale validation
+extern bool setting_disableIndirectMLDepth;      // Indirect: Global kill switch for all indirect ML depth
+extern float setting_indirectMLDepthWeight;      // Indirect.P1: Weight multiplier for g2o depth prior edges
+
 // ML Initialization Settings
 extern bool setting_useMLForInitialization;      // Enable ML-based initialization
 extern float setting_mlInitConfidenceThreshold;  // Min confidence for ML scale

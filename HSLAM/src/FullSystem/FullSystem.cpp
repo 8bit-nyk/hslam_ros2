@@ -2570,13 +2570,13 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	if (usingMetricScale) {
 		// Convert translation to metric scale during initialization
 		float metric_scale_factor = ml_mean_depth / photometricScale;
-		printf("[INIT_DIAG] photometricScale=%.6f, metricScaleFactor(median)=%.6f\n", photometricScale, metricScaleFactor);
-		printf("[INIT_DIAG] metric_scale_factor (ml/photo) = %.6f\n", metric_scale_factor);
-		printf("[INIT_DIAG] Pre-metric translation norm: %.6f\n", firstToNew.translation().norm());
+		// printf("[INIT_DIAG] photometricScale=%.6f, metricScaleFactor(median)=%.6f\n", photometricScale, metricScaleFactor);
+		// printf("[INIT_DIAG] metric_scale_factor (ml/photo) = %.6f\n", metric_scale_factor);
+		// printf("[INIT_DIAG] Pre-metric translation norm: %.6f\n", firstToNew.translation().norm());
 
 		firstToNew.translation() *= metric_scale_factor;
 
-		printf("[INIT_DIAG] Post-metric translation norm: %.6f\n", firstToNew.translation().norm());
+		// printf("[INIT_DIAG] Post-metric translation norm: %.6f\n", firstToNew.translation().norm());
 	} else {
 		// Standard monocular - apply photometric scale normalization
 		firstToNew.translation() /= rescaleFactor;
@@ -2656,10 +2656,10 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 			if (u >= 0 && v >= 0 && u < coarseInitializer->firstFrameMLDepth.cols &&
 				v < coarseInitializer->firstFrameMLDepth.rows)
 				mlD = coarseInitializer->firstFrameMLDepth.at<float>(v, u);
-			printf("[INIT_DIAG] Point %d: iR=%.6f, final_idepth=%.6f (depth=%.2fm), mlDepth=%.2fm, ratio=%.3f\n",
-				   init_diag_count, original_idepth, final_idepth,
-				   final_idepth > 0 ? 1.0f/final_idepth : -1,
-				   mlD, mlD > 0 && final_idepth > 0 ? (1.0f/final_idepth)/mlD : -1);
+			// printf("[INIT_DIAG] Point %d: iR=%.6f, final_idepth=%.6f (depth=%.2fm), mlDepth=%.2fm, ratio=%.3f\n",
+			//        init_diag_count, original_idepth, final_idepth,
+			//        final_idepth > 0 ? 1.0f/final_idepth : -1,
+			//        mlD, mlD > 0 && final_idepth > 0 ? (1.0f/final_idepth)/mlD : -1);
 			init_diag_count++;
 		}
 		
@@ -4546,8 +4546,8 @@ void FullSystem::monitorScaleDrift(FrameHessian* newKF, const cv::Mat& mlDepth)
 
 	// Log scale drift every 10 keyframes (pure diagnostic, no trajectory impact)
 	if (scale_monitor_count_ % 10 == 0) {
-		printf("[SCALE_DRIFT] KF%d: live_ratio=%.4f ema=%.4f drift=%+.1f%% | mean_residual=%.4f (%d pts) | %zu projections\n",
-		       newKF->frameID, live_ratio, scale_ema_, drift_pct, mean_residual, residual_count, scale_ratios.size());
+		// printf("[SCALE_DRIFT] KF%d: live_ratio=%.4f ema=%.4f drift=%+.1f%% | mean_residual=%.4f (%d pts) | %zu projections\n",
+		//        newKF->frameID, live_ratio, scale_ema_, drift_pct, mean_residual, residual_count, scale_ratios.size());
 	}
 
 	// ML probation mechanism — GATED

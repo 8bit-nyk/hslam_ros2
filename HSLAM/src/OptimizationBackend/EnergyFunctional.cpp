@@ -469,12 +469,13 @@ double EnergyFunctional::calcLEnergyF_MT()
 		float mean_rel_res = sum_rel_residual / ml_constraints;
 		float mean_robust = sum_robust_factor / ml_constraints;
 		float mean_weight = sum_ml_weight / ml_constraints;
-		printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n",
-			   photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
-		printf("[ML_SELFGATE] mean_abs_res=%.4f, mean_rel_res=%.2f%%, max_abs_res=%.4f, "
-			   "mean_selfgate=%.3f, mean_w_ML=%.4f\n",
-			   mean_abs_res, mean_rel_res * 100.0f, max_abs_residual,
-			   mean_robust, mean_weight);
+		// Direct pipeline diagnostics silenced — see git history to re-enable
+		// printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n",
+		//        photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
+		// printf("[ML_SELFGATE] mean_abs_res=%.4f, mean_rel_res=%.2f%%, max_abs_res=%.4f, "
+		//        "mean_selfgate=%.3f, mean_w_ML=%.4f\n",
+		//        mean_abs_res, mean_rel_res * 100.0f, max_abs_residual,
+		//        mean_robust, mean_weight);
 	}
 
 	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,

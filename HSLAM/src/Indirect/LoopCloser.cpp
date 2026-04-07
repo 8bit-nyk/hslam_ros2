@@ -380,6 +380,35 @@ namespace HSLAM {
                     // If optimization is succesful stop ransacs and continue
                     if (nInliers >= 30) //20
                     {
+                        // Indirect.P2: ML scale validation — reject loops where RANSAC and ML scales disagree
+                        bool mlScaleValid = true;
+                        float s_optimized = gScm.scale();
+                        {
+                            std::vector<float> ml_ratios;
+                            for (size_t j = 0; j < vpMapPointMatches.size(); j++) {
+                                auto mpCurrent = vpMapPointMatches[j];
+                                auto mpCandidate = pKF->getMapPoint(j);
+                                if (mpCurrent && mpCandidate &&
+                                    mpCurrent->getHasMLDepth() && mpCandidate->getHasMLDepth() &&
+                                    mpCurrent->getMLIdepth() > 0 && mpCandidate->getMLIdepth() > 0) {
+                                    float ratio = mpCandidate->getMLIdepth() / mpCurrent->getMLIdepth();
+                                    ml_ratios.push_back(ratio);
+                                }
+                            }
+                            if (ml_ratios.size() >= 5) {
+                                std::sort(ml_ratios.begin(), ml_ratios.end());
+                                float s_ml = ml_ratios[ml_ratios.size() / 2];
+                                float scale_disagreement = std::abs(s_optimized - s_ml) / std::max(s_optimized, s_ml);
+                                printf("[INDIRECT.P2] RANSAC=%.3f ML=%.3f disagreement=%.1f%% matches=%zu\n",
+                                       s_optimized, s_ml, scale_disagreement * 100.0f, ml_ratios.size());
+                                if (scale_disagreement > 0.5f) {
+                                    printf("[INDIRECT.P2] REJECTED: scale disagreement too large\n");
+                                    mlScaleValid = false;
+                                }
+                            }
+                        }
+                        if (!mlScaleValid) continue;
+
                         bMatch = true;
                         candidateKF = pKF;
                         Sim3 gSmw = currentKF->fs->getPoseOpti(); //Sim3(currentKF->fs->getPoseInverse().matrix()); //pKF

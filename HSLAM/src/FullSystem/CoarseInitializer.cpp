@@ -318,8 +318,8 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			}
 		}
 		if (nRatio > 0) {
-			printf("[GAUGE_DRIFT] mean(idepth/iR) = %.4f (1.0 = no drift from ML seed, %d points)\n",
-				   sumRatio / nRatio, nRatio);
+			// printf("[GAUGE_DRIFT] mean(idepth/iR) = %.4f (1.0 = no drift from ML seed, %d points)\n",
+			//        sumRatio / nRatio, nRatio);
 		}
 	}
 
@@ -1299,8 +1299,8 @@ void CoarseInitializer::seedPointsWithMLDepth()
         fallback += lvlFallback;
     }
     mlSeededInit = (seeded > 0);
-    printf("[ML_SEED] Seeded %d points with ML depth, %d kept default (across %d levels)\n",
-           seeded, fallback, pyrLevelsUsed);
+    // printf("[ML_SEED] Seeded %d points with ML depth, %d kept default (across %d levels)\n",
+    //        seeded, fallback, pyrLevelsUsed);
 
     // Log level-0 iR distribution
     if (numPoints[0] > 0) {
@@ -1315,8 +1315,8 @@ void CoarseInitializer::seedPointsWithMLDepth()
         if (n > 0) {
             float mean = sum / n;
             float stddev = sqrtf(fmaxf(0.0f, sum2 / n - mean * mean));
-            printf("[ML_SEED] Level-0 iR: mean=%.4f, stddev=%.4f (depth: mean=%.2fm)\n",
-                   mean, stddev, 1.0f / mean);
+            // printf("[ML_SEED] Level-0 iR: mean=%.4f, stddev=%.4f (depth: mean=%.2fm)\n",
+            //        mean, stddev, 1.0f / mean);
         }
     }
 }
@@ -1396,8 +1396,8 @@ float CoarseInitializer::computeMetricScaleFactor()
     for (auto r : scale_ratios) sum += r;
     float meanScale = sum / scale_ratios.size();
 
-    printf("[INIT_DIAG] Scale: median=%.3f, mean=%.3f, mean/median=%.2f (from %zu correspondences)\n",
-           medianScale, meanScale, meanScale / medianScale, scale_ratios.size());
+    // printf("[INIT_DIAG] Scale: median=%.3f, mean=%.3f, mean/median=%.2f (from %zu correspondences)\n",
+    //        medianScale, meanScale, meanScale / medianScale, scale_ratios.size());
 
     // [ML_SEED_DIAG] Count how many points still match their ML seed vs photometrically refined
     int matchesSeed = 0;

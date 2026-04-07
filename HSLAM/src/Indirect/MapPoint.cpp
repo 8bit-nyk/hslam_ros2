@@ -38,7 +38,14 @@ namespace HSLAM
         status = mpDirStatus::active;
         idepth = ph->idepth;
         idepthH = ph->idepth_hessian;
-        
+
+        // Indirect.P0: Copy ML depth from PointHessian
+        if (ph->hasMLDepth) {
+            ml_idepth = ph->ml_idepth_reference;
+            ml_uncertainty = ph->ml_uncertainty;
+            hasMLDepth = true;
+        }
+
         worldPose = sourceFrame->fs->getPose().cast<float>() * (Vec3f((pt[0] * calib->fxli() + calib->cxli()), (pt[1] * calib->fyli() + calib->cyli()), 1.0f) * (1.0f/idepth));
 
         // normal vector pointing towards the first frame
