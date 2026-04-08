@@ -478,6 +478,27 @@ double EnergyFunctional::calcLEnergyF_MT()
 		//        mean_robust, mean_weight);
 	}
 
+	// Direct.VS: accumulate virtual stereo energy and log periodically
+	double vs_energy = 0;
+	int vs_active = 0;
+	for(EFFrame* f : frames)
+		for(EFPoint* p : f->points)
+			if(p->vs_h > 0) {
+				// E_VS = vs_h * (r_0 + J * deltaF)^2 ≈ vs_h * deltaF^2 + 2*vs_b*deltaF + vs_b^2/vs_h
+				// Simpler: just track vs_h * deltaF^2 + linearized term
+				float delta = p->deltaF;
+				vs_energy += p->vs_h * delta * delta + 2.0 * p->vs_b * delta;
+				vs_active++;
+			}
+	E += vs_energy;
+
+	static int vs_log_counter = 0;
+	if(vs_log_counter++ % 100 == 0 && vs_active > 0) {
+		printf("[DIRECT.VS] active=%d vs_energy=%.2f photo_energy=%.2f ratio=%.3f%%\n",
+		       vs_active, vs_energy, photometric_energy,
+		       (vs_energy / (photometric_energy + 1e-10)) * 100.0);
+	}
+
 	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,
 			this, _1, _2, _3, _4), 0, allPoints.size(), 50);
 

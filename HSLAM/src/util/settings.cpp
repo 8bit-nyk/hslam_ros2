@@ -228,6 +228,11 @@ bool setting_disableDirectP3Tracker = true; // Direct.P3: Disabled — marginal 
 float setting_mlSelfGateTau = 0.01f;        // Direct.P2: Paper Eq. 5 self-gating width (gated — P2 disabled)
 int setting_mlInferenceEveryN = 2;          // Paper Table V: ML every 2nd keyframe is optimal
 
+// Direct Virtual Stereo ML Depth Settings (Step 4)
+bool setting_disableDirectVS = false;    // Direct.VS: kill switch
+float setting_vsBaseline = 0.1f;         // Direct.VS: virtual baseline in meters
+float setting_vsWeight = 1e-5f;          // Direct.VS: weight multiplier (calibrate via eval; 0.001 was 14000x photo)
+
 // Indirect Pipeline ML Depth Settings
 bool setting_disableIndirectMLDepth = false;     // Indirect: Global kill switch
 float setting_indirectMLDepthWeight = 0.3f;      // Indirect.P1v2: Scale-drift-aware prior (see EXPERIMENT_LOG.md Exp 4)

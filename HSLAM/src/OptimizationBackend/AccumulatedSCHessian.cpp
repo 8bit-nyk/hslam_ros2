@@ -44,8 +44,8 @@ void AccumulatedSCHessianSSE::addPoint(EFPoint* p, bool shiftPriorToZero, int ti
 		return;
 	}
 
-	// Apply both indirect and ML priors independently
-	float H = p->Hdd_accAF+p->Hdd_accLF+p->priorF+p->ml_priorF;
+	// Apply both indirect and ML priors independently; also add VS image-space contribution
+	float H = p->Hdd_accAF+p->Hdd_accLF+p->priorF+p->ml_priorF+p->vs_h;
 	if(H < 1e-10) H = 1e-10;
 
 	p->data->idepth_hessian=H;
@@ -64,6 +64,12 @@ void AccumulatedSCHessianSSE::addPoint(EFPoint* p, bool shiftPriorToZero, int ti
 		if(p->ml_priorF > 0) {
 			float ml_deltaF = p->data->idepth - p->ml_reference;
 			p->bdSumF += p->ml_priorF * ml_deltaF;
+		}
+
+		// Direct.VS: virtual stereo image-space constraint
+		// vs_b is the linearized residual gradient (constant); vs_h * deltaF is the delta correction.
+		if(p->vs_h > 0) {
+			p->bdSumF += p->vs_b + p->vs_h * p->deltaF;
 		}
 	}
 	VecCf Hcd = p->Hcd_accAF + p->Hcd_accLF;

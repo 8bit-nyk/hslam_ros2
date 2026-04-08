@@ -122,6 +122,12 @@ public:
 	float ml_reference;    // NEW: ML reference depth (idepth_zero equivalent)
 	float ml_sigma;        // ML depth standard deviation (aleatoric uncertainty)
 
+	// Direct.VS: Virtual stereo image-space constraint (Step 4)
+	// Computed once at point activation; enters H/b via Schur complement accumulation.
+	// vs_h = w * J_rho^2,  vs_b = w * J_rho * r   (J_rho = I_x(u_R) * (-fx * b_vs))
+	float vs_h = 0;   // idepth Hessian contribution
+	float vs_b = 0;   // idepth gradient contribution
+
 
 	// constant info (never changes in-between).
 	int idxInPoints;

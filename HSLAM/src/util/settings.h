@@ -180,6 +180,12 @@ extern bool setting_disableDirectP3Tracker;   // Direct.P3: ML depth fusion in C
 extern float setting_mlSelfGateTau;           // Direct.P2: self-gating width (Paper Eq. 5) — currently gated
 extern int setting_mlInferenceEveryN;         // Paper Table V: run ML every Nth keyframe (N=2 optimal)
 
+// ML Depth Integration Settings — Direct Virtual Stereo (Step 4)
+// Naming: "Direct.VS" = virtual stereo constraint in DSO BA (image-space, self-gating via gradient)
+extern bool setting_disableDirectVS;     // Direct.VS: kill switch (default false)
+extern float setting_vsBaseline;         // Direct.VS: virtual baseline in meters (default 0.1m)
+extern float setting_vsWeight;           // Direct.VS: weight multiplier (default 0.001, tune per eval)
+
 // ML Depth Integration Settings — Indirect Pipeline (Geometric/ORB)
 // Naming: "Indirect.P0" = MapPoint storage, "Indirect.P1" = BA depth prior, "Indirect.P2" = loop scale validation
 extern bool setting_disableIndirectMLDepth;      // Indirect: Global kill switch for all indirect ML depth

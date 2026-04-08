@@ -969,6 +969,42 @@ void FullSystem::activatePointsMT()
 		
 
 			ef->insertPoint(newpoint);
+
+			// [DIRECT.VS] Virtual stereo constraint: compute vs_h, vs_b once at activation.
+			// Anchors idepth against ML depth via image-space photometric consistency in the
+			// host frame. Self-gates through image gradient: flat regions contribute nothing.
+			if (!setting_disableDirectVS && newpoint->hasMLDepth &&
+			    newpoint->ml_idepth_reference > 1e-6f && setting_vsBaseline > 0)
+			{
+			    float rho_ML = newpoint->ml_idepth_reference;  // 1/m (SCALE_IDEPTH=1.0)
+			    float fx     = Hcalib.fxl();
+			    float u_R    = newpoint->u - fx * setting_vsBaseline * rho_ML;
+
+			    if (u_R >= 1.0f && u_R < wG[0] - 2.0f)
+			    {
+			        const Eigen::Vector3f* dI = newpoint->host->dI;
+			        Vec3f hitR = getInterpolatedElement33(dI, u_R,      newpoint->v, wG[0]);
+			        Vec3f hitH = getInterpolatedElement33(dI, newpoint->u, newpoint->v, wG[0]);
+
+			        if (std::isfinite(hitR[0]) && std::isfinite(hitH[0]))
+			        {
+			            float r     = hitR[0] - hitH[0];
+			            float J_rho = hitR[1] * (-fx * setting_vsBaseline);  // ∂r/∂ρ
+
+			            // Gradient-based down-weight (same form as Residuals.cpp)
+			            float w_img = setting_outlierTHSumComponent /
+			                          (setting_outlierTHSumComponent + hitR[1]*hitR[1] + hitR[2]*hitR[2]);
+
+			            // Huber robustification
+			            float hw = fabsf(r) < setting_huberTH ? 1.0f : setting_huberTH / fabsf(r);
+
+			            float w_eff = setting_vsWeight * w_img * hw;
+			            newpoint->efPoint->vs_h = w_eff * J_rho * J_rho;
+			            newpoint->efPoint->vs_b = w_eff * J_rho * r;
+			        }
+			    }
+			}
+
 			for(PointFrameResidual* r : newpoint->residuals)
 				ef->insertResidual(r);
 			assert(newpoint->efPoint != 0);
