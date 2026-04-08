@@ -77,6 +77,7 @@
 #include <cmath>
 #include <chrono>
 #include <thread>
+#include <sys/time.h>
 #include "ML/MLInference.h"
 #include "ML/MLDepthProcessor.h"
 
@@ -1548,7 +1549,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 
 		int nMatches;
 		// indirect!: Update the loop closer and indirect points
-		nMatches = matcher->SearchByProjectionFrameToFrame(shell->frame, mLastFrame, 15, true);
+		nMatches = matcher->SearchByProjectionFrameToFrame(shell->frame, mLastFrame, 15, true, currentMLDepthImage);
 
 		if (nMatches < 20)
 		{
@@ -1640,6 +1641,19 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 		mLastFrame = shell->frame;
 
 
+
+		// [PERF] Accumulate inter-frame wall-clock time for tracking fps
+		{
+			struct timeval now; gettimeofday(&now, NULL);
+			if (perf_timing_initialized_) {
+				float ms = (now.tv_sec  - perf_last_frame_time_.tv_sec)  * 1000.0f
+				         + (now.tv_usec - perf_last_frame_time_.tv_usec) / 1000.0f;
+				perf_total_tracking_ms_ += ms;
+				perf_tracking_frame_count_++;
+			}
+			perf_last_frame_time_ = now;
+			perf_timing_initialized_ = true;
+		}
 
 		for (IOWrap::Output3DWrapper *ow : outputWrapper)
 		{
@@ -3591,7 +3605,7 @@ int FullSystem::SearchLocalPoints(std::shared_ptr<Frame> frame, int th, float nn
 		// If the camera has been relocalised recently, perform a coarser search
 		// if (mCurrentFrame.mnId < mnLastRelocFrameId + 2)
 		// 	th = 5;
-		nmatches += matcher->SearchLocalMapByProjection(frame, mvpLocalMapPoints, th, nnratio);
+		nmatches += matcher->SearchLocalMapByProjection(frame, mvpLocalMapPoints, th, nnratio, currentMLDepthImage);
 	}
 	return nmatches;
 }
@@ -4608,6 +4622,21 @@ cv::Mat FullSystem::getMLReferenceDepth() const {
 int FullSystem::getMLReferenceFrameId() const {
 	boost::unique_lock<boost::mutex> lock(ml_reference_mutex_);
 	return ml_reference_frame_id_;
+}
+
+void FullSystem::printPerfSummary(double avg_ml_inference_ms)
+{
+	double track_fps = (perf_tracking_frame_count_ > 0 && perf_total_tracking_ms_ > 0)
+	                 ? perf_tracking_frame_count_ * 1000.0 / perf_total_tracking_ms_
+	                 : 0.0;
+	int kf_count  = static_cast<int>(allKeyFramesHistory.size());
+	int mp_count  = globalMap ? globalMap->MapPointsInMap() : 0;
+
+	printf("[PERF_SUMMARY] track_fps=%.2f frames=%d kfs=%d mps=%d",
+	       track_fps, perf_tracking_frame_count_, kf_count, mp_count);
+	if (avg_ml_inference_ms > 0)
+		printf(" ml_ms=%.1f", avg_ml_inference_ms);
+	printf("\n");
 }
 
 }

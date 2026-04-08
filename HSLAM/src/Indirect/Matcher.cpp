@@ -284,7 +284,7 @@ namespace HSLAM
         return nmatches;
     }
 
-    int Matcher::SearchLocalMapByProjection(shared_ptr<Frame> F, vector<shared_ptr<MapPoint>> &vpMapPoints, float th, float nnratio) //this is run from tracking thread -> access tMapPoints only!!
+    int Matcher::SearchLocalMapByProjection(shared_ptr<Frame> F, vector<shared_ptr<MapPoint>> &vpMapPoints, float th, float nnratio, const cv::Mat &mlDepthImage) //this is run from tracking thread -> access tMapPoints only!!
     {
         int nmatches = 0;
 
@@ -356,6 +356,26 @@ namespace HSLAM
             {
                 if (bestLevel == bestLevel2 && bestDist > nnratio * bestDist2)
                     continue;
+
+                // [INDIRECT.Step2] ML depth consistency gate — reject wildly inconsistent candidates
+                // Ratio d_slam/d_ml ≈ 0.55 for correct matches (DSO scale drift); bounds [0.08, 12.0] are
+                // generous enough to pass correct matches but catch grossly wrong depth associations.
+                if (!mlDepthImage.empty() && pMP->getidepth() > 0.f)
+                {
+                    int px = (int)pMP->mTrackProjX;
+                    int py = (int)pMP->mTrackProjY;
+                    if (px >= 0 && px < mlDepthImage.cols && py >= 0 && py < mlDepthImage.rows)
+                    {
+                        float d_ml = mlDepthImage.at<float>(py, px);
+                        if (d_ml > 0.f)
+                        {
+                            float d_slam = 1.0f / pMP->getidepth();
+                            float ratio  = d_slam / d_ml;
+                            if (ratio < 0.08f || ratio > 12.0f)
+                                continue;
+                        }
+                    }
+                }
 
                 F->tMapPoints[bestIdx] = pMP;
                 nmatches++;
@@ -989,7 +1009,7 @@ namespace HSLAM
         return nFused;
     }
 
-    int Matcher::SearchByProjectionFrameToFrame(std::shared_ptr<Frame> CurrentFrame, const std::shared_ptr<Frame> LastFrame, const float th, bool mbCheckOrientation) //this is run from tracking thread -> access tMapPoints only!!
+    int Matcher::SearchByProjectionFrameToFrame(std::shared_ptr<Frame> CurrentFrame, const std::shared_ptr<Frame> LastFrame, const float th, bool mbCheckOrientation, const cv::Mat &mlDepthImage) //this is run from tracking thread -> access tMapPoints only!!
     {
         int nmatches = 0;
 
@@ -1079,6 +1099,22 @@ namespace HSLAM
 
                     if (bestDist <= TH_HIGH)
                     {
+                        // [INDIRECT.Step2] ML depth consistency gate (same bounds as SearchLocalMapByProjection)
+                        if (!mlDepthImage.empty() && pMP->getidepth() > 0.f)
+                        {
+                            int px = (int)u, py = (int)v;
+                            if (px >= 0 && px < mlDepthImage.cols && py >= 0 && py < mlDepthImage.rows)
+                            {
+                                float d_ml = mlDepthImage.at<float>(py, px);
+                                if (d_ml > 0.f)
+                                {
+                                    float ratio = (1.0f / pMP->getidepth()) / d_ml;
+                                    if (ratio < 0.08f || ratio > 12.0f)
+                                        continue;
+                                }
+                            }
+                        }
+
                         CurrentFrame->tMapPoints[bestIdx2] = pMP;
                         nmatches++;
 

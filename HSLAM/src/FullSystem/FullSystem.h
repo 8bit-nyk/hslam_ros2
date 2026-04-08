@@ -168,6 +168,15 @@ public:
 	
 	// Performance monitoring
 	int getKeyframeCount() const { return static_cast<int>(frameHessians.size()); }
+
+	// Run-end performance summary — call after blockUntilMappingIsFinished()
+	void printPerfSummary(double avg_ml_inference_ms = -1.0);
+
+	// Perf accumulators (updated per-frame in TrackMonocularWithML)
+	struct timeval perf_last_frame_time_;
+	bool           perf_timing_initialized_ = false;
+	double         perf_total_tracking_ms_  = 0.0;
+	int            perf_tracking_frame_count_ = 0;
 	
 	// Keyframe history for performance metrics
 	std::vector<FrameShell*> allKeyFramesHistory;

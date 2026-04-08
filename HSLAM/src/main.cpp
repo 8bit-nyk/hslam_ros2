@@ -838,9 +838,16 @@ int main(int argc, char **argv)
 
         fullSystem->printResult("result.txt");
 		if (outputPC) fullSystem->printPC("PC.PCD");
-        
+
         // Log keyframe statistics
         fullSystem->printKeyframeStats();
+
+        // [PERF_SUMMARY] — machine-parseable performance line for eval summary
+        {
+            double avg_ml_ms = (ml_depth_enabled && fullSystem->ml_depth_enabled_)
+                             ? fullSystem->ml_metrics_.avg_ml_inference_time_ms : -1.0;
+            fullSystem->printPerfSummary(avg_ml_ms);
+        }
         
         double MilliSecondsTakenSingle = 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC);
         double MilliSecondsTakenMT = sInitializerOffset + ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f);
