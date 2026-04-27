@@ -134,6 +134,15 @@ int main(int argc, char **argv)
 		("ml-gpu-device", "GPU device ID for ML inference", cxxopts::value<int>()->default_value("0"))
 		("ml-gpu-memory", "GPU memory limit in MB", cxxopts::value<size_t>()->default_value("2048"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
+		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
+		// Phase toggles for the Phase C config matrix (Phase B/C research). Defaults match current production.
+		("p0", "Direct.P0: ML-based metric scale initialization (default: on)", cxxopts::value<bool>()->default_value("true"))
+		("p1", "Direct.P1: ML depth bounds in ImmaturePoint tracing (default: on)", cxxopts::value<bool>()->default_value("true"))
+		("p2", "Direct.P2: ML energy term in photometric BA (default: off — memory says structurally dead)", cxxopts::value<bool>()->default_value("false"))
+		("p3", "Direct.P3: ML depth fusion in CoarseTracker (default: off — marginal benefit)", cxxopts::value<bool>()->default_value("false"))
+		("vs", "Direct.VS: virtual stereo in DSO sliding-window BA (default: OFF — futility-tested, no measurable contribution on TUM)", cxxopts::value<bool>()->default_value("false"))
+		("vs-weight", "Direct.VS weight multiplier (default matches settings.cpp; typical sweep 1e-5..1e-2)", cxxopts::value<float>()->default_value("-1"))
+		("depth-scale", "Divisor applied to 16-bit depth PNG values to get meters (TUM=5000; KITTI projected depth we write at 500 for max ~130m range).", cxxopts::value<float>()->default_value("5000.0"))
 		("h,help", "Print usage")
     ;
 
@@ -194,6 +203,50 @@ int main(int argc, char **argv)
 	
 	// ML initialization control (for A/B testing)
 	bool ml_init_enabled = result["ml-init"].as<bool>();
+
+	// Depth PNG scaling (for RGB-D associations loop; 5000 for TUM, ~500 for KITTI)
+	float depth_scale = result["depth-scale"].as<float>();
+	if (depth_scale <= 0.0f) { printf("ERROR: --depth-scale must be positive.\n"); return 0; }
+	printf("[DEPTH_SCALE] divisor=%.1f (maps uint16 PNG -> meters)\n", depth_scale);
+
+	// Depth source selection (Phase B — research-only validation switch)
+	{
+		std::string dsrc = result["depth-source"].as<std::string>();
+		if (dsrc == "ml")        setting_depthSource = DEPTH_SOURCE_ML;
+		else if (dsrc == "gt")   setting_depthSource = DEPTH_SOURCE_GT;
+		else if (dsrc == "none") setting_depthSource = DEPTH_SOURCE_NONE;
+		else {
+			printf("ERROR: invalid --depth-source='%s' (expected ml|gt|none). Using 'ml'.\n", dsrc.c_str());
+			setting_depthSource = DEPTH_SOURCE_ML;
+		}
+		const char* label = (setting_depthSource == DEPTH_SOURCE_ML) ? "ML (Metric3D, production)"
+		                   : (setting_depthSource == DEPTH_SOURCE_GT) ? "GT (Kinect/LiDAR from associations.txt)"
+		                                                               : "NONE (pure monocular)";
+		printf("[DEPTH_SOURCE] %s\n", label);
+		if (setting_depthSource == DEPTH_SOURCE_GT && associations.empty()) {
+			printf("ERROR: --depth-source=gt requires --associations=<path/to/associations.txt>\n");
+			return 0;
+		}
+	}
+
+	// Phase toggles (Phase C matrix). Each flag overrides the settings.cpp default.
+	// Convention: p0/p1/p2/p3/vs = true means enable; settings polarity is flipped per flag.
+	setting_useMLForInitialization = result["p0"].as<bool>();
+	setting_enableDirectP1Bounds   = result["p1"].as<bool>();
+	setting_disableDirectP2BA      = !result["p2"].as<bool>();
+	setting_disableDirectP3Tracker = !result["p3"].as<bool>();
+	setting_disableDirectVS        = !result["vs"].as<bool>();
+	{
+		float vsw = result["vs-weight"].as<float>();
+		if (vsw >= 0.0f) setting_vsWeight = vsw;  // negative sentinel = keep settings default
+	}
+	printf("[PHASE_CONFIG] P0=%s P1=%s P2=%s P3=%s VS=%s vsWeight=%.1e\n",
+	       setting_useMLForInitialization ? "on":"off",
+	       setting_enableDirectP1Bounds   ? "on":"off",
+	       !setting_disableDirectP2BA     ? "on":"off",
+	       !setting_disableDirectP3Tracker? "on":"off",
+	       !setting_disableDirectVS       ? "on":"off",
+	       setting_vsWeight);
 
 	if(source.empty() || calib.empty()) { std::cout<< "Path to images or calibration not provided! cannot function without them. exit." << std::endl; return(0);}
 
@@ -598,7 +651,9 @@ int main(int argc, char **argv)
                 }
                 
                 cv::Mat depth_img;
-                depth_img_raw.convertTo(depth_img, CV_32FC1, 1.0/5000.0);
+                // Depth-scale divisor: TUM uses 5000, KITTI velodyne-projected we write at ~500.
+                // Configurable via --depth-scale CLI flag.
+                depth_img_raw.convertTo(depth_img, CV_32FC1, 1.0/depth_scale);
                 
                 // Debug-only logging for frame processing details
                 HSLAM::DepthLogger::logFrameProcessing(processedFrames, rgb_img.cols, rgb_img.rows,

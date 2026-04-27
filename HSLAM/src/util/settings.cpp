@@ -229,13 +229,17 @@ float setting_mlSelfGateTau = 0.01f;        // Direct.P2: Paper Eq. 5 self-gatin
 int setting_mlInferenceEveryN = 2;          // Paper Table V: ML every 2nd keyframe is optimal
 
 // Direct Virtual Stereo ML Depth Settings (Step 4)
-bool setting_disableDirectVS = false;    // Direct.VS: kill switch
+bool setting_disableDirectVS = true;     // Direct.VS: DISABLED BY DEFAULT (Apr 25, 2026). Futility test on TUM freiburg1_room (V0-V4 matrix, 5 weights × 3 reps) showed VS produces no measurable scale anchoring under production ML conditions — all weights leave Sim(3) scale in [0.554, 0.573], same band as VS-off. The 0.55 floor is set by Metric3D bias and VS at any tested weight cannot move it. Joining Phase 2/Phase 3 in "kept disabled until outdoor / sweet-spot evidence justifies re-enabling". See docs/gt_depth_validation/PHASE_C_CONSOLIDATED.md §9.
 float setting_vsBaseline = 0.1f;         // Direct.VS: virtual baseline in meters
-float setting_vsWeight = 1e-5f;          // Direct.VS: weight multiplier (calibrate via eval; 0.001 was 14000x photo)
+float setting_vsWeight = 1e-5f;          // Direct.VS: weight multiplier (intentionally inert baseline per fa6af55; Phase C found VS not load-bearing on indoor — proper sweet-spot evaluation pending)
 
 // Indirect Pipeline ML Depth Settings
 bool setting_disableIndirectMLDepth = false;     // Indirect: Global kill switch
 float setting_indirectMLDepthWeight = 0.3f;      // Indirect.P1v2: Scale-drift-aware prior (see EXPERIMENT_LOG.md Exp 4)
+
+// GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
+// See docs/gt_depth_validation/PLAN.md
+int setting_depthSource = DEPTH_SOURCE_ML;
 
 // ML Initialization Settings
 bool setting_useMLForInitialization = true;        // Enable ML-based metric scale initialization

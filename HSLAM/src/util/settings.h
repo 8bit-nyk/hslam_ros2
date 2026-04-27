@@ -191,6 +191,13 @@ extern float setting_vsWeight;           // Direct.VS: weight multiplier (defaul
 extern bool setting_disableIndirectMLDepth;      // Indirect: Global kill switch for all indirect ML depth
 extern float setting_indirectMLDepthWeight;      // Indirect.P1: Weight multiplier for g2o depth prior edges
 
+// GT Depth Validation (Phase B) — research-only, NOT a shipped feature
+// When depthSource=GT, load GT depth from --associations PNG files and route it through
+// the ML depth integration path (idepth_GT, bounds, Phase 0/1/2/VS hooks all fire identically).
+// Purpose: decouple integration-correctness testing from Metric3D bias. See docs/gt_depth_validation/PLAN.md.
+enum DepthSource { DEPTH_SOURCE_ML = 0, DEPTH_SOURCE_GT = 1, DEPTH_SOURCE_NONE = 2 };
+extern int setting_depthSource;                  // default DEPTH_SOURCE_ML; flip via --depth-source=ml|gt|none
+
 // ML Initialization Settings
 extern bool setting_useMLForInitialization;      // Enable ML-based initialization
 extern float setting_mlInitConfidenceThreshold;  // Min confidence for ML scale

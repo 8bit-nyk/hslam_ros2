@@ -469,13 +469,16 @@ double EnergyFunctional::calcLEnergyF_MT()
 		float mean_rel_res = sum_rel_residual / ml_constraints;
 		float mean_robust = sum_robust_factor / ml_constraints;
 		float mean_weight = sum_ml_weight / ml_constraints;
-		// Direct pipeline diagnostics silenced — see git history to re-enable
-		// printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n",
-		//        photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
-		// printf("[ML_SELFGATE] mean_abs_res=%.4f, mean_rel_res=%.2f%%, max_abs_res=%.4f, "
-		//        "mean_selfgate=%.3f, mean_w_ML=%.4f\n",
-		//        mean_abs_res, mean_rel_res * 100.0f, max_abs_residual,
-		//        mean_robust, mean_weight);
+		// [ENERGY] / [ML_SELFGATE] fire once per 50 BA iterations when P2 is enabled
+		// (setting_disableDirectP2BA == false; activated via --p2=true CLI flag).
+		// Used by H2 (Phase 2 viability) measurement in Phase C. See
+		// HSLAM/docs/gt_depth_validation/PHASE_C_CONSOLIDATED.md §5.
+		printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n",
+		       photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
+		printf("[ML_SELFGATE] mean_abs_res=%.4f, mean_rel_res=%.2f%%, max_abs_res=%.4f, "
+		       "mean_selfgate=%.3f, mean_w_ML=%.4f\n",
+		       mean_abs_res, mean_rel_res * 100.0f, max_abs_residual,
+		       mean_robust, mean_weight);
 	}
 
 	// Direct.VS: accumulate virtual stereo energy and log periodically

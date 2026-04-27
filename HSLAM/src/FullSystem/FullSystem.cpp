@@ -1209,6 +1209,33 @@ void FullSystem::TrackRGBD(const cv::Mat& rgb_color, const cv::Mat& rgb_image, c
         boost::unique_lock<boost::mutex> lock(rgbd_depth_mutex_);
         currentDepthImage = depth_image.clone();
     }
+
+    // [GT_DEPTH] diagnostic — fires in GT mode, first N frames, to verify wiring is live.
+    if (setting_depthSource == DEPTH_SOURCE_GT) {
+        static int gt_log_count = 0;
+        if (gt_log_count < 10 || gt_log_count % 50 == 0) {
+            int n_valid = 0;
+            double sum = 0.0, mn = 1e9, mx = 0.0;
+            const int total = depth_image.rows * depth_image.cols;
+            for (int y = 0; y < depth_image.rows; y++) {
+                const float* row = depth_image.ptr<float>(y);
+                for (int x = 0; x < depth_image.cols; x++) {
+                    float d = row[x];
+                    if (std::isfinite(d) && d > 0.1f) {
+                        n_valid++; sum += d;
+                        if (d < mn) mn = d;
+                        if (d > mx) mx = d;
+                    }
+                }
+            }
+            float mean = n_valid ? (float)(sum / n_valid) : 0.0f;
+            printf("[GT_DEPTH] frame %d  ts=%.3f  size=%dx%d  valid=%d/%d (%.1f%%)  range=[%.2f, %.2f]m  mean=%.2fm\n",
+                   gt_log_count, timestamp, depth_image.cols, depth_image.rows,
+                   n_valid, total, 100.0f * n_valid / total,
+                   n_valid ? mn : 0.0, n_valid ? mx : 0.0, mean);
+        }
+        gt_log_count++;
+    }
     
     // Store RGB color for ML keyframe submissions (thread-safe)
     {
@@ -1462,9 +1489,51 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 			printf("\n=== INITIALIZATION STARTED ===\n");
 			
 			coarseInitializer->setFirst(&Hcalib, fh);
-			
-			// Process ML depth for initialization to establish metric scale
-			if (ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady()) {
+
+			// Phase B: route metric initialization by setting_depthSource.
+			// ML  -> existing ML warmup/inference path
+			// GT  -> seed from currentDepthImage (from TrackRGBD), confidence=1.0 synthetic
+			// NONE-> skip metric init (pure monocular)
+			if (setting_depthSource == DEPTH_SOURCE_GT) {
+				cv::Mat gt_depth;
+				{
+					boost::unique_lock<boost::mutex> lock(rgbd_depth_mutex_);
+					if (!currentDepthImage.empty() && currentDepthImage.type() == CV_32FC1) {
+						gt_depth = currentDepthImage.clone();
+					}
+				}
+				if (!gt_depth.empty()) {
+					// Compute mean of valid pixels (>0.1m) for metric scale factor
+					double sum = 0.0; int cnt = 0;
+					for (int y = 0; y < gt_depth.rows; y++) {
+						const float* row = gt_depth.ptr<float>(y);
+						for (int x = 0; x < gt_depth.cols; x++) {
+							float d = row[x];
+							if (std::isfinite(d) && d > 0.1f) { sum += d; cnt++; }
+						}
+					}
+					if (cnt >= 100) {
+						float mean_gt = (float)(sum / cnt);
+						// Synthetic confidence map: 1.0 where valid, 0.0 otherwise
+						cv::Mat gt_conf = cv::Mat::zeros(gt_depth.size(), CV_32FC1);
+						for (int y = 0; y < gt_depth.rows; y++) {
+							const float* d_row = gt_depth.ptr<float>(y);
+							float* c_row = gt_conf.ptr<float>(y);
+							for (int x = 0; x < gt_depth.cols; x++) {
+								if (std::isfinite(d_row[x]) && d_row[x] > 0.1f) c_row[x] = 1.0f;
+							}
+						}
+						printf("[SCALE_INIT] GT depth init: %d valid pixels, mean=%.2fm\n", cnt, mean_gt);
+						coarseInitializer->setMLDepth(gt_depth, 1.0f, mean_gt);
+						coarseInitializer->seedPointsWithMLDepth();
+					} else {
+						printf("[SCALE_INIT] GT depth has too few valid pixels (%d), falling back to photometric\n", cnt);
+					}
+				} else {
+					printf("[SCALE_INIT] GT mode but currentDepthImage empty; falling back to photometric\n");
+				}
+			} else if (setting_depthSource == DEPTH_SOURCE_ML &&
+			           ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady()) {
 				cv::Mat rgb_image;
 				{
 					boost::unique_lock<boost::mutex> lock(ml_depth_mutex_);
@@ -1472,16 +1541,16 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 						rgb_image = last_bgr_frame_.clone();
 					}
 				}
-				
+
 				// Check if we have warmup results available first (optimization)
 				if (warmup_results_available_) {
 					printf("[SCALE_INIT] Using GPU warmup results for metric scale...\n");
-					coarseInitializer->setMLDepth(warmup_depth_map_, 
+					coarseInitializer->setMLDepth(warmup_depth_map_,
 												 warmup_confidence_,
 												 warmup_mean_depth_);
-					printf("[SCALE_INIT] Metric scale set from warmup: %.2fm (saved ~70ms processing)\n", 
+					printf("[SCALE_INIT] Metric scale set from warmup: %.2fm (saved ~70ms processing)\n",
 						   warmup_mean_depth_);
-					
+
 					// Seed initializer points with ML inverse depth
 					coarseInitializer->seedPointsWithMLDepth();
 					// Clear the stored results to free memory
@@ -1491,10 +1560,10 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					printf("[SCALE_INIT] Processing ML depth for metric scale initialization...\n");
 					auto ml_result = ml_processor_->processKeyframeDetailed(rgb_image);
 					if (ml_result.success) {
-						coarseInitializer->setMLDepth(ml_result.depth_map, 
+						coarseInitializer->setMLDepth(ml_result.depth_map,
 													 ml_result.confidence,
 													 ml_result.mean_depth);
-						printf("[SCALE_INIT] ML depth set for initialization (mean=%.2fm, confidence=%.2f)\n", 
+						printf("[SCALE_INIT] ML depth set for initialization (mean=%.2fm, confidence=%.2f)\n",
 							   ml_result.mean_depth, ml_result.confidence);
 						// Seed initializer points with ML inverse depth
 						coarseInitializer->seedPointsWithMLDepth();
@@ -1505,7 +1574,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					printf("[SCALE_INIT] No RGB image available, falling back to photometric scale\n");
 				}
 			} else {
-				printf("Initialization: Using standard monocular initialization (ML depth disabled)\n");
+				printf("Initialization: Using standard monocular initialization (depth-source=NONE or ML disabled)\n");
 			}
 		}
 		else if(coarseInitializer->trackFrame(fh, outputWrapper))	// if SNAPPED
@@ -1941,8 +2010,10 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	}
 
 	// =================== ML DEPTH PROCESSOR INTEGRATION ===================
-	// Direct synchronous ML depth processing for current keyframe
-	if (ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady() && should_run_ml) {
+	// Direct synchronous ML depth processing for current keyframe.
+	// Phase B: gated on depth-source=ML. In GT or NONE mode we skip ML inference entirely.
+	if (setting_depthSource == DEPTH_SOURCE_ML &&
+	    ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady() && should_run_ml) {
 		// Signal that ML processing is starting
 		{
 			boost::unique_lock<boost::mutex> lock(ml_processing_mutex_);
@@ -2266,9 +2337,12 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 	// =========================== Figure Out if INITIALIZATION FAILED =========================
-	// ML-aware initialization failure detection
-	bool use_ml_tolerant_thresholds = ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady();
-	int max_keyframes = use_ml_tolerant_thresholds ? 6 : 4; // Allow more keyframes with ML
+	// ML-aware initialization failure detection.
+	// Phase B: GT mode also gets the tolerant threshold (GT provides depth signal equivalent to ML).
+	bool use_ml_tolerant_thresholds =
+	    (setting_depthSource == DEPTH_SOURCE_ML && ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady())
+	    || setting_depthSource == DEPTH_SOURCE_GT;
+	int max_keyframes = use_ml_tolerant_thresholds ? 6 : 4; // Allow more keyframes with ML/GT depth
 	
 	// DEBUG_INIT: Show failure detection parameters
 	// printf("[DEBUG_INIT] Failure detection: RMSE=%.2f, keyframes=%zu/%d, ML_mode=%s, slack=%.1f\n", 
@@ -2397,49 +2471,75 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 	// =========================== add new Immature points & new residuals =========================
-	// UNIFIED depth handling: Use makeNewTraces for all cases with ML depth guidance
+	// Depth routing by setting_depthSource (Phase B):
+	//   ML   -> makeNewTracesWithMLDepth(fh, currentMLDepthImage)   [unchanged production path]
+	//   GT   -> makeNewTracesWithMLDepth(fh, currentDepthImage)     [GT treated identically to ML —
+	//                                                                writes idepth_GT, ml_confidence=1.0
+	//                                                                via isMLDepthValid + default branches]
+	//   NONE -> makeNewTraces(fh, nullptr)                           [pure monocular, no prior]
 	{
-		// Prepare depth information for unified processing
-		float* depthData = nullptr;
-		bool hasMLDepth = false;
-		
-		// Check for ML depth first (preferred)
-		if(!currentMLDepthImage.empty() && initialized) {
-			hasMLDepth = true;
-			if(!setting_debugout_runquiet) {
-				printf("makeNewTraces: Using ML depth (%dx%d) as guidance for enhanced tracking\n", 
-				       currentMLDepthImage.cols, currentMLDepthImage.rows);
+		cv::Mat depthForTraces;
+		const char* modeLabel = "NONE";
+		if (setting_depthSource == DEPTH_SOURCE_ML) {
+			if (!currentMLDepthImage.empty() && initialized) {
+				depthForTraces = currentMLDepthImage;
+				modeLabel = "ML";
 			}
-		}
-		
-		// Check for RGB-D depth as fallback
-		{
+		} else if (setting_depthSource == DEPTH_SOURCE_GT) {
 			boost::unique_lock<boost::mutex> lock(rgbd_depth_mutex_);
-			if(!currentDepthImage.empty() && currentDepthImage.type() == CV_32FC1) {
-				depthData = (float*)currentDepthImage.data;
-				if(!hasMLDepth && !setting_debugout_runquiet) {
-					printf("makeNewTraces: Using RGB-D depth (%dx%d)\n", 
-					       currentDepthImage.cols, currentDepthImage.rows);
-				}
+			if (!currentDepthImage.empty() && currentDepthImage.type() == CV_32FC1) {
+				depthForTraces = currentDepthImage;  // shallow ref — Mat has atomic refcount
+				modeLabel = "GT";
 			}
 		}
-		
-		// Check for ML depth first, then RGB-D depth
-		if(hasMLDepth) {
-			// Use ML depth for enhanced point creation
-			if(!setting_debugout_runquiet) {
-				printf("makeNewTraces: Using ML depth (%dx%d) for enhanced tracking\n", 
-				       currentMLDepthImage.cols, currentMLDepthImage.rows);
+		// NONE mode (or ML-without-depth / GT-without-depth) falls through to pure monocular.
+
+		if (!depthForTraces.empty()) {
+			if (!setting_debugout_runquiet) {
+				printf("makeNewTraces: depth-source=%s (%dx%d)\n",
+				       modeLabel, depthForTraces.cols, depthForTraces.rows);
 			}
-			makeNewTracesWithMLDepth(fh, currentMLDepthImage);
-			
-			// Clear ML depth after use (confidence stored in frame, no clearing needed)
-			currentMLDepthImage = cv::Mat();
+			// [SELMAP_GT_OVERLAP] diagnostic — count selectionMap pixels with/without valid depth
+			// (fires for both ML and GT modes, so we can compare coverage between them)
+			if (setting_depthSource == DEPTH_SOURCE_GT) {
+				int n_sel = 0, n_sel_with_gt = 0;
+				int n_band_top = 0, n_band_mid = 0, n_band_bot = 0;
+				int n_band_top_gt = 0, n_band_mid_gt = 0, n_band_bot_gt = 0;
+				const int band_top_end = hG[0] / 3;
+				const int band_mid_end = 2 * hG[0] / 3;
+				for (int y = 0; y < hG[0]; y++) {
+					for (int x = 0; x < wG[0]; x++) {
+						if (selectionMap[x + y * wG[0]] == 0) continue;
+						n_sel++;
+						bool in_top = y < band_top_end;
+						bool in_mid = !in_top && y < band_mid_end;
+						if (in_top) n_band_top++;
+						else if (in_mid) n_band_mid++;
+						else n_band_bot++;
+						float d = depthForTraces.at<float>(y, x);
+						if (std::isfinite(d) && d > 0.1f) {
+							n_sel_with_gt++;
+							if (in_top) n_band_top_gt++;
+							else if (in_mid) n_band_mid_gt++;
+							else n_band_bot_gt++;
+						}
+					}
+				}
+				float frac = n_sel ? (100.0f * n_sel_with_gt / n_sel) : 0.0f;
+				printf("[SELMAP_GT_OVERLAP] sel=%d  sel_with_gt=%d (%.1f%%)  "
+				       "bands top/mid/bot = %d/%d/%d  top/mid/bot_with_gt = %d/%d/%d\n",
+				       n_sel, n_sel_with_gt, frac,
+				       n_band_top, n_band_mid, n_band_bot,
+				       n_band_top_gt, n_band_mid_gt, n_band_bot_gt);
+			}
+			makeNewTracesWithMLDepth(fh, depthForTraces);
+			if (setting_depthSource == DEPTH_SOURCE_ML) {
+				currentMLDepthImage = cv::Mat();  // clear after use (matches prior behavior)
+			}
 		} else {
-			// Use RGB-D depth if available, otherwise pure monocular
-			makeNewTraces(fh, depthData);
-			if(!depthData && !setting_debugout_runquiet) {
-				printf("makeNewTraces: Using pure monocular (no depth available)\n");
+			makeNewTraces(fh, nullptr);
+			if (!setting_debugout_runquiet) {
+				printf("makeNewTraces: depth-source=%s but no depth available, pure monocular\n", modeLabel);
 			}
 		}
 	}
@@ -2534,8 +2634,20 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	int totalPoints = coarseInitializer->numPoints[0];
 	float goodRatio = (float)goodPointCount / totalPoints;
 
-	// Check if ML scale is available
-	float metricScaleFactor = coarseInitializer->computeMetricScaleFactor();
+	// Check if ML scale is available.
+	// Phase B/C: computeMetricScaleFactor() computes median(D_ML · iR) over points that have
+	// GT available at their pixel. For dense GT (TUM Kinect, ~77% coverage), the median is
+	// representative. For sparse GT (KITTI velodyne, ~4% coverage), only ~400/13000 points
+	// survive the filter and the median is biased. When running in GT mode we trust the
+	// aggregate mlMeanDepth computed by the caller instead.
+	float metricScaleFactor;
+	if (setting_depthSource == DEPTH_SOURCE_GT) {
+		metricScaleFactor = coarseInitializer->mlMeanDepth;  // aggregate over all valid GT pixels
+		printf("[INIT_SCALE] GT mode: using aggregate mlMeanDepth = %.3f m (skipping sparse-subset median)\n",
+		       metricScaleFactor);
+	} else {
+		metricScaleFactor = coarseInitializer->computeMetricScaleFactor();
+	}
 	bool scaleReliable = (metricScaleFactor > 0) && (goodRatio >= setting_mlInitMinGoodRatio);
 
 	printf("[INIT_QUALITY] %d/%d points well-triangulated (%.1f%%). Scale %s.\n",
