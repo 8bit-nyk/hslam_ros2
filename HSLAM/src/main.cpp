@@ -141,6 +141,7 @@ int main(int argc, char **argv)
 		("ml-idepth-uncertainty", "Phase 1 base idepth uncertainty for ML bounds (default 0.20 = cross-regime optimum per Apr 27 sweep). Smaller = tighter; was 0.05 pre-Apr27.", cxxopts::value<float>()->default_value("0.20"))
 		("ml-mean-strategy", "mlMeanDepth computation: 0=arith mean of valid (legacy), 1=median, 2=trimmed mean 5-95%. Default 0.", cxxopts::value<int>()->default_value("0"))
 		("ml-inference-mode", "ML inference cadence: 0=every Nth KF (legacy), 1=init_only (lean), 2=disabled. Default 0.", cxxopts::value<int>()->default_value("0"))
+		("ml-indirect-filter", "Indirect.Step2 ML depth-ratio filter in feature matchers. true=enabled (legacy), false=disabled. Default true.", cxxopts::value<bool>()->default_value("true"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
 		// Phase toggles for the Phase C config matrix (Phase B/C research). Defaults match current production.
@@ -198,6 +199,7 @@ int main(int argc, char **argv)
 	setting_idepthUncertaintyForMLInit = result["ml-idepth-uncertainty"].as<float>();
 	setting_mlMeanDepthStrategy = result["ml-mean-strategy"].as<int>();
 	setting_mlInferenceMode = result["ml-inference-mode"].as<int>();
+	setting_indirectMatcherUseML = result["ml-indirect-filter"].as<bool>();
 	
 	// Validate and normalize ML strategy parameters for ablation study
 	if (ml_strategy != "keyframe_only" && ml_strategy != "snapshot_mode") {

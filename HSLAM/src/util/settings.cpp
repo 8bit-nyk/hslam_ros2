@@ -262,6 +262,12 @@ float setting_alphaWForMLInit = 100.0f * 100.0f;
 // Default 0 keeps legacy behavior; sweep planned 2026-04-27 to find best across regimes.
 int setting_mlMeanDepthStrategy = 0;
 
+// Indirect.Step2: ML depth-ratio filter in feature matchers (Matcher.cpp:363, 1103).
+// Default true keeps legacy behavior. Set false to disable when ML is OOD-poisoned
+// on a regime (April 27 finding: OOD ML feed via this filter is the dominant
+// EuRoC regression mechanism). CLI: --ml-indirect-filter.
+bool setting_indirectMatcherUseML = true;
+
 // ML inference cadence (FullSystem.cpp::makeKeyFrame).
 // 0 = every Nth keyframe (default, controlled by setting_mlInferenceEveryN)
 // 1 = init_only (only first keyframe; tests "is ongoing ML inference actually useful?")

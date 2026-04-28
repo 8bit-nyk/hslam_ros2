@@ -1,6 +1,7 @@
 #include "Matcher.h"
 #include "Indirect/Frame.h"
 #include "util/FrameShell.h"
+#include "util/settings.h"
 #include "Indirect/MapPoint.h"
 #include "DBoW3/DBoW3.h"
 #include "FullSystem/HessianBlocks.h"
@@ -360,7 +361,9 @@ namespace HSLAM
                 // [INDIRECT.Step2] ML depth consistency gate — reject wildly inconsistent candidates
                 // Ratio d_slam/d_ml ≈ 0.55 for correct matches (DSO scale drift); bounds [0.08, 12.0] are
                 // generous enough to pass correct matches but catch grossly wrong depth associations.
-                if (!mlDepthImage.empty() && pMP->getidepth() > 0.f)
+                // Gated on setting_indirectMatcherUseML (April 27 2026): on OOD scenes where d_ml is
+                // unreliable (e.g. EuRoC drone), this filter rejects CORRECT matches. Disable to test.
+                if (setting_indirectMatcherUseML && !mlDepthImage.empty() && pMP->getidepth() > 0.f)
                 {
                     int px = (int)pMP->mTrackProjX;
                     int py = (int)pMP->mTrackProjY;
@@ -1100,7 +1103,8 @@ namespace HSLAM
                     if (bestDist <= TH_HIGH)
                     {
                         // [INDIRECT.Step2] ML depth consistency gate (same bounds as SearchLocalMapByProjection)
-                        if (!mlDepthImage.empty() && pMP->getidepth() > 0.f)
+                        // Gated on setting_indirectMatcherUseML (Apr 27 2026); see SearchLocalMapByProjection.
+                        if (setting_indirectMatcherUseML && !mlDepthImage.empty() && pMP->getidepth() > 0.f)
                         {
                             int px = (int)u, py = (int)v;
                             if (px >= 0 && px < mlDepthImage.cols && py >= 0 && py < mlDepthImage.rows)

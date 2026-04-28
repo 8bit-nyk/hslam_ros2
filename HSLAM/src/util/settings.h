@@ -208,6 +208,7 @@ extern float setting_alphaWForMLInit;            // Phase 0 alpha-prior strength
 extern float setting_idepthUncertaintyForMLInit; // Phase 1 base idepth-uncertainty for ML bounds (default 0.05; larger = looser bounds)
 extern int setting_mlMeanDepthStrategy;          // mlMeanDepth computation: 0=arith mean of valid, 1=median, 2=trimmed 5-95% (default 0 for backward compat; recommended: 2)
 extern int setting_mlInferenceMode;              // ML inference cadence: 0=every Nth KF (default), 1=init_only, 2=disabled
+extern bool setting_indirectMatcherUseML;        // Indirect.Step2: gate ML depth-ratio filter in feature matchers (Matcher.cpp). Default true (legacy).
 
 extern bool debugSaveImages;
 
