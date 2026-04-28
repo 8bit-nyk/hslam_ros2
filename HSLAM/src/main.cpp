@@ -133,6 +133,13 @@ int main(int argc, char **argv)
 		("ml-fp16", "Enable FP16 optimization for GPU inference", cxxopts::value<bool>()->default_value("false"))
 		("ml-gpu-device", "GPU device ID for ML inference", cxxopts::value<int>()->default_value("0"))
 		("ml-gpu-memory", "GPU memory limit in MB", cxxopts::value<size_t>()->default_value("2048"))
+		("ml-model-type", "ML model type: metric3d|depth_anything_v2|midas (default metric3d)", cxxopts::value<std::string>()->default_value("metric3d"))
+		("ml-input-width", "Model input width (default 518 for metric3d/dav2)", cxxopts::value<int>()->default_value("518"))
+		("ml-input-height", "Model input height (default 518 for metric3d/dav2)", cxxopts::value<int>()->default_value("518"))
+		("ml-output-scale", "Multiplier on relative-depth model output (DA V2 only). Default 1.0 = pure relative.", cxxopts::value<float>()->default_value("1.0"))
+		("ml-alpha-w", "Phase 0 alpha-prior strength when ML-seeded (default 10000=cross-regime sweet spot; 22500 = mono). Tighter prior reduces iR scatter on jerky motion.", cxxopts::value<float>()->default_value("10000"))
+		("ml-idepth-uncertainty", "Phase 1 base idepth uncertainty for ML bounds (default 0.20 = cross-regime optimum per Apr 27 sweep). Smaller = tighter; was 0.05 pre-Apr27.", cxxopts::value<float>()->default_value("0.20"))
+		("ml-mean-strategy", "mlMeanDepth computation: 0=arith mean of valid (legacy), 1=median, 2=trimmed mean 5-95%. Default 0.", cxxopts::value<int>()->default_value("0"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
 		// Phase toggles for the Phase C config matrix (Phase B/C research). Defaults match current production.
@@ -182,6 +189,13 @@ int main(int argc, char **argv)
 	std::string ml_strategy = result["ml-strategy"].as<std::string>();
 	int ml_snapshot_interval = result["ml-snapshot-interval"].as<int>();
 	bool ml_benchmark_enabled = result["ml-benchmark"].as<bool>();
+	std::string ml_model_type_str = result["ml-model-type"].as<std::string>();
+	int ml_input_width = result["ml-input-width"].as<int>();
+	int ml_input_height = result["ml-input-height"].as<int>();
+	float ml_output_scale = result["ml-output-scale"].as<float>();
+	setting_alphaWForMLInit = result["ml-alpha-w"].as<float>();
+	setting_idepthUncertaintyForMLInit = result["ml-idepth-uncertainty"].as<float>();
+	setting_mlMeanDepthStrategy = result["ml-mean-strategy"].as<int>();
 	
 	// Validate and normalize ML strategy parameters for ablation study
 	if (ml_strategy != "keyframe_only" && ml_strategy != "snapshot_mode") {
@@ -399,8 +413,10 @@ int main(int argc, char **argv)
 		ml_config.gpu_device_id = ml_gpu_device;
 		ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
 		
-		ml_config.input_width = 518;   // Metric3D model requirement
-		ml_config.input_height = 518;  // Metric3D model requirement
+		ml_config.input_width = ml_input_width;
+		ml_config.input_height = ml_input_height;
+		ml_config.model_type = ml_model_type_str;
+		ml_config.output_scale = ml_output_scale;
 		ml_config.benchmark_enabled = ml_benchmark_enabled;
 		
 		// Ablation study configuration
@@ -421,13 +437,16 @@ int main(int argc, char **argv)
 		}
 		printf("ML Depth Processor initialized successfully\n");
 		
-		// Perform ML warmup with real frame for effective GPU optimization
-		printf("GPU warmup: starting with first real frame (one-time GPU initialization)...\n");
+		// Perform ML warmup with real frame for effective GPU optimization.
+		// Use the requested startIndex frame (not hardcoded frame 0) so --startindex N
+		// genuinely skips degenerate-motion preludes; warmup-stored mean depth feeds
+		// Phase 0 metric scale anchor.
+		printf("GPU warmup: starting with frame index %d (one-time GPU initialization)...\n", startIndex);
 		auto warmup_start = std::chrono::high_resolution_clock::now();
-		
+
 		try {
-			// Load first frame from dataset for real warmup
-			ImageAndExposure* first_img = reader->getImage(0);
+			// Load warmup frame from dataset (respects --startindex)
+			ImageAndExposure* first_img = reader->getImage(startIndex);
 			if (first_img && first_img->useColour && first_img->r_image != nullptr) {
 				// Convert first real frame to RGB using the same pipeline
 				cv::Mat first_rgb = convertUndistortedToRGB(first_img);
@@ -698,8 +717,10 @@ int main(int argc, char **argv)
                             ml_config.enable_fp16 = ml_fp16_enabled;
                             ml_config.gpu_device_id = ml_gpu_device;
                             ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
-                            ml_config.input_width = 518;
-                            ml_config.input_height = 518;
+                            ml_config.input_width = ml_input_width;
+                            ml_config.input_height = ml_input_height;
+                            ml_config.model_type = ml_model_type_str;
+                            ml_config.output_scale = ml_output_scale;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
                             
                             // Ablation study configuration
@@ -856,8 +877,10 @@ int main(int argc, char **argv)
                             ml_config.enable_fp16 = ml_fp16_enabled;
                             ml_config.gpu_device_id = ml_gpu_device;
                             ml_config.gpu_memory_limit_mb = ml_gpu_memory_mb;
-                            ml_config.input_width = 518;
-                            ml_config.input_height = 518;
+                            ml_config.input_width = ml_input_width;
+                            ml_config.input_height = ml_input_height;
+                            ml_config.model_type = ml_model_type_str;
+                            ml_config.output_scale = ml_output_scale;
                             ml_config.benchmark_enabled = ml_benchmark_enabled;
                             
                             // Ablation study configuration

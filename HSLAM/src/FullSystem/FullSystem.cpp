@@ -1533,6 +1533,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					printf("[SCALE_INIT] GT mode but currentDepthImage empty; falling back to photometric\n");
 				}
 			} else if (setting_depthSource == DEPTH_SOURCE_ML &&
+			           setting_useMLForInitialization &&  // April 27: gate seeding on --p0 flag (was leaking through)
 			           ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady()) {
 				cv::Mat rgb_image;
 				{
@@ -3063,9 +3064,12 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                     // This approach uses the ML confidence map directly without problematic depth² scaling
                     const float idepth = 1.0f / depth;
                     
-                    // Base uncertainty in inverse depth space (not metric)
-                    // This provides consistent bounds regardless of depth
-                    const float base_idepth_uncertainty = 0.05f;
+                    // Base uncertainty in inverse depth space (not metric).
+                    // Configurable via --ml-idepth-uncertainty / setting_idepthUncertaintyForMLInit
+                    // (default 0.05f). Larger values relax Phase 1 bounds — under investigation
+                    // for EuRoC regression where tight bounds × photo-cal-absence may cascade
+                    // outlier rejections (April 27, 2026).
+                    const float base_idepth_uncertainty = setting_idepthUncertaintyForMLInit;
                     
                     // Scale by confidence: high confidence = tighter bounds, low confidence = looser bounds
                     // pixel_confidence is already clamped to [0.1, 1.0] at line 2764
@@ -4568,18 +4572,29 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 		// Convert FullSystem::MLConfig to ML::MLInference::InferenceConfig
 		ML::MLInference::InferenceConfig ml_config;
 		ml_config.model_path = config.model_path;
-		ml_config.model_type = ML::MLInference::METRIC3D_V2;
+		// Map model_type string -> enum
+		if (config.model_type == "depth_anything_v2" || config.model_type == "dav2") {
+			ml_config.model_type = ML::MLInference::DEPTH_ANYTHING;
+		} else if (config.model_type == "midas") {
+			ml_config.model_type = ML::MLInference::MIDAS_V3;
+		} else {
+			ml_config.model_type = ML::MLInference::METRIC3D_V2;
+		}
 		ml_config.enable_gpu = config.enable_gpu;
 		ml_config.num_threads = config.num_threads;
-		
+
 		// GPU-specific parameters
 		ml_config.enable_fp16 = config.enable_fp16;
 		ml_config.gpu_device_id = config.gpu_device_id;
-		ml_config.gpu_memory_limit = config.gpu_memory_limit_mb * 1024 * 1024;  // Convert MB to bytes
-		
-		ml_config.input_width = 518;   // Metric3D model requirement for quality inference
-		ml_config.input_height = 518;  // Metric3D model requirement for quality inference
+		ml_config.gpu_memory_limit = config.gpu_memory_limit_mb * 1024 * 1024;  // MB -> bytes
+
+		ml_config.input_width = config.input_width;
+		ml_config.input_height = config.input_height;
+		ml_config.depth_scale = config.output_scale;  // DA V2 relative-depth multiplier
 		ml_config.benchmark_enabled = config.benchmark_enabled;
+		printf("MLConfig: model_type=%s input=%dx%d output_scale=%.3f\n",
+		       config.model_type.c_str(), config.input_width, config.input_height,
+		       config.output_scale);
 		
 		// Create MLDepthProcessor instance
 		ml_processor_ = std::make_unique<ML::MLDepthProcessor>(ml_config);

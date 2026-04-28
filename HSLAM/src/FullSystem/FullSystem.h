@@ -301,11 +301,18 @@ public:
 		int input_width = 518;
 		int input_height = 518;
 		bool benchmark_enabled = false;
-		
+
 		// Ablation study parameters
 		std::string inference_strategy = "keyframe_only";  // "keyframe_only" or "snapshot_mode"
 		int snapshot_rate = 1;  // ML inference every N keyframes (1 = every keyframe)
-		
+
+		// Vector A: model-type selection (default = metric3d). Other options:
+		//   "depth_anything_v2" -> ML::MLInference::DEPTH_ANYTHING (relative inverse depth)
+		//   "midas"             -> ML::MLInference::MIDAS_V3 (placeholder, not implemented)
+		std::string model_type = "metric3d";
+
+		// Multiplier applied to relative-depth model output (DA V2 only). 1.0 = pure relative.
+		float output_scale = 1.0f;
 	};
 	
 	// ML configuration storage  

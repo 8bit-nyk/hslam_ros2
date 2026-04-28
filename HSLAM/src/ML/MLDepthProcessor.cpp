@@ -1,6 +1,9 @@
 #include "MLDepthProcessor.h"
+#include "../util/settings.h"
 #include <iostream>
 #include <chrono>
+#include <cmath>
+#include <algorithm>
 
 namespace HSLAM {
 namespace ML {
@@ -130,10 +133,80 @@ MLDepthProcessor::ProcessingResult MLDepthProcessor::processKeyframeDetailed(con
         // Add depth quality information
         double min_depth, max_depth;
         cv::minMaxLoc(result.depth_map, &min_depth, &max_depth);
-        
-        // Compute mean depth for streamlined scale computation
-        cv::Scalar mean_depth_scalar = cv::mean(result.depth_map);
-        detailed_result.mean_depth = static_cast<float>(mean_depth_scalar[0]);
+
+        // Compute mlMeanDepth (the metric scale anchor) using configurable strategy.
+        // The previous arithmetic mean (cv::mean) over ALL pixels was vulnerable to:
+        //   - Clamped extreme values (e.g. Metric3D's 100m max on far/sky pixels)
+        //   - NaN/Inf from preprocessing artifacts (poisons mean)
+        //   - Outliers from low-confidence regions (white walls, reflective surfaces)
+        //   - Padded zeros from aspect-ratio preprocessing
+        //
+        // Strategy options (setting_mlMeanDepthStrategy):
+        //   0 = arithmetic mean (legacy default; affected by all above)
+        //   1 = median (robust to outliers; 50% breakdown)
+        //   2 = trimmed mean (5-95% percentile; balance robustness + smoothness)
+        //
+        // All strategies filter to valid range [0.1m, 80m] before computing.
+        {
+            const cv::Mat& dm = result.depth_map;
+            std::vector<float> valid_depths;
+            valid_depths.reserve(dm.total());
+            for (int y = 0; y < dm.rows; y++) {
+                const float* row = dm.ptr<float>(y);
+                for (int x = 0; x < dm.cols; x++) {
+                    float d = row[x];
+                    if (std::isfinite(d) && d > 0.1f && d < 80.0f) {
+                        valid_depths.push_back(d);
+                    }
+                }
+            }
+            float robust_mean = 0.0f;
+            if (valid_depths.empty()) {
+                printf("MLDepthProcessor: WARNING — no valid depths in [0.1, 80]m, using cv::mean fallback\n");
+                robust_mean = static_cast<float>(cv::mean(dm)[0]);
+            } else if (setting_mlMeanDepthStrategy == 1) {
+                // Median
+                std::nth_element(valid_depths.begin(),
+                                 valid_depths.begin() + valid_depths.size() / 2,
+                                 valid_depths.end());
+                robust_mean = valid_depths[valid_depths.size() / 2];
+            } else if (setting_mlMeanDepthStrategy == 2) {
+                // 5-95% trimmed mean
+                std::sort(valid_depths.begin(), valid_depths.end());
+                size_t lo = valid_depths.size() / 20;        // 5%
+                size_t hi = valid_depths.size() - lo;        // 95%
+                if (hi <= lo) {
+                    robust_mean = valid_depths[valid_depths.size() / 2];
+                } else {
+                    double sum = 0.0;
+                    for (size_t i = lo; i < hi; i++) sum += valid_depths[i];
+                    robust_mean = static_cast<float>(sum / (hi - lo));
+                }
+            } else {
+                // Strategy 0 — arithmetic mean of valid depths (still better than naive cv::mean)
+                double sum = 0.0;
+                for (float d : valid_depths) sum += d;
+                robust_mean = static_cast<float>(sum / valid_depths.size());
+            }
+            detailed_result.mean_depth = robust_mean;
+
+            // Diagnostic: report all 3 statistics for visibility
+            static int diag_count = 0;
+            if (diag_count < 5 || diag_count % 50 == 0) {
+                std::vector<float> tmp = valid_depths;
+                if (!tmp.empty()) {
+                    std::nth_element(tmp.begin(), tmp.begin() + tmp.size()/2, tmp.end());
+                    float median = tmp[tmp.size()/2];
+                    double sum_arith = 0.0;
+                    for (float d : valid_depths) sum_arith += d;
+                    float arith = static_cast<float>(sum_arith / valid_depths.size());
+                    printf("[MEAN_DEPTH_DIAG] strategy=%d valid=%zu/%zu range=[%.2f,%.2f] arith=%.3f median=%.3f -> using=%.3f\n",
+                           setting_mlMeanDepthStrategy, valid_depths.size(), dm.total(),
+                           min_depth, max_depth, arith, median, robust_mean);
+                }
+                diag_count++;
+            }
+        }
         
         if (detailed_result.inference_time_ms > 60.0f) {
             printf("MLDepthProcessor: Slow inference warning (%.1fms, expected ~40ms, range: %.2f-%.2fm)\n",

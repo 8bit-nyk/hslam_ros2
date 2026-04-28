@@ -204,6 +204,9 @@ extern float setting_mlInitConfidenceThreshold;  // Min confidence for ML scale
 extern int setting_mlInitMinPoints;              // Min points for scale estimation
 extern float setting_mlInitMinGoodRatio;         // Min fraction of well-triangulated points for ML init
 extern bool setting_mlReinitializationEnabled;   // Enable for re-init
+extern float setting_alphaWForMLInit;            // Phase 0 alpha-prior strength when ML-seeded (default 50*50; mono uses 150*150)
+extern float setting_idepthUncertaintyForMLInit; // Phase 1 base idepth-uncertainty for ML bounds (default 0.05; larger = looser bounds)
+extern int setting_mlMeanDepthStrategy;          // mlMeanDepth computation: 0=arith mean of valid, 1=median, 2=trimmed 5-95% (default 0 for backward compat; recommended: 2)
 
 extern bool debugSaveImages;
 

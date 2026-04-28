@@ -456,9 +456,14 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                 break;
             case DEPTH_ANYTHING:
                 depth_map = postprocessDepthAnything(output_values, output_width, output_height);
-                // PHASE2_DEBUG: No uncertainty for DepthAnything
+                // Resize from model output resolution back to input image resolution.
+                if (!depth_map.empty() &&
+                    (depth_map.cols != input_image.cols || depth_map.rows != input_image.rows)) {
+                    cv::resize(depth_map, depth_map,
+                               cv::Size(input_image.cols, input_image.rows),
+                               0, 0, cv::INTER_LINEAR);
+                }
                 confidence_map = cv::Mat::ones(input_image.rows, input_image.cols, CV_32F);
-                // printf("PHASE2_DEBUG: DepthAnything - Created default confidence map\n");
                 break;
             case MIDAS_V3:
                 depth_map = postprocessMiDaS(output_values, output_width, output_height);
@@ -604,18 +609,42 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
 }
 
 cv::Mat MLInference::preprocessDepthAnything(const cv::Mat& input_image) const {
-    // Basic preprocessing for DepthAnything (placeholder)
-    cv::Mat processed;
-    if(input_image.type() != CV_32FC3) {
-        input_image.convertTo(processed, CV_32FC3, 1.0/255.0);
-    } else {
-        processed = input_image.clone();
+    // Depth Anything V2 preprocessing per HuggingFace `preprocessor_config.json`:
+    //   1. BGR -> RGB
+    //   2. Resize to (input_width, input_height) -- square, no aspect-ratio padding
+    //      (do_pad=false; we use direct square resize for runtime simplicity)
+    //   3. Rescale to [0, 1]
+    //   4. Normalize with ImageNet mean / std
+    //   5. NCHW float32 (handled later in inferDepth via cv::dnn::blobFromImage shape)
+    //
+    // No padding info recorded -- direct resize means postprocess just resizes back.
+    cv::Mat rgb;
+    cv::cvtColor(input_image, rgb, cv::COLOR_BGR2RGB);
+
+    cv::Mat resized;
+    cv::resize(rgb, resized, cv::Size(config_.input_width, config_.input_height),
+               0, 0, cv::INTER_CUBIC);
+
+    cv::Mat f32;
+    resized.convertTo(f32, CV_32FC3, 1.0 / 255.0);
+
+    // ImageNet mean/std normalization (channel-wise on RGB)
+    const float mean[3] = {0.485f, 0.456f, 0.406f};
+    const float std_[3] = {0.229f, 0.224f, 0.225f};
+    std::vector<cv::Mat> chans(3);
+    cv::split(f32, chans);
+    for (int c = 0; c < 3; c++) {
+        chans[c] = (chans[c] - mean[c]) / std_[c];
     }
-    
-    cv::resize(processed, processed, cv::Size(config_.input_width, config_.input_height), 
-               0, 0, cv::INTER_LINEAR);
-    
-    return processed;
+    cv::merge(chans, f32);
+
+    // Reset padding info (no padding for DA V2)
+    current_padding_.top = -1;
+    current_padding_.bottom = -1;
+    current_padding_.left = -1;
+    current_padding_.right = -1;
+
+    return f32;
 }
 
 cv::Mat MLInference::preprocessMiDaS(const cv::Mat& input_image) const {
@@ -705,9 +734,46 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
 }
 
 cv::Mat MLInference::postprocessDepthAnything(const std::vector<float>& raw_output, int width, int height) const {
-    // Basic postprocessing for DepthAnything (placeholder)
+    // Depth Anything V2 outputs INVERSE RELATIVE depth (no metric scale).
+    // Larger value = closer pixel; the units are arbitrary.
+    //
+    // Conversion strategy (applied per-frame, no per-dataset tuning):
+    //   - depth_relative = 1.0 / max(raw, eps)
+    //   - Multiply by depth_scale config (default 1.0 = pure relative)
+    //
+    // Caller (CoarseInitializer / Phase 0) interprets `mlMeanDepth` as the metric
+    // anchor. With DA V2 in default config (depth_scale=1.0), `mlMeanDepth` is in
+    // arbitrary units -> Phase 0 metric init produces a non-metric trajectory whose
+    // absolute scale is wrong by a constant factor; Sim(3) post-hoc alignment
+    // recovers comparable ATE for evaluation.
+    //
+    // For an empirical "approximately metric" approach, calibrate depth_scale on
+    // a held-out reference scene (e.g. TUM mean GT depth ~1.27m, DA V2 mean
+    // inverse output ~6.5 -> 1/6.5*x = 1.27 -> x ~= 8.25). Pass via CLI.
+    size_t expected_size = static_cast<size_t>(width * height);
+    if (raw_output.size() != expected_size) {
+        printf("ERROR: DA V2 dimension mismatch - expected %zu (%dx%d), got %zu\n",
+               expected_size, width, height, raw_output.size());
+        return cv::Mat();
+    }
+
+    cv::Mat inv_depth(height, width, CV_32FC1);
+    std::memcpy(inv_depth.ptr<float>(), raw_output.data(),
+                raw_output.size() * sizeof(float));
+
+    // Convert inverse -> depth (relative units), apply optional scale factor
     cv::Mat depth_map(height, width, CV_32FC1);
-    std::memcpy(depth_map.ptr<float>(), raw_output.data(), raw_output.size() * sizeof(float));
+    const float eps = 1e-3f;
+    const float scale = config_.depth_scale > 0 ? config_.depth_scale : 1.0f;
+    for (int y = 0; y < height; y++) {
+        const float* in_row = inv_depth.ptr<float>(y);
+        float* out_row = depth_map.ptr<float>(y);
+        for (int x = 0; x < width; x++) {
+            float v = in_row[x];
+            out_row[x] = (v > eps) ? scale / v : 0.0f;
+        }
+    }
+
     return depth_map;
 }
 

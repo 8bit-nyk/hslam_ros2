@@ -1020,15 +1020,22 @@ void CoarseTracker::setExternalDepthImage(const cv::Mat& depth_image)
         return;
     }
     
-    // Validate dimensions
+    // Validate dimensions; resize with NN interpolation when input is at native
+    // dataset resolution but the tracker pyramid level 0 uses HSLAM's cropped
+    // resolution (e.g. VKitti2 1242x375 depth -> 640x368 pyramid). NN only —
+    // averaging depth across object boundaries would synthesize phantom surfaces.
     if(depth_image.cols != w[0] || depth_image.rows != h[0]) {
-        printf("WARNING: External depth image dimensions mismatch (%dx%d vs %dx%d)\n",
-               depth_image.cols, depth_image.rows, w[0], h[0]);
-        clearExternalDepthImage();
-        return;
+        static bool warned = false;
+        if (!warned) {
+            printf("[DEPTH_RESIZE] CoarseTracker: resizing external depth %dx%d -> %dx%d (NN interp)\n",
+                   depth_image.cols, depth_image.rows, w[0], h[0]);
+            warned = true;
+        }
+        cv::resize(depth_image, external_depth_image,
+                   cv::Size(w[0], h[0]), 0, 0, cv::INTER_NEAREST);
+    } else {
+        external_depth_image = depth_image.clone();
     }
-    
-    external_depth_image = depth_image.clone();
     has_external_depth = true;
     
     if (!setting_debugout_runquiet) {

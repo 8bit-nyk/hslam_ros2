@@ -247,6 +247,30 @@ float setting_mlInitConfidenceThreshold = 0.5f;   // Min confidence for ML scale
 int setting_mlInitMinPoints = 20;                  // Min points for robust scale estimation
 float setting_mlInitMinGoodRatio = 0.3f;           // Min fraction of well-triangulated points for reliable ML init
 bool setting_mlReinitializationEnabled = true;    // Enable ML depth for re-initialization
+// Phase 0 alpha-prior strength when ML-seeded (CoarseInitializer.cpp:120).
+// Default 10000 (100*100) — uniformly improves ATE on TUM (-16%), KITTI (-11%),
+// and EuRoC MH_01 (-23%) compared to the prior 2500 (50*50) used through April 2026.
+// alphaW sweep 2026-04-27 showed 50000 best on TUM/KITTI but EuRoC regresses there;
+// 10000 is the no-tradeoff cross-regime sweet spot. Mono uses 22500 (150*150).
+// Configurable via --ml-alpha-w for further experimentation.
+float setting_alphaWForMLInit = 100.0f * 100.0f;
+
+// mlMeanDepth computation strategy (MLDepthProcessor.cpp).
+// 0 = arithmetic mean over valid pixels (legacy + filtered for [0.1, 80]m, NaN-safe)
+// 1 = median (robust to outliers)
+// 2 = trimmed mean (5-95% percentile)
+// Default 0 keeps legacy behavior; sweep planned 2026-04-27 to find best across regimes.
+int setting_mlMeanDepthStrategy = 0;
+
+// Phase 1 base idepth uncertainty for ML depth bounds (FullSystem.cpp:3068).
+// April 27, 2026: 4-value sweep (0.05, 0.10, 0.20, 0.50) showed:
+//   - KITTI 07 ATE drops -35% (5.31m -> 3.42m, matching mono baseline 3.39m) at 0.20
+//   - TUM fr1_room slight regression (+12%, 0.344m -> 0.384m) — both still far below mono
+//   - EuRoC MH_01 marginal -5% improvement
+// Sharp non-monotonic optimum at 0.20 on KITTI: 0.05 too tight (cascades outlier rejection
+// when no photo-cal), 0.50 too loose (looses ML depth's anchoring value). 0.20 is the
+// cross-regime sweet spot. Configurable via --ml-idepth-uncertainty.
+float setting_idepthUncertaintyForMLInit = 0.20f;
 
 bool goStepByStep = false;
 

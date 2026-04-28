@@ -117,7 +117,11 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	alphaK = 2.5*2.5;
 	// Option B: weaker alpha prior (50*50 vs 150*150) to give photometric optimizer
 	// more freedom to move depths away from ML seed. Addresses tight gauge drift (0.99).
-	alphaW = (mlSeededInit) ? (50*50) : (150*150);
+	// 2026-04-27 ablation hypothesis: weak alphaW lets photometric refinement scatter
+	// iR estimates on jerky motion (EuRoC drone) -> biased metric scale -> cascading
+	// outlier rejection. setting_alphaWForMLInit allows runtime testing of tighter
+	// prior on ML-seeded inits to isolate this effect.
+	alphaW = (mlSeededInit) ? setting_alphaWForMLInit : (150*150);
 	regWeight = 0.8;
 	couplingWeight = 1;
 
