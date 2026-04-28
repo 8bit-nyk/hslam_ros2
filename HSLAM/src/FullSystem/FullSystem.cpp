@@ -2003,8 +2003,23 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 			printf("[ML_ABLATION] Keyframe %zu: SKIPPING ML (last ML at KF %zu, next at KF %zu)\n", 
 			       keyframe_counter_, last_ml_keyframe_, next_ml_kf);
 		}
+	} else if (setting_mlInferenceMode == 1) {
+		// init_only mode (April 27): run ML inference ONLY at the first keyframe
+		// (for Phase 0 metric init via warmup-results / live inference). After init
+		// completes, no further ML inference. This is the "lean" production mode —
+		// frees ~30ms/sec of GPU for downstream models (YOLO, DINO, SAM).
+		// Phase 1 bounds, Phase 2/3 BA terms, indirect depth filter all become
+		// inactive (no fresh ML data). Only Phase 0 init benefits remain.
+		should_run_ml = (keyframe_counter_ == 1);
+		if (should_run_ml)
+			last_ml_keyframe_ = keyframe_counter_;
+	} else if (setting_mlInferenceMode == 2) {
+		// disabled mode: never run ML inference (still does GPU warmup at startup
+		// per main.cpp; warmup-results may still feed Phase 0 if --p0=true).
+		should_run_ml = false;
 	} else {
-		// Default mode: Run ML every Nth keyframe (Paper Table V: N=2 optimal)
+		// Default mode (setting_mlInferenceMode == 0): Run ML every Nth keyframe
+		// (Paper Table V: N=2 optimal)
 		should_run_ml = ((keyframe_counter_ - 1) % setting_mlInferenceEveryN == 0);
 		if (should_run_ml)
 			last_ml_keyframe_ = keyframe_counter_;

@@ -262,6 +262,15 @@ float setting_alphaWForMLInit = 100.0f * 100.0f;
 // Default 0 keeps legacy behavior; sweep planned 2026-04-27 to find best across regimes.
 int setting_mlMeanDepthStrategy = 0;
 
+// ML inference cadence (FullSystem.cpp::makeKeyFrame).
+// 0 = every Nth keyframe (default, controlled by setting_mlInferenceEveryN)
+// 1 = init_only (only first keyframe; tests "is ongoing ML inference actually useful?")
+// 2 = disabled (no ML inference at all in makeKeyFrame; warmup at startup still runs)
+// Init-only mode is the "lean production" candidate: if Phase 0 metric init is the
+// dominant ATE driver (per April 27 phase ablation), ongoing keyframe inference is
+// wasted compute. Frees GPU for downstream models (YOLO, DINO, SAM).
+int setting_mlInferenceMode = 0;
+
 // Phase 1 base idepth uncertainty for ML depth bounds (FullSystem.cpp:3068).
 // April 27, 2026: 4-value sweep (0.05, 0.10, 0.20, 0.50) showed:
 //   - KITTI 07 ATE drops -35% (5.31m -> 3.42m, matching mono baseline 3.39m) at 0.20
