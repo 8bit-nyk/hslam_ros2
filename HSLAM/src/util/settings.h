@@ -189,7 +189,8 @@ extern float setting_vsWeight;           // Direct.VS: weight multiplier (defaul
 // ML Depth Integration Settings — Indirect Pipeline (Geometric/ORB)
 // Naming: "Indirect.P0" = MapPoint storage, "Indirect.P1" = BA depth prior, "Indirect.P2" = loop scale validation
 extern bool setting_disableIndirectMLDepth;      // Indirect: Global kill switch for all indirect ML depth
-extern float setting_indirectMLDepthWeight;      // Indirect.P1: Weight multiplier for g2o depth prior edges
+extern float setting_indirectMLDepthWeight;      // Indirect.P1: Weight multiplier for g2o depth prior edges (INERT — consumer is dead BundleAdjustment)
+extern bool setting_disableIndirectP2LoopCloser; // Indirect.P2: gate loop-closure ML/RANSAC scale-disagreement rejection (default true — never experimentally validated)
 
 // GT Depth Validation (Phase B) — research-only, NOT a shipped feature
 // When depthSource=GT, load GT depth from --associations PNG files and route it through

@@ -235,7 +235,8 @@ float setting_vsWeight = 1e-5f;          // Direct.VS: weight multiplier (intent
 
 // Indirect Pipeline ML Depth Settings
 bool setting_disableIndirectMLDepth = false;     // Indirect: Global kill switch
-float setting_indirectMLDepthWeight = 0.3f;      // Indirect.P1v2: Scale-drift-aware prior (see EXPERIMENT_LOG.md Exp 4)
+float setting_indirectMLDepthWeight = 0.3f;      // Indirect.P1v2: INERT — consumer is dead BundleAdjustment() in Optimizer.cpp (heap corruption from g2o port; only caller in main.cpp:915 is commented out). See feedback_bundleadjustment_dead_code memory entry.
+bool setting_disableIndirectP2LoopCloser = true; // Indirect.P2: DISABLED BY DEFAULT (May 5, 2026). Loop-closure ML/RANSAC scale-disagreement rejection (commit ea9c5e2) was implemented in LoopCloser.cpp::computeSim3 but the rejection branch was never experimentally validated — only fires when there's a loop closure with ≥30 inliers, observed ~1 event in TUM and 0 in KITTI/EuRoC across all eval runs. Kept in code for paper documentation; gated off pending real loop-closure exposure in evaluation.
 
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
 // See docs/gt_depth_validation/PLAN.md
