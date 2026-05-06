@@ -254,13 +254,34 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                     input_shape.data(), input_shape.size());
                 
                 io_binding.BindInput(input_names_[0], input_tensor);
-                io_binding.BindOutput(output_names_[0], *memory_info_);
-                
+                // [ML_OUTPUT_TENSORS] Sprint 0c fix: bind ALL outputs, not just output[0]
+                for (size_t i = 0; i < output_names_.size(); ++i) {
+                    io_binding.BindOutput(output_names_[i], *memory_info_);
+                }
+
                 // printf("DEBUG: MLInference - IoBinding configured, running session...\n");
-                
+
                 // Run with IoBinding (GPU optimized)
                 onnx_session_->Run(Ort::RunOptions{nullptr}, io_binding);
                 output_tensors = io_binding.GetOutputValues();
+
+                // [ML_OUTPUT_TENSORS] One-shot diagnostic: verify multi-output binding is active
+                {
+                    static bool printed = false;
+                    if (!printed) {
+                        printed = true;
+                        printf("[ML_OUTPUT_TENSORS] GPU IoBinding: output_tensors.size()=%zu\n", output_tensors.size());
+                        for (size_t i = 0; i < output_tensors.size(); ++i) {
+                            auto shape = output_tensors[i].GetTensorTypeAndShapeInfo().GetShape();
+                            printf("[ML_OUTPUT_TENSORS]   output[%zu] shape: [", i);
+                            for (size_t j = 0; j < shape.size(); ++j) {
+                                printf("%lld", (long long)shape[j]);
+                                if (j < shape.size() - 1) printf(", ");
+                            }
+                            printf("]\n");
+                        }
+                    }
+                }
                 
                 // printf("DEBUG: MLInference - Session run completed successfully\n");
                 
@@ -328,6 +349,26 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             }
         }
         
+        // [ML_OUTPUT_TENSORS] One-shot diagnostic (common path): verify output tensor count
+        {
+            static bool printed_common = false;
+            if (!printed_common && !output_tensors.empty()) {
+                printed_common = true;
+                printf("[ML_OUTPUT_TENSORS] output_tensors.size()=%zu (path: %s)\n",
+                       output_tensors.size(),
+                       (config_.enable_gpu && memory_pool_ && memory_pool_->initialized_) ? "GPU-IoBinding" : "regular");
+                for (size_t i = 0; i < output_tensors.size(); ++i) {
+                    auto shape = output_tensors[i].GetTensorTypeAndShapeInfo().GetShape();
+                    printf("[ML_OUTPUT_TENSORS]   output[%zu] shape: [", i);
+                    for (size_t j = 0; j < shape.size(); ++j) {
+                        printf("%lld", (long long)shape[j]);
+                        if (j < shape.size() - 1) printf(", ");
+                    }
+                    printf("]\n");
+                }
+            }
+        }
+
         // Extract output tensor
         if(output_tensors.empty()) {
             result.error_message = "No output from inference";
@@ -439,15 +480,22 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                 
                 // PHASE 2: Process uncertainty into confidence map
                 if(has_uncertainty) {
-                    confidence_map = processUncertaintyToConfidence(uncertainty_values, uncertainty_width, uncertainty_height, 
+                    confidence_map = processUncertaintyToConfidence(uncertainty_values, uncertainty_width, uncertainty_height,
                                                                   input_image.cols, input_image.rows);
-                    // PHASE2_DEBUG: Log confidence processing
-                    // if(!confidence_map.empty()) {
-                    //     cv::Scalar conf_mean, conf_std;
-                    //     cv::meanStdDev(confidence_map, conf_mean, conf_std);
-                    //     printf("PHASE2_DEBUG: Confidence map created - Size: %dx%d, Mean: %.3f, Std: %.3f\n",
-                    //            confidence_map.cols, confidence_map.rows, conf_mean[0], conf_std[0]);
-                    // }
+                    // [CONFIDENCE_STATS] One-shot: confirm confidence_map is non-trivially distributed
+                    {
+                        static bool conf_printed = false;
+                        if (!conf_printed && !confidence_map.empty()) {
+                            conf_printed = true;
+                            double conf_min, conf_max;
+                            cv::Scalar conf_mean, conf_std;
+                            cv::minMaxLoc(confidence_map, &conf_min, &conf_max);
+                            cv::meanStdDev(confidence_map, conf_mean, conf_std);
+                            printf("[CONFIDENCE_STATS] Size: %dx%d, min=%.4f, max=%.4f, mean=%.4f, std=%.4f\n",
+                                   confidence_map.cols, confidence_map.rows,
+                                   (float)conf_min, (float)conf_max, (float)conf_mean[0], (float)conf_std[0]);
+                        }
+                    }
                 } else {
                     // PHASE2_DEBUG: Create default confidence map
                     confidence_map = cv::Mat::ones(input_image.rows, input_image.cols, CV_32F);
