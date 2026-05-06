@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <fstream>
+#include <iomanip>
 
 #include "IOWrapper/Output3DWrapper.h"
 
@@ -152,6 +154,8 @@ int main(int argc, char **argv)
 		("vs", "Direct.VS: virtual stereo in DSO sliding-window BA (default: OFF — futility-tested, no measurable contribution on TUM)", cxxopts::value<bool>()->default_value("false"))
 		("vs-weight", "Direct.VS weight multiplier (default matches settings.cpp; typical sweep 1e-5..1e-2)", cxxopts::value<float>()->default_value("-1"))
 		("depth-scale", "Divisor applied to 16-bit depth PNG values to get meters (TUM=5000; KITTI projected depth we write at 500 for max ~130m range).", cxxopts::value<float>()->default_value("5000.0"))
+		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
+		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
 		("h,help", "Print usage")
     ;
 
@@ -226,6 +230,12 @@ int main(int argc, char **argv)
 	float depth_scale = result["depth-scale"].as<float>();
 	if (depth_scale <= 0.0f) { printf("ERROR: --depth-scale must be positive.\n"); return 0; }
 	printf("[DEPTH_SCALE] divisor=%.1f (maps uint16 PNG -> meters)\n", depth_scale);
+
+	// Map PLY export (Sprint 0d)
+	setting_exportMapPly = result["export-map-ply"].as<bool>();
+	setting_mapPlyOut = result["map-ply-out"].as<std::string>();
+	// When PLY export is requested, enable point collection (allMargPointsHistory is gated on outputPC)
+	if (setting_exportMapPly) outputPC = true;
 
 	// Depth source selection (Phase B — research-only validation switch)
 	{
@@ -920,6 +930,14 @@ int main(int argc, char **argv)
 
         fullSystem->printResult("result.txt");
 		if (outputPC) fullSystem->printPC("PC.PCD");
+
+		// [MAP_EXPORT] Sprint 0d: ASCII PLY export of marginalized PointHessians
+		if (setting_exportMapPly) {
+			// Determine output path: use --map-ply-out if set, else result.ply in CWD
+			std::string ply_path = setting_mapPlyOut;
+			if (ply_path.empty()) ply_path = "result.ply";
+			fullSystem->printMapPly(ply_path);
+		}
 
         // Log keyframe statistics
         fullSystem->printKeyframeStats();

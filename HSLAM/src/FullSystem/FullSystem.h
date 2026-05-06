@@ -206,6 +206,7 @@ public:
 
 	void printResult(std::string file, bool printSim = false);
 	void printPC(std::string file);
+	void printMapPly(std::string file);  // [MAP_EXPORT] Sprint 0d: ASCII PLY of marginalized PointHessians
 
 	void debugPlot(std::string name);
 

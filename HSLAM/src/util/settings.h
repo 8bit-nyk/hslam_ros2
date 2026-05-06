@@ -211,6 +211,10 @@ extern int setting_mlMeanDepthStrategy;          // mlMeanDepth computation: 0=a
 extern int setting_mlInferenceMode;              // ML inference cadence: 0=every Nth KF (default), 1=init_only, 2=disabled
 extern bool setting_indirectMatcherUseML;        // Indirect.Step2: gate ML depth-ratio filter in feature matchers (Matcher.cpp). Default true (legacy).
 
+// Map PLY export (Sprint 0d) — optional end-of-run export of marginalized PointHessians
+extern bool setting_exportMapPly;        // default false; set via --export-map-ply
+extern std::string setting_mapPlyOut;    // default "": derive from result file path
+
 extern bool debugSaveImages;
 
 

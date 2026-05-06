@@ -419,6 +419,36 @@ void FullSystem::printPC(std::string file)
 	myfile.close();
 }
 
+// [MAP_EXPORT] Sprint 0d: write marginalized PointHessians as ASCII PLY.
+// Points are already in world coordinates (stored by FullSystemMarginalize.cpp).
+// Requires outputPC=true so allMargPointsHistory is populated during the run.
+void FullSystem::printMapPly(std::string file)
+{
+	boost::unique_lock<boost::mutex> lock(trackMutex);
+	boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
+
+	size_t num_pts = allMargPointsHistory.size();
+
+	std::ofstream ply(file.c_str());
+	if (!ply.is_open()) {
+		printf("[MAP_EXPORT] ERROR: could not open PLY file: %s\n", file.c_str());
+		return;
+	}
+	ply << std::setprecision(9);
+	ply << "ply\nformat ascii 1.0\n";
+	ply << "element vertex " << num_pts << "\n";
+	ply << "property float x\nproperty float y\nproperty float z\n";
+	ply << "property uchar red\nproperty uchar green\nproperty uchar blue\n";
+	ply << "end_header\n";
+	for (const auto& kv : allMargPointsHistory) {
+		const PC_output& p = kv.second;
+		ply << p.x << " " << p.y << " " << p.z
+		    << " " << (int)p.r << " " << (int)p.g << " " << (int)p.b << "\n";
+	}
+	ply.close();
+	printf("[MAP_EXPORT] Wrote %zu points to %s\n", num_pts, file.c_str());
+}
+
 /**
  * @brief Determines best track by tracking possible poses using the coarseTracker class
  * Has three steps

@@ -288,6 +288,10 @@ int setting_mlInferenceMode = 0;
 // cross-regime sweet spot. Configurable via --ml-idepth-uncertainty.
 float setting_idepthUncertaintyForMLInit = 0.20f;
 
+// Map PLY export (Sprint 0d) — optional end-of-run export of marginalized PointHessians
+bool setting_exportMapPly = false;
+std::string setting_mapPlyOut = "";  // empty = derive from result file path
+
 bool goStepByStep = false;
 
 
