@@ -279,14 +279,15 @@ bool setting_indirectMatcherUseML = true;
 int setting_mlInferenceMode = 0;
 
 // Phase 1 base idepth uncertainty for ML depth bounds (FullSystem.cpp:3068).
-// April 27, 2026: 4-value sweep (0.05, 0.10, 0.20, 0.50) showed:
-//   - KITTI 07 ATE drops -35% (5.31m -> 3.42m, matching mono baseline 3.39m) at 0.20
-//   - TUM fr1_room slight regression (+12%, 0.344m -> 0.384m) — both still far below mono
-//   - EuRoC MH_01 marginal -5% improvement
-// Sharp non-monotonic optimum at 0.20 on KITTI: 0.05 too tight (cascades outlier rejection
-// when no photo-cal), 0.50 too loose (looses ML depth's anchoring value). 0.20 is the
-// cross-regime sweet spot. Configurable via --ml-idepth-uncertainty.
-float setting_idepthUncertaintyForMLInit = 0.20f;
+// April 27, 2026: 4-value sweep (0.05, 0.10, 0.20, 0.50) showed 0.20 = cross-regime sweet
+//   spot (KITTI -35%, TUM +12%, EuRoC -5%).
+// May 7, 2026 (Sprint 3a WIN): re-calibrated from 0.20 to 0.30 for AngMF confidence baseline.
+//   AngMF formula gives confidence ~0.88 vs sigmoid ~0.44 — a ~2x effective Phase 1 tightening.
+//   Sprint 3a sweep (unc in {0.20,0.30,0.40,0.50,0.60}, n=2 KITTI + n=3 TUM at winner):
+//   - unc=0.20: KITTI mean 9.34m FAIL (AngMF over-constrains road idepths)
+//   - unc=0.30: KITTI mean 3.71m PASS; TUM room -14.6%, desk +4.5%, floor -23.6% (all non-regressive)
+//   - 0.30 is the minimum unc with KITTI <= 6.83m target. Configurable via --ml-idepth-uncertainty.
+float setting_idepthUncertaintyForMLInit = 0.30f;
 
 // Map PLY export (Sprint 0d) — optional end-of-run export of marginalized PointHessians
 bool setting_exportMapPly = false;
@@ -301,10 +302,12 @@ bool setting_useNormalIntegration = false;
 bool setting_useNormalForeshortening = true;
 
 // Sprint 3 — A.2: κ → AngMF expected-angle confidence formula.
-// Default false (KILL verdict: KITTI +107% ATE regression with foreshortening+AngMF stack;
-// Sprint 3a needed to re-sweep --ml-idepth-uncertainty at new confidence baseline).
+// Sprint 3 KILL (default false): KITTI +107% ATE with foreshortening+AngMF at unc=0.20
+//   (sigmoid confidence ~0.44 vs AngMF ~0.88 → 2× effective Phase 1 tightening on road idepths).
+// Sprint 3a WIN (2026-05-07): re-calibrated unc to 0.30; AngMF now default true.
+//   KITTI 3.71m (vs Sprint 2 5.94m = -37%); TUM room/desk/floor non-regressive.
 // CLI: --ml-angmf-confidence
-bool setting_useAngmfConfidence = false;
+bool setting_useAngmfConfidence = true;
 
 bool goStepByStep = false;
 
