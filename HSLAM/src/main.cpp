@@ -156,6 +156,7 @@ int main(int argc, char **argv)
 		("depth-scale", "Divisor applied to 16-bit depth PNG values to get meters (TUM=5000; KITTI projected depth we write at 500 for max ~130m range).", cxxopts::value<float>()->default_value("5000.0"))
 		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
+		("use-normal-integration", "Sprint 1 master gate: enable downstream consumers of predicted_normal (default false — normals plumbed but not yet read)", cxxopts::value<bool>()->default_value("false"))
 		("h,help", "Print usage")
     ;
 
@@ -236,6 +237,10 @@ int main(int argc, char **argv)
 	setting_mapPlyOut = result["map-ply-out"].as<std::string>();
 	// When PLY export is requested, enable point collection (allMargPointsHistory is gated on outputPC)
 	if (setting_exportMapPly) outputPC = true;
+
+	// Surface Normal Integration (Sprint 1) — master gate
+	setting_useNormalIntegration = result["use-normal-integration"].as<bool>();
+	printf("[PHASE_CONFIG] use-normal-integration=%s\n", setting_useNormalIntegration ? "on" : "off");
 
 	// Depth source selection (Phase B — research-only validation switch)
 	{

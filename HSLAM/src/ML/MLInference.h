@@ -75,6 +75,7 @@ public:
     struct InferenceResult {
         cv::Mat depth_map;
         cv::Mat confidence_map;  // PHASE 2: Per-pixel confidence [0,1] from normal uncertainty
+        cv::Mat normal_map;      // Sprint 1: CV_32FC3 unit surface normals in camera frame
         bool success = false;
         float inference_time_ms = 0.0f;
         std::string error_message;
@@ -130,6 +131,7 @@ private:
     // Model-specific postprocessing
     cv::Mat postprocessMetric3D(const std::vector<float>& raw_output, int width, int height, int target_width = -1, int target_height = -1) const;
     cv::Mat processUncertaintyToConfidence(const std::vector<float>& uncertainty_output, int width, int height, int target_width, int target_height) const;  // PHASE 2
+    cv::Mat postprocessNormalMap(const Ort::Value& tensor, int target_width, int target_height) const;  // Sprint 1: 3-channel normal map
     cv::Mat postprocessDepthAnything(const std::vector<float>& raw_output, int width, int height) const;
     cv::Mat postprocessMiDaS(const std::vector<float>& raw_output, int width, int height) const;
     

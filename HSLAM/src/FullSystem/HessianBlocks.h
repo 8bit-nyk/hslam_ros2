@@ -157,7 +157,9 @@ struct FrameHessian
 	// ML Depth Integration Fields (Phase 2.7 - Frame-Integrated Architecture)
 	std::shared_ptr<cv::Mat> ml_depth_map_;			// ML-estimated depth map (shared ownership)
 	std::shared_ptr<cv::Mat> ml_confidence_map_;	// ML confidence map (shared ownership)
+	std::shared_ptr<cv::Mat> ml_normal_map_;		// Sprint 1: CV_32FC3 surface normals in camera frame
 	std::atomic<bool> has_ml_depth_{false};			// Flag indicating ML depth availability
+	std::atomic<bool> has_ml_normals_{false};		// Sprint 1: Flag indicating normal map availability
 	std::atomic<bool> ml_pending_{false};			// ML request submitted but not complete
 	int ml_request_frame_id_ = -1;					// Tracks ML request by absolute frame ID
 	std::atomic<float> ml_confidence_{0.0f};			// ML depth confidence score (thread-safe)
@@ -273,7 +275,9 @@ struct FrameHessian
 		idx(0),
 		ml_depth_map_(nullptr),
 		ml_confidence_map_(nullptr),
+		ml_normal_map_(nullptr),
 		has_ml_depth_(false),
+		has_ml_normals_(false),
 		ml_pending_(false)
 	{
 		instanceCounter++;
@@ -342,13 +346,26 @@ struct FrameHessian
 		return has_ml_depth_.load() ? ml_confidence_map_ : nullptr;
 	}
 
-	inline void setMLDepth(const cv::Mat& depth, float confidence, double inference_time, const cv::Mat& confidence_map = cv::Mat()) {
+	// Sprint 1: accessor for surface normal map (CV_32FC3, camera frame)
+	inline std::shared_ptr<cv::Mat> getMLNormalMap() const {
+		boost::unique_lock<boost::mutex> lock(ml_mutex_);
+		return has_ml_normals_.load() ? ml_normal_map_ : nullptr;
+	}
+
+	inline void setMLDepth(const cv::Mat& depth, float confidence, double inference_time,
+	                        const cv::Mat& confidence_map = cv::Mat(),
+	                        const cv::Mat& normal_map = cv::Mat()) {
 		if (!depth.empty()) {
 			{
 				boost::unique_lock<boost::mutex> lock(ml_mutex_);
 				ml_depth_map_ = std::make_shared<cv::Mat>(depth.clone());
 				if (!confidence_map.empty()) {
 					ml_confidence_map_ = std::make_shared<cv::Mat>(confidence_map.clone());
+				}
+				// Sprint 1: store normal map if provided
+				if (!normal_map.empty()) {
+					ml_normal_map_ = std::make_shared<cv::Mat>(normal_map.clone());
+					has_ml_normals_.store(true);
 				}
 			}
 			ml_confidence_.store(confidence);
@@ -363,8 +380,10 @@ struct FrameHessian
 			boost::unique_lock<boost::mutex> lock(ml_mutex_);
 			ml_depth_map_.reset();
 			ml_confidence_map_.reset();
+			ml_normal_map_.reset();      // Sprint 1: also clear normal map
 		}
 		has_ml_depth_.store(false);
+		has_ml_normals_.store(false);   // Sprint 1
 		ml_pending_.store(false);
 		ml_confidence_.store(0.0f);
 		ml_inference_time_ms_.store(0.0);

@@ -292,6 +292,10 @@ float setting_idepthUncertaintyForMLInit = 0.20f;
 bool setting_exportMapPly = false;
 std::string setting_mapPlyOut = "";  // empty = derive from result file path
 
+// Surface Normal Integration (Sprint 1) — master gate for downstream normal consumers.
+// Default false: normals are plumbed end-to-end but nothing reads them until Sprint 2.
+bool setting_useNormalIntegration = false;
+
 bool goStepByStep = false;
 
 

@@ -2126,7 +2126,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					   
 				// Continue with ML result processing if successful
 				if (ml_result.success && !ml_result.depth_map.empty()) {
-					fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms, ml_result.confidence_map);
+					fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms,
+				               ml_result.confidence_map, ml_result.normal_map);  // Sprint 1: pass normal map
 					fh->setMLPending(false);  // Clear pending flag
 					
 					// Update ML visualization immediately

@@ -26,6 +26,7 @@ public:
     struct ProcessingResult {
         cv::Mat depth_map;
         cv::Mat confidence_map;  // PHASE 2: Per-pixel confidence [0,1]
+        cv::Mat normal_map;      // Sprint 1: CV_32FC3 unit surface normals in camera frame
         bool success = false;
         float inference_time_ms = 0.0f;
         float confidence = 1.0f;  // Default high confidence for successful processing

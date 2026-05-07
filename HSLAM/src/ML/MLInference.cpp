@@ -374,72 +374,74 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
             result.error_message = "No output from inference";
             return result;
         }
-        
-        // Debug: Check all output shapes for Metric3D (commented out to reduce verbosity)
-        // if(config_.model_type == METRIC3D_V2) {
-        //     printf("MLInference: Metric3D model has %zu outputs:\n", output_tensors.size());
-        //     for(size_t i = 0; i < output_tensors.size(); i++) {
-        //         auto shape = output_tensors[i].GetTensorTypeAndShapeInfo().GetShape();
-        //         printf("  Output[%zu] shape: [", i);
-        //         for(size_t j = 0; j < shape.size(); j++) {
-        //             printf("%lld", shape[j]);
-        //             if(j < shape.size()-1) printf(", ");
-        //         }
-        //         printf("]\n");
-        //     }
-        // }
-        
-        // Use appropriate output for Metric3D (typically the depth output is at index 1 or 2)
+
+        // [Sprint 1] Name-based output lookup (replaces heuristic by-shape selection).
+        // Uses output_name_strings_ populated in setupInputOutputNames().
+        // Expected names for Metric3D-v2: "predicted_depth", "predicted_normal", "normal_confidence".
         size_t depth_output_index = 0;
-        if(config_.model_type == METRIC3D_V2 && output_tensors.size() > 1) {
-            // Try to find the depth output by examining shapes
+        size_t normal_output_index = SIZE_MAX;
+        size_t kappa_output_index = SIZE_MAX;
+
+        if(config_.model_type == METRIC3D_V2 && !output_name_strings_.empty()) {
+            for(size_t i = 0; i < output_name_strings_.size() && i < output_tensors.size(); ++i) {
+                const std::string& name = output_name_strings_[i];
+                if(name == "predicted_depth")   depth_output_index  = i;
+                if(name == "predicted_normal")  normal_output_index = i;
+                if(name == "normal_confidence") kappa_output_index  = i;
+            }
+        } else if(config_.model_type == METRIC3D_V2 && output_tensors.size() > 1) {
+            // Fallback: heuristic by-shape (pre-Sprint-1 behavior, no output_name_strings_)
             for(size_t i = 0; i < output_tensors.size(); i++) {
                 auto shape = output_tensors[i].GetTensorTypeAndShapeInfo().GetShape();
-                // Depth output should be 4D: [batch, 1, height, width] or 3D: [1, height, width]
-                if((shape.size() == 4 && shape[1] == 1) || 
+                if((shape.size() == 4 && shape[1] == 1) ||
                    (shape.size() == 3 && shape[0] == 1) ||
-                   (shape.size() == 2)) {  // 2D height x width
+                   (shape.size() == 2)) {
                     depth_output_index = i;
-                    // printf("MLInference: Using output[%zu] as depth map\n", i);
                     break;
                 }
             }
         }
-        
+
         auto& output_tensor = output_tensors[depth_output_index];
         auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
         auto output_data = output_tensor.GetTensorData<float>();
-        
-        // PHASE 2: Extract uncertainty/confidence from output[2] if available
+
+        // PHASE 2: Extract uncertainty/confidence from kappa output if available
         std::vector<float> uncertainty_values;
         int uncertainty_height = 0, uncertainty_width = 0;
         bool has_uncertainty = false;
-        
-        if(config_.model_type == METRIC3D_V2 && output_tensors.size() > 2) {
-            auto& uncertainty_tensor = output_tensors[2];
+
+        if(config_.model_type == METRIC3D_V2 && kappa_output_index != SIZE_MAX) {
+            auto& uncertainty_tensor = output_tensors[kappa_output_index];
             auto uncertainty_shape = uncertainty_tensor.GetTensorTypeAndShapeInfo().GetShape();
             auto uncertainty_data = uncertainty_tensor.GetTensorData<float>();
-            
-            // Uncertainty extraction from output[2]
-            
+
             if(uncertainty_shape.size() >= 2) {
                 uncertainty_height = static_cast<int>(uncertainty_shape[uncertainty_shape.size()-2]);
                 uncertainty_width = static_cast<int>(uncertainty_shape[uncertainty_shape.size()-1]);
-                
+
                 size_t uncertainty_size = 1;
                 for(auto dim : uncertainty_shape) uncertainty_size *= dim;
-                
+
                 if(uncertainty_size > 0) {
                     uncertainty_values = std::vector<float>(uncertainty_data, uncertainty_data + uncertainty_size);
                     has_uncertainty = true;
-                    
-                    // PHASE2_DEBUG: Analyze uncertainty statistics
-                    // float min_unc = *std::min_element(uncertainty_values.begin(), uncertainty_values.end());
-                    // float max_unc = *std::max_element(uncertainty_values.begin(), uncertainty_values.end());
-                    // float mean_unc = std::accumulate(uncertainty_values.begin(), uncertainty_values.end(), 0.0f) / uncertainty_values.size();
-                    // 
-                    // printf("PHASE2_DEBUG: Uncertainty extracted - Size: %dx%d, Range: [%.3f, %.3f], Mean: %.3f\n",
-                    //        uncertainty_width, uncertainty_height, min_unc, max_unc, mean_unc);
+                }
+            }
+        } else if(config_.model_type == METRIC3D_V2 && kappa_output_index == SIZE_MAX && output_tensors.size() > 2) {
+            // Legacy fallback: output[2] was kappa before name-based lookup
+            auto& uncertainty_tensor = output_tensors[2];
+            auto uncertainty_shape = uncertainty_tensor.GetTensorTypeAndShapeInfo().GetShape();
+            auto uncertainty_data = uncertainty_tensor.GetTensorData<float>();
+
+            if(uncertainty_shape.size() >= 2) {
+                uncertainty_height = static_cast<int>(uncertainty_shape[uncertainty_shape.size()-2]);
+                uncertainty_width = static_cast<int>(uncertainty_shape[uncertainty_shape.size()-1]);
+                size_t uncertainty_size = 1;
+                for(auto dim : uncertainty_shape) uncertainty_size *= dim;
+                if(uncertainty_size > 0) {
+                    uncertainty_values = std::vector<float>(uncertainty_data, uncertainty_data + uncertainty_size);
+                    has_uncertainty = true;
                 }
             }
         }
@@ -542,8 +544,68 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
         
         result.depth_map = depth_map;
         result.confidence_map = confidence_map;  // PHASE 2: Include confidence map
+
+        // [Sprint 1] Extract normal map from predicted_normal output if available.
+        // postprocessNormalMap mirrors postprocessMetric3D: strip padding, resize, renormalize.
+        if(config_.model_type == METRIC3D_V2 && normal_output_index != SIZE_MAX) {
+            result.normal_map = postprocessNormalMap(output_tensors[normal_output_index],
+                                                     input_image.cols, input_image.rows);
+        }
+
+        // [NORMAL_KAPPA] Per-frame κ stats from normal_confidence output (Sprint 1).
+        if(has_uncertainty && !uncertainty_values.empty()) {
+            static bool kappa_header_printed = false;
+            if(!kappa_header_printed) {
+                kappa_header_printed = true;
+                printf("[NORMAL_KAPPA] First inference — per-frame κ stats follow\n");
+            }
+            float kmin = *std::min_element(uncertainty_values.begin(), uncertainty_values.end());
+            float kmax = *std::max_element(uncertainty_values.begin(), uncertainty_values.end());
+            float kmean = std::accumulate(uncertainty_values.begin(), uncertainty_values.end(), 0.0f)
+                          / static_cast<float>(uncertainty_values.size());
+            float kvar = 0.0f;
+            for(float v : uncertainty_values) kvar += (v - kmean) * (v - kmean);
+            kvar /= static_cast<float>(uncertainty_values.size());
+            float kstd = std::sqrt(kvar);
+            // p90
+            std::vector<float> kappa_sorted(uncertainty_values);
+            std::nth_element(kappa_sorted.begin(),
+                             kappa_sorted.begin() + static_cast<ptrdiff_t>(kappa_sorted.size() * 9 / 10),
+                             kappa_sorted.end());
+            float kp90 = kappa_sorted[kappa_sorted.size() * 9 / 10];
+            printf("[NORMAL_KAPPA] min=%.3f max=%.3f mean=%.3f std=%.3f p90=%.3f\n",
+                   kmin, kmax, kmean, kstd, kp90);
+        }
+
+        // [NORMAL_STATS] Per-frame ‖n‖₂ distribution — verifies post-resize unit-norm preservation (Sprint 1).
+        if(!result.normal_map.empty()) {
+            double norm_min = 1e9, norm_max = 0.0;
+            double norm_sum = 0.0, norm_sum_sq = 0.0;
+            int total_pixels = result.normal_map.rows * result.normal_map.cols;
+            int in_band = 0;
+            for(int y = 0; y < result.normal_map.rows; y++) {
+                const cv::Vec3f* row = result.normal_map.ptr<cv::Vec3f>(y);
+                for(int x = 0; x < result.normal_map.cols; x++) {
+                    float nx = row[x][0], ny = row[x][1], nz = row[x][2];
+                    double norm = std::sqrt((double)nx*nx + (double)ny*ny + (double)nz*nz);
+                    norm_min = std::min(norm_min, norm);
+                    norm_max = std::max(norm_max, norm);
+                    norm_sum += norm;
+                    norm_sum_sq += norm * norm;
+                    if(norm >= 0.95 && norm <= 1.05) in_band++;
+                }
+            }
+            double norm_mean = norm_sum / total_pixels;
+            double norm_var = norm_sum_sq / total_pixels - norm_mean * norm_mean;
+            double norm_std = std::sqrt(std::max(0.0, norm_var));
+            float frac_in_band = (float)in_band / (float)total_pixels;
+            printf("[NORMAL_STATS] size=%dx%d norm_min=%.4f norm_max=%.4f mean=%.4f std=%.5f frac_in_band(0.95-1.05)=%.4f\n",
+                   result.normal_map.cols, result.normal_map.rows,
+                   (float)norm_min, (float)norm_max, (float)norm_mean, (float)norm_std, frac_in_band);
+        }
+
         result.success = true;
-        
+
         return result;
         
     } catch(const Ort::Exception& e) {
@@ -1372,5 +1434,79 @@ cv::Mat MLInference::processUncertaintyToConfidence(const std::vector<float>& un
     return unpadded_confidence;
 }
 
+// [Sprint 1] Postprocess the predicted_normal output tensor.
+// Mirrors postprocessMetric3D: strip aspect-ratio padding, resize to target_width × target_height,
+// then per-pixel renormalize (defensive — Sprint 0b showed naïve cv::resize is correct to 100%
+// on TUM but renormalization is ~3 LoC and costs nothing).
+cv::Mat MLInference::postprocessNormalMap(const Ort::Value& tensor, int target_width, int target_height) const {
+#ifdef HAS_ONNXRUNTIME
+    auto shape = tensor.GetTensorTypeAndShapeInfo().GetShape();
+    // Expected shape: [1, 3, H, W] (NCHW)
+    if(shape.size() < 3) {
+        printf("[NORMAL_STATS] ERROR: unexpected normal tensor rank %zu\n", shape.size());
+        return cv::Mat();
+    }
+
+    int tensor_h = static_cast<int>(shape[shape.size()-2]);
+    int tensor_w = static_cast<int>(shape[shape.size()-1]);
+    const float* data = tensor.GetTensorData<float>();
+    size_t spatial = static_cast<size_t>(tensor_h * tensor_w);
+
+    // Deinterleave CHW (3, H, W) → HWC CV_32FC3
+    cv::Mat normal_chw(tensor_h, tensor_w * 3, CV_32F);  // scratch storage
+    cv::Mat ch0(tensor_h, tensor_w, CV_32F, const_cast<float*>(data));
+    cv::Mat ch1(tensor_h, tensor_w, CV_32F, const_cast<float*>(data + spatial));
+    cv::Mat ch2(tensor_h, tensor_w, CV_32F, const_cast<float*>(data + 2 * spatial));
+    std::vector<cv::Mat> channels = {ch0.clone(), ch1.clone(), ch2.clone()};
+    cv::Mat normal_hwc;
+    cv::merge(channels, normal_hwc);  // CV_32FC3, shape [H, W, 3]
+
+    // Strip aspect-ratio padding (same crop region as postprocessMetric3D)
+    cv::Mat unpadded;
+    if(current_padding_.top >= 0) {
+        int unpadded_h = tensor_h - current_padding_.top - current_padding_.bottom;
+        int unpadded_w = tensor_w - current_padding_.left - current_padding_.right;
+        if(unpadded_h > 0 && unpadded_w > 0 &&
+           current_padding_.top + unpadded_h <= tensor_h &&
+           current_padding_.left + unpadded_w <= tensor_w) {
+            cv::Rect roi(current_padding_.left, current_padding_.top, unpadded_w, unpadded_h);
+            unpadded = normal_hwc(roi).clone();
+        } else {
+            unpadded = normal_hwc;
+        }
+    } else {
+        unpadded = normal_hwc;
+    }
+
+    // Resize to target resolution (per-channel linear — Sprint 0b verified this preserves ‖n‖₂ at 100%)
+    cv::Mat resized;
+    if(target_width > 0 && target_height > 0 &&
+       (unpadded.cols != target_width || unpadded.rows != target_height)) {
+        cv::resize(unpadded, resized, cv::Size(target_width, target_height), 0, 0, cv::INTER_LINEAR);
+    } else {
+        resized = unpadded;
+    }
+
+    // Per-pixel renormalization (defensive, ~3 LoC — Sprint 0b says not strictly needed but recommended)
+    for(int y = 0; y < resized.rows; y++) {
+        cv::Vec3f* row = resized.ptr<cv::Vec3f>(y);
+        for(int x = 0; x < resized.cols; x++) {
+            float nx = row[x][0], ny = row[x][1], nz = row[x][2];
+            float norm = std::sqrt(nx*nx + ny*ny + nz*nz);
+            if(norm > 1e-6f) {
+                row[x][0] = nx / norm;
+                row[x][1] = ny / norm;
+                row[x][2] = nz / norm;
+            }
+        }
+    }
+
+    return resized;
+#else
+    (void)tensor; (void)target_width; (void)target_height;
+    return cv::Mat();
+#endif
+}
+
 } // namespace ML
-} // namespace HSLAM 
+} // namespace HSLAM

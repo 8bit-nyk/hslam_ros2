@@ -215,6 +215,13 @@ extern bool setting_indirectMatcherUseML;        // Indirect.Step2: gate ML dept
 extern bool setting_exportMapPly;        // default false; set via --export-map-ply
 extern std::string setting_mapPlyOut;    // default "": derive from result file path
 
+// Surface Normal Integration (Sprint 1) — master gate for downstream normal consumers.
+// Normals are always extracted from ONNX output[1] when model_type=METRIC3D_V2 and the
+// multi-output IoBinding is active (Sprint 0c). This flag gates any downstream code that
+// READS the normals. Default false until Sprint 2 ships and is validated.
+// CLI: --use-normal-integration
+extern bool setting_useNormalIntegration;
+
 extern bool debugSaveImages;
 
 

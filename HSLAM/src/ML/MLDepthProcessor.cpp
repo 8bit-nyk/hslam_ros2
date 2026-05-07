@@ -119,6 +119,7 @@ MLDepthProcessor::ProcessingResult MLDepthProcessor::processKeyframeDetailed(con
         
         detailed_result.depth_map = result.depth_map;
         detailed_result.confidence_map = result.confidence_map;  // PHASE 2: Pass confidence map
+        detailed_result.normal_map = result.normal_map;          // Sprint 1: Pass normal map through
         detailed_result.success = true;
         detailed_result.confidence = 1.0f;  // High confidence for successful Metric3D processing
         
