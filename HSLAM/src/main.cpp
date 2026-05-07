@@ -158,6 +158,7 @@ int main(int argc, char **argv)
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
 		("use-normal-integration", "Sprint 1 master gate: enable downstream consumers of predicted_normal (default false — normals plumbed but not yet read)", cxxopts::value<bool>()->default_value("false"))
 		("ml-foreshortening", "Sprint 2 CD-H5: apply |n·z_hat| foreshortening factor to idepth uncertainty (default true after WIN verdict)", cxxopts::value<bool>()->default_value("true"))
+		("ml-angmf-confidence", "Sprint 3 A.2: use AngMF expected-angle formula 1-E_angle(kappa)/pi instead of mis-oriented sigmoid 1/(1+kappa/5) (default false; KILL: +107% KITTI ATE regression; Sprint 3a re-sweeps --ml-idepth-uncertainty)", cxxopts::value<bool>()->default_value("false"))
 		("h,help", "Print usage")
     ;
 
@@ -246,6 +247,10 @@ int main(int argc, char **argv)
 	// Sprint 2 — CD-H5: foreshortening factor in idepth uncertainty
 	setting_useNormalForeshortening = result["ml-foreshortening"].as<bool>();
 	printf("[PHASE_CONFIG] ml-foreshortening=%s\n", setting_useNormalForeshortening ? "on" : "off");
+
+	// Sprint 3 — A.2: κ → AngMF confidence formula (replaces mis-oriented sigmoid)
+	setting_useAngmfConfidence = result["ml-angmf-confidence"].as<bool>();
+	printf("[PHASE_CONFIG] ml-angmf-confidence=%s\n", setting_useAngmfConfidence ? "on" : "off");
 
 	// Depth source selection (Phase B — research-only validation switch)
 	{

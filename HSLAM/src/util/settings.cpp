@@ -300,6 +300,12 @@ bool setting_useNormalIntegration = false;
 // Default true (WIN verdict from Sprint 2 eval on TUM+KITTI). CLI: --ml-foreshortening
 bool setting_useNormalForeshortening = true;
 
+// Sprint 3 — A.2: κ → AngMF expected-angle confidence formula.
+// Default false (KILL verdict: KITTI +107% ATE regression with foreshortening+AngMF stack;
+// Sprint 3a needed to re-sweep --ml-idepth-uncertainty at new confidence baseline).
+// CLI: --ml-angmf-confidence
+bool setting_useAngmfConfidence = false;
+
 bool goStepByStep = false;
 
 

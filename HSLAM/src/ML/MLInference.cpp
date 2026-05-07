@@ -1,4 +1,5 @@
 #include "ML/MLInference.h"
+#include "util/settings.h"
 #include <iostream>
 #include <chrono>
 #include <algorithm>
@@ -1379,18 +1380,37 @@ cv::Mat MLInference::processUncertaintyToConfidence(const std::vector<float>& un
     // printf("[UNCERTAINTY_RAW] Size: %dx%d, Range: [%.3f, %.3f], Mean: %.3f, Std: %.3f\n",
     //        width, height, unc_min, unc_max, unc_mean[0], unc_std[0]);
     
-    // Convert uncertainty to confidence [0,1]
-    // High uncertainty = low confidence
-    // Use sigmoid-like transformation: confidence = 1 / (1 + uncertainty/scale)
+    // Convert κ (AngMF concentration) to confidence [0, 1].
+    // Sprint 3 — A.2: AngMF expected-angle formula replaces the mis-oriented sigmoid.
+    //   AngMF path (setting_useAngmfConfidence=true, default):
+    //     E_angle(κ) = 2κ/(κ²+1) + π·exp(-κπ)/(1+exp(-κπ))  ∈ [0, π/2]
+    //     confidence  = 1 - E_angle(κ)/π                       ∈ [0.5, 1.0]
+    //     High κ → low E_angle → high confidence (correctly oriented).
+    //   Legacy sigmoid path (setting_useAngmfConfidence=false, ablation only):
+    //     confidence = 1/(1 + κ/5)  ∈ (0, 1)  — provably mis-oriented (Sprint 0a).
     cv::Mat confidence_map = cv::Mat::zeros(height, width, CV_32FC1);
-    const float uncertainty_scale = 5.0f;  // Tunable parameter
-    
-    for(int y = 0; y < height; y++) {
-        for(int x = 0; x < width; x++) {
-            float uncertainty = uncertainty_map.at<float>(y, x);
-            // Sigmoid transformation: high uncertainty -> low confidence
-            float confidence = 1.0f / (1.0f + uncertainty / uncertainty_scale);
-            confidence_map.at<float>(y, x) = confidence;
+
+    if (setting_useAngmfConfidence) {
+        // Sprint 3: AngMF closed-form expected angular error → confidence
+        const float pi_f = static_cast<float>(M_PI);
+        for(int y = 0; y < height; y++) {
+            for(int x = 0; x < width; x++) {
+                const float kappa = std::max(uncertainty_map.at<float>(y, x), 1e-6f);
+                const float term1 = 2.0f * kappa / (kappa * kappa + 1.0f);
+                const float e_neg_kpi = std::exp(-kappa * pi_f);
+                const float term2 = pi_f * e_neg_kpi / (1.0f + e_neg_kpi);
+                const float e_angle = term1 + term2;       // expected angular error ∈ [0, π/2]
+                confidence_map.at<float>(y, x) = 1.0f - e_angle / pi_f;  // ∈ [0.5, 1.0]
+            }
+        }
+    } else {
+        // Legacy sigmoid — retained for ablation reproducibility (Sprint 0a confirmed mis-oriented).
+        const float uncertainty_scale = 5.0f;
+        for(int y = 0; y < height; y++) {
+            for(int x = 0; x < width; x++) {
+                const float uncertainty = uncertainty_map.at<float>(y, x);
+                confidence_map.at<float>(y, x) = 1.0f / (1.0f + uncertainty / uncertainty_scale);
+            }
         }
     }
     

@@ -227,6 +227,12 @@ extern bool setting_useNormalIntegration;
 // Default true after Sprint 2 win verdict. CLI: --ml-foreshortening
 extern bool setting_useNormalForeshortening;
 
+// Sprint 3 — A.2: κ → AngMF expected-angle confidence formula.
+// Replaces the mis-oriented sigmoid 1/(1+κ/5) with 1 - E_angle(κ)/π ∈ [0.5, 1.0].
+// Default false (KILL verdict: KITTI +107% ATE; Sprint 3a re-sweeps --ml-idepth-uncertainty).
+// CLI: --ml-angmf-confidence
+extern bool setting_useAngmfConfidence;
+
 extern bool debugSaveImages;
 
 
