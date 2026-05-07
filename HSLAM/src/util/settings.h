@@ -233,6 +233,15 @@ extern bool setting_useNormalForeshortening;
 // CLI: --ml-angmf-confidence
 extern bool setting_useAngmfConfidence;
 
+// Sprint 4 — CD-H3: gate CoarseTracker lvl=0 gap-fill dilation on normal-cosine agreement.
+// Skips a neighbour's depth contribution when its surface normal disagrees with the center
+// pixel's normal by more than acos(setting_normalGapfillCosThreshold).  Prevents phantom
+// medium-depth pixels at object boundaries from entering the semi-dense reference depth.
+// KILL verdict (2026-05-07): cos_min=0.873 across TUM; threshold 0.866 catches nothing.
+// Default false (KILL). CLI: --ml-normal-gapfill-mask / --ml-normal-gapfill-cos
+extern bool setting_useNormalGapfillMask;
+extern float setting_normalGapfillCosThreshold;  // cos(30°) ≈ 0.866
+
 extern bool debugSaveImages;
 
 

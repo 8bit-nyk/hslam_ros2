@@ -246,6 +246,20 @@ void CoarseTracker::makeCoarseDepthL0Original(std::vector<FrameHessian*> frameHe
 	{
 		int numIts = 1;
 
+		// Sprint 4 — CD-H3: at lvl=0, gate each neighbour contribution on normal-cosine
+		// agreement with the center pixel.  Prevents phantom medium-depth pixels at object
+		// boundaries from entering the semi-dense reference depth.
+		// Only active when: feature flag on, lvl==0, and lastRef has a normal map.
+		const cv::Mat* nmap_for_gapfill = nullptr;
+		if (setting_useNormalGapfillMask && lvl == 0 && lastRef) {
+			auto nm_ptr = lastRef->getMLNormalMap();
+			if (nm_ptr && !nm_ptr->empty()) nmap_for_gapfill = nm_ptr.get();
+		}
+		long gapfill_total_gaps = 0;
+		long gapfill_total_candidates = 0;
+		long gapfill_skipped = 0;
+		long gapfill_filled = 0;
+		float gapfill_cos_min = 1.0f;   // for debug: track minimum cosine seen at cross-surface candidates
 
 		for(int it=0;it<numIts;it++)
 		{
@@ -256,20 +270,63 @@ void CoarseTracker::makeCoarseDepthL0Original(std::vector<FrameHessian*> frameHe
 			memcpy(weightSumsl_bak, weightSumsl, w[lvl]*h[lvl]*sizeof(float));
 			float* idepthl = idepth[lvl];	// don't need to make a temp copy of depth, since the code only
 											// reads values with weightSumsl>0, and write ones with weightSumsl<=0.
-			
+
 			for(int i=w[lvl]+1;i<wh-1;i++) // dilate on frame area excluding border
 			{
 				if(weightSumsl_bak[i] <= 0)
 				{
 					float sum=0, num=0, numn=0;
-					// Dilation matrix is a X shape
-					if(weightSumsl_bak[i+1+wl] > 0) { sum += idepthl[i+1+wl]; num+=weightSumsl_bak[i+1+wl]; numn++;}
-					if(weightSumsl_bak[i-1-wl] > 0) { sum += idepthl[i-1-wl]; num+=weightSumsl_bak[i-1-wl]; numn++;}
-					if(weightSumsl_bak[i+wl-1] > 0) { sum += idepthl[i+wl-1]; num+=weightSumsl_bak[i+wl-1]; numn++;}
-					if(weightSumsl_bak[i-wl+1] > 0) { sum += idepthl[i-wl+1]; num+=weightSumsl_bak[i-wl+1]; numn++;}
-					if(numn>0) {idepthl[i] = sum/numn; weightSumsl[i] = num/numn;}
+
+					if (nmap_for_gapfill) {
+						// CD-H3: normal-gated gap-fill at lvl=0.
+						// X-shape diagonal offsets: (+1,+1), (-1,-1), (-1,+1), (+1,-1)
+						const int cy_i = i / wl, cx_i = i % wl;
+						cv::Vec3f nc = nmap_for_gapfill->at<cv::Vec3f>(cy_i, cx_i);
+
+						auto try_neighbour = [&](int j, int dx, int dy) {
+							if (weightSumsl_bak[j] <= 0) return;
+							const int yn = cy_i + dy, xn = cx_i + dx;
+							if (yn < 0 || yn >= h[lvl] || xn < 0 || xn >= w[lvl]) return;
+							gapfill_total_candidates++;
+							cv::Vec3f nn = nmap_for_gapfill->at<cv::Vec3f>(yn, xn);
+							float dot = nc[0]*nn[0] + nc[1]*nn[1] + nc[2]*nn[2];
+							if (dot < gapfill_cos_min) gapfill_cos_min = dot;
+							if (dot < setting_normalGapfillCosThreshold) {
+								gapfill_skipped++;
+								return;
+							}
+							sum += idepthl[j]; num += weightSumsl_bak[j]; numn++;
+						};
+
+						gapfill_total_gaps++;
+						try_neighbour(i+1+wl, +1, +1);
+						try_neighbour(i-1-wl, -1, -1);
+						try_neighbour(i+wl-1, -1, +1);
+						try_neighbour(i-wl+1, +1, -1);
+					} else {
+						// Original unmasked X-shape dilation
+						if(weightSumsl_bak[i+1+wl] > 0) { sum += idepthl[i+1+wl]; num+=weightSumsl_bak[i+1+wl]; numn++;}
+						if(weightSumsl_bak[i-1-wl] > 0) { sum += idepthl[i-1-wl]; num+=weightSumsl_bak[i-1-wl]; numn++;}
+						if(weightSumsl_bak[i+wl-1] > 0) { sum += idepthl[i+wl-1]; num+=weightSumsl_bak[i+wl-1]; numn++;}
+						if(weightSumsl_bak[i-wl+1] > 0) { sum += idepthl[i-wl+1]; num+=weightSumsl_bak[i-wl+1]; numn++;}
+					}
+
+					if(numn>0) {
+						idepthl[i] = sum/numn; weightSumsl[i] = num/numn;
+						if (nmap_for_gapfill) gapfill_filled++;
+					}
 				}
 			}
+		}
+
+		// [GAPFILL_MASK] diagnostic — emitted once per setCoarseTrackingRef at lvl=0
+		if (lvl == 0 && nmap_for_gapfill) {
+			float skip_pct = (gapfill_total_candidates > 0)
+			    ? 100.f * gapfill_skipped / gapfill_total_candidates : 0.f;
+			float filled_pct = (gapfill_total_gaps > 0)
+			    ? 100.f * gapfill_filled / gapfill_total_gaps : 0.f;
+			printf("[GAPFILL_MASK] total_gaps=%ld candidates=%ld skipped=%ld skip_pct=%.1f%% filled_pct=%.1f%% cos_min=%.4f\n",
+			       gapfill_total_gaps, gapfill_total_candidates, gapfill_skipped, skip_pct, filled_pct, gapfill_cos_min);
 		}
 	}
 

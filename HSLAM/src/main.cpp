@@ -159,6 +159,8 @@ int main(int argc, char **argv)
 		("use-normal-integration", "Sprint 1 master gate: enable downstream consumers of predicted_normal (default false — normals plumbed but not yet read)", cxxopts::value<bool>()->default_value("false"))
 		("ml-foreshortening", "Sprint 2 CD-H5: apply |n·z_hat| foreshortening factor to idepth uncertainty (default true after WIN verdict)", cxxopts::value<bool>()->default_value("true"))
 		("ml-angmf-confidence", "Sprint 3 A.2: use AngMF expected-angle formula 1-E_angle(kappa)/pi instead of mis-oriented sigmoid 1/(1+kappa/5) (default true after Sprint 3a WIN: unc recalibrated to 0.30)", cxxopts::value<bool>()->default_value("true"))
+		("ml-normal-gapfill-mask", "Sprint 4 CD-H3: gate CoarseTracker lvl=0 gap-fill on normal-cosine agreement (default false — KILL: cos_min=0.873 at threshold 0.866, 0% skip on TUM)", cxxopts::value<bool>()->default_value("false"))
+		("ml-normal-gapfill-cos", "Sprint 4 CD-H3: cosine threshold for normal gap-fill mask; cos(30deg)=0.866, cos(40deg)=0.766 (default 0.866)", cxxopts::value<float>()->default_value("0.866"))
 		("h,help", "Print usage")
     ;
 
@@ -251,6 +253,12 @@ int main(int argc, char **argv)
 	// Sprint 3 — A.2: κ → AngMF confidence formula (replaces mis-oriented sigmoid)
 	setting_useAngmfConfidence = result["ml-angmf-confidence"].as<bool>();
 	printf("[PHASE_CONFIG] ml-angmf-confidence=%s\n", setting_useAngmfConfidence ? "on" : "off");
+
+	// Sprint 4 — CD-H3: CoarseTracker lvl=0 gap-fill masking by normal discontinuity
+	setting_useNormalGapfillMask = result["ml-normal-gapfill-mask"].as<bool>();
+	setting_normalGapfillCosThreshold = result["ml-normal-gapfill-cos"].as<float>();
+	printf("[PHASE_CONFIG] ml-normal-gapfill-mask=%s cos_thresh=%.3f\n",
+	       setting_useNormalGapfillMask ? "on" : "off", setting_normalGapfillCosThreshold);
 
 	// Depth source selection (Phase B — research-only validation switch)
 	{

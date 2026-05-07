@@ -309,6 +309,14 @@ bool setting_useNormalForeshortening = true;
 // CLI: --ml-angmf-confidence
 bool setting_useAngmfConfidence = true;
 
+// Sprint 4 — CD-H3: CoarseTracker lvl=0 gap-fill masking by normal discontinuity.
+// KILL verdict (2026-05-07): cos_min=0.873 across fr1_room+desk; threshold 0.866 catches nothing.
+// skip_pct=0% on TUM (gap-boundary normals agree within 30°); fr2_lnl 0.2% (11 skips) not signal.
+// Ablation fr1_desk mask-on vs mask-off: 0.095 vs 0.093 m (no measurable difference).
+// Default false (KILL). CLI: --ml-normal-gapfill-mask / --ml-normal-gapfill-cos
+bool setting_useNormalGapfillMask = false;
+float setting_normalGapfillCosThreshold = 0.866f;
+
 bool goStepByStep = false;
 
 
