@@ -222,6 +222,11 @@ extern std::string setting_mapPlyOut;    // default "": derive from result file 
 // CLI: --use-normal-integration
 extern bool setting_useNormalIntegration;
 
+// Sprint 2 — CD-H5: foreshortening factor |n·z_hat| in idepth uncertainty formula.
+// Widens bounds on edge-on surfaces (geometrically ill-conditioned for depth).
+// Default true after Sprint 2 win verdict. CLI: --ml-foreshortening
+extern bool setting_useNormalForeshortening;
+
 extern bool debugSaveImages;
 
 

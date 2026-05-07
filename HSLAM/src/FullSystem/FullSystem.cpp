@@ -3067,6 +3067,11 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
     // ML depth integration with confidence maps - get confidence directly from frame
     auto ml_confidence_ptr = newFrame->getMLConfidenceMap();
     cv::Mat ml_confidence = (ml_confidence_ptr && !ml_confidence_ptr->empty()) ? *ml_confidence_ptr : cv::Mat();
+
+    // Sprint 2 — CD-H5: foreshortening diagnostic accumulator
+    auto ml_normal_ptr = newFrame->getMLNormalMap();
+    const cv::Mat* ml_normal = (ml_normal_ptr && !ml_normal_ptr->empty()) ? ml_normal_ptr.get() : nullptr;
+    std::vector<float> foreshortening_vals;
     
     int numPointsTotal = pixelSelector->makeMaps(newFrame, selectionMap, setting_desiredImmatureDensity);
     
@@ -3117,10 +3122,23 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                     // outlier rejections (April 27, 2026).
                     const float base_idepth_uncertainty = setting_idepthUncertaintyForMLInit;
                     
-                    // Scale by confidence: high confidence = tighter bounds, low confidence = looser bounds
-                    // pixel_confidence is already clamped to [0.1, 1.0] at line 2764
-                    float effective_idepth_uncertainty = base_idepth_uncertainty / pixel_confidence;
-                    
+                    // CD-H5 (Sprint 2): foreshortening factor — surfaces edge-on to the camera are
+                    // geometrically ill-conditioned for depth recovery regardless of κ-confidence.
+                    // Widen the idepth interval on edge-on surfaces (|n·z_hat| ≈ 0) and tighten
+                    // on front-facing surfaces (|n·z_hat| ≈ 1). Floor at 0.1 caps widening at 10×.
+                    float foreshortening = 1.0f;
+                    if (setting_useNormalForeshortening && ml_normal &&
+                        y < ml_normal->rows && x < ml_normal->cols) {
+                        cv::Vec3f n = ml_normal->at<cv::Vec3f>(y, x);
+                        foreshortening = std::max(std::abs(n[2]), 0.1f);  // |n · z_hat|
+                        foreshortening_vals.push_back(foreshortening);
+                    }
+
+                    // Scale by confidence and foreshortening: both multiply reliability.
+                    // pixel_confidence already clamped to [0.1, 1.0] above.
+                    float effective_idepth_uncertainty = base_idepth_uncertainty
+                        / (pixel_confidence * foreshortening);
+
                     // Optional gentle depth-adaptive scaling for numerical stability at extreme distances
                     float depth_factor = 1.0f + (depth / 100.0f);
                     effective_idepth_uncertainty *= depth_factor;
@@ -3174,11 +3192,30 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
     }
     
     // ML bounds set at creation - hybrid combination happens during tracing
-    
+
+    // [FORESHORTENING_HIST] — Sprint 2 CD-H5 diagnostic: distribution of foreshortening factors
+    // applied this keyframe. Sanity: mean should be in [0.3, 0.9]; not >50% at floor 0.1.
+    if (!foreshortening_vals.empty()) {
+        std::sort(foreshortening_vals.begin(), foreshortening_vals.end());
+        int n = (int)foreshortening_vals.size();
+        float fmin = foreshortening_vals.front();
+        float fmax = foreshortening_vals.back();
+        float fmean = 0.0f;
+        for (float v : foreshortening_vals) fmean += v;
+        fmean /= n;
+        float fp10 = foreshortening_vals[(int)(0.10f * n)];
+        float fp50 = foreshortening_vals[(int)(0.50f * n)];
+        float fp90 = foreshortening_vals[(int)(0.90f * n)];
+        int at_floor = 0;
+        for (float v : foreshortening_vals) if (v <= 0.1001f) at_floor++;
+        printf("[FORESHORTENING_HIST] n=%d min=%.3f p10=%.3f p50=%.3f p90=%.3f max=%.3f mean=%.3f floor_pct=%.1f%%\n",
+               n, fmin, fp10, fp50, fp90, fmax, fmean, 100.0f * at_floor / n);
+    }
+
     // TEMP_DEBUG_REPETITIVE: Commented out ML integration statistics for cleaner output
     // if(ml_depth_points > 0) {
     //     printf("ML Depth Integration: %d/%d points (%.1f%%)\n",
-    //            ml_depth_points, total_points, 
+    //            ml_depth_points, total_points,
     //            100.0f * ml_depth_points / total_points);
     // }
     

@@ -296,6 +296,10 @@ std::string setting_mapPlyOut = "";  // empty = derive from result file path
 // Default false: normals are plumbed end-to-end but nothing reads them until Sprint 2.
 bool setting_useNormalIntegration = false;
 
+// Sprint 2 — CD-H5: foreshortening factor |n·z_hat| in idepth uncertainty formula.
+// Default true (WIN verdict from Sprint 2 eval on TUM+KITTI). CLI: --ml-foreshortening
+bool setting_useNormalForeshortening = true;
+
 bool goStepByStep = false;
 
 

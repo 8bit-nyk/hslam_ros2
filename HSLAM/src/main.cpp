@@ -157,6 +157,7 @@ int main(int argc, char **argv)
 		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
 		("use-normal-integration", "Sprint 1 master gate: enable downstream consumers of predicted_normal (default false — normals plumbed but not yet read)", cxxopts::value<bool>()->default_value("false"))
+		("ml-foreshortening", "Sprint 2 CD-H5: apply |n·z_hat| foreshortening factor to idepth uncertainty (default true after WIN verdict)", cxxopts::value<bool>()->default_value("true"))
 		("h,help", "Print usage")
     ;
 
@@ -241,6 +242,10 @@ int main(int argc, char **argv)
 	// Surface Normal Integration (Sprint 1) — master gate
 	setting_useNormalIntegration = result["use-normal-integration"].as<bool>();
 	printf("[PHASE_CONFIG] use-normal-integration=%s\n", setting_useNormalIntegration ? "on" : "off");
+
+	// Sprint 2 — CD-H5: foreshortening factor in idepth uncertainty
+	setting_useNormalForeshortening = result["ml-foreshortening"].as<bool>();
+	printf("[PHASE_CONFIG] ml-foreshortening=%s\n", setting_useNormalForeshortening ? "on" : "off");
 
 	// Depth source selection (Phase B — research-only validation switch)
 	{
