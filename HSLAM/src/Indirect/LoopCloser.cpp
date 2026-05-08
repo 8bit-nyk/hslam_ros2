@@ -441,10 +441,17 @@ namespace HSLAM {
                         const float s_ml_new = medianOf(ml_ratios_new);
 
                         // [INDIRECT.SML_COMPARE]: always print on accepted (≥30-inlier) loop events for audit.
-                        printf("[INDIRECT.SML_COMPARE] cur=%d cand=%d s_ransac=%.3f s_ml_old=%.3f s_ml_new=%.3f n_old=%zu n_new=%zu\n",
+                        // degenerate=YES tags Sim3 RANSAC scales outside [1/3, 3] — physically implausible inter-KF
+                        // scale changes (e.g. cur=3106↔cand=17 on KITTI 00 produced s_ransac=29.85). Lets C0_post
+                        // grep "would the gate have rejected this?" per estimator without rerunning. Threshold is
+                        // intentionally loose (factor of 3) so ordinary scale drift through the trajectory is not
+                        // flagged. See docs/indirect_depth_integration/EXECUTION_LOG.md Session 2 finding.
+                        const bool degenerateRansac = (s_optimized < (1.f/3.f)) || (s_optimized > 3.f);
+                        printf("[INDIRECT.SML_COMPARE] cur=%d cand=%d s_ransac=%.3f s_ml_old=%.3f s_ml_new=%.3f n_old=%zu n_new=%zu degenerate=%s\n",
                                (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
                                s_optimized, s_ml_old, s_ml_new,
-                               ml_ratios_old.size(), ml_ratios_new.size());
+                               ml_ratios_old.size(), ml_ratios_new.size(),
+                               degenerateRansac ? "YES" : "no");
 
                         // Indirect.P2 rejection gate (committed-inert by default). Consumes either old or new s_ml
                         // depending on setting_indirectMlSemanticFix. Logs coverage_low when ml_ratios.size() < 5
