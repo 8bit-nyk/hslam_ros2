@@ -253,11 +253,13 @@ bool setting_indirectMlSemanticFix = true;
 // kept declared for paper-doc traceability but is no longer consumed in LoopCloser. The new gate
 // uses a fallback estimator policy: prefer new s_ml (current-KF ML images at matched pixels) when
 // ml_ratios_new.size() >= 5, else fall back to old s_ml (source-frame MapPoint ML idepth ratios)
-// when ml_ratios_old.size() >= 5. Otherwise the gate bypasses (coverage_low). Default false; opt
-// in via --p2-gate=true. C0_post (May 8) found 9 degenerate-Sim3 acceptances across 28 events on
-// KITTI 00/05/06/07; H2 measurement protocol scores whether the gate would have caught them.
-// See LOOP_CLOSURE_ML_TEST_PLAN.md §6.3 + §12.2.
-bool setting_indirectP2RejectGate = false;
+// when ml_ratios_old.size() >= 5. Otherwise the gate bypasses (coverage_low).
+// **Default true (May 8 ship)** after C2 verdict (n=5 across KITTI 00/05/06/07): WIN per §6.3
+// DEFENSIBLE GATE. 65 degenerate Sim3 acceptances rejected; KITTI 05 −5.5% ATE + crash prevented
+// (C0_post rep 5 hit Sophus::ScaleNotPositive without the gate); KITTI 00/06 ATE neutral; KITTI 07
+// gate-innocent (0 events, recheck cleared the C2 ATE delta as RANSAC noise). Disable via
+// --p2-gate=false. See LOOP_CLOSURE_ML_TEST_PLAN.md §13 verdict.
+bool setting_indirectP2RejectGate = true;
 float setting_indirectP2RejectThresh = 0.5f;
 
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
