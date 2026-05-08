@@ -453,25 +453,34 @@ namespace HSLAM {
                                ml_ratios_old.size(), ml_ratios_new.size(),
                                degenerateRansac ? "YES" : "no");
 
-                        // Indirect.P2 rejection gate (committed-inert by default). Consumes either old or new s_ml
-                        // depending on setting_indirectMlSemanticFix. Logs coverage_low when ml_ratios.size() < 5
-                        // so future analysis can distinguish "no rejection needed" from "no data to decide".
-                        if (!setting_disableIndirectP2LoopCloser) {
+                        // Indirect.H2 (May 8, 2026): loop-closure Sim3 scale-disagreement rejection gate.
+                        // Fallback policy decided by C0_post finding (plan §12.2): prefer new s_ml (≥5 samples) for
+                        // semantic correctness, fall back to old s_ml (≥5 samples) when production ML cadence
+                        // (every-Nth-KF) leaves new with insufficient coverage on this loop pair. Bypass only when
+                        // BOTH estimators are < 5 samples — that's true coverage_low. Diagnostic always prints
+                        // the gate's decision (REJECTED / ACCEPTED / BYPASS_COVERAGE_LOW) so §6.3 measurement can
+                        // count, per estimator, would-the-gate-have-caught-this. Default off (--p2-gate=false).
+                        if (setting_indirectP2RejectGate) {
                             bool mlScaleValid = true;
-                            const std::vector<float>& chosen = setting_indirectMlSemanticFix ? ml_ratios_new : ml_ratios_old;
-                            const float s_ml_chosen = setting_indirectMlSemanticFix ? s_ml_new : s_ml_old;
-                            if (chosen.size() >= 5) {
-                                const float scale_disagreement = std::abs(s_optimized - s_ml_chosen) / std::max(s_optimized, s_ml_chosen);
-                                printf("[INDIRECT.P2] RANSAC=%.3f ML=%.3f disagreement=%.1f%% matches=%zu source=%s\n",
-                                       s_optimized, s_ml_chosen, scale_disagreement * 100.0f, chosen.size(),
-                                       setting_indirectMlSemanticFix ? "new" : "old");
-                                if (scale_disagreement > 0.5f) {
-                                    printf("[INDIRECT.P2] REJECTED: scale disagreement too large\n");
-                                    mlScaleValid = false;
-                                }
+                            float s_ml_used = -1.f; size_t n_used = 0; const char* source_used = "none";
+                            if (ml_ratios_new.size() >= 5) {
+                                s_ml_used = s_ml_new; n_used = ml_ratios_new.size(); source_used = "new";
+                            } else if (ml_ratios_old.size() >= 5) {
+                                s_ml_used = s_ml_old; n_used = ml_ratios_old.size(); source_used = "old";
+                            }
+                            if (n_used >= 5) {
+                                const float scale_disagreement = std::abs(s_optimized - s_ml_used) / std::max(s_optimized, s_ml_used);
+                                const bool rejected = (scale_disagreement > setting_indirectP2RejectThresh);
+                                printf("[INDIRECT.P2_GATE] cur=%d cand=%d s_ransac=%.3f s_ml=%.3f disagreement=%.1f%% n=%zu source=%s thresh=%.2f decision=%s\n",
+                                       (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                       s_optimized, s_ml_used, scale_disagreement * 100.0f,
+                                       n_used, source_used, setting_indirectP2RejectThresh,
+                                       rejected ? "REJECTED" : "ACCEPTED");
+                                if (rejected) mlScaleValid = false;
                             } else {
-                                printf("[INDIRECT.P2] coverage_low source=%s n=%zu (gate bypassed)\n",
-                                       setting_indirectMlSemanticFix ? "new" : "old", chosen.size());
+                                printf("[INDIRECT.P2_GATE] cur=%d cand=%d s_ransac=%.3f decision=BYPASS_COVERAGE_LOW n_new=%zu n_old=%zu\n",
+                                       (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                       s_optimized, ml_ratios_new.size(), ml_ratios_old.size());
                             }
                             if (!mlScaleValid) continue;
                         }

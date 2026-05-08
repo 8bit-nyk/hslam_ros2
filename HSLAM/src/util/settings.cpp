@@ -248,6 +248,18 @@ bool setting_disableIndirectP2LoopCloser = true; // Indirect.P2: DISABLED BY DEF
 // docs/indirect_depth_integration/LOOP_CLOSURE_ML_TEST_PLAN.md §4 H0.
 bool setting_indirectMlSemanticFix = true;
 
+// Indirect.H2 (May 8, 2026): loop-closure Sim3 scale-disagreement rejection gate.
+// Replaces (and supersedes) the old setting_disableIndirectP2LoopCloser kill-switch — that flag is
+// kept declared for paper-doc traceability but is no longer consumed in LoopCloser. The new gate
+// uses a fallback estimator policy: prefer new s_ml (current-KF ML images at matched pixels) when
+// ml_ratios_new.size() >= 5, else fall back to old s_ml (source-frame MapPoint ML idepth ratios)
+// when ml_ratios_old.size() >= 5. Otherwise the gate bypasses (coverage_low). Default false; opt
+// in via --p2-gate=true. C0_post (May 8) found 9 degenerate-Sim3 acceptances across 28 events on
+// KITTI 00/05/06/07; H2 measurement protocol scores whether the gate would have caught them.
+// See LOOP_CLOSURE_ML_TEST_PLAN.md §6.3 + §12.2.
+bool setting_indirectP2RejectGate = false;
+float setting_indirectP2RejectThresh = 0.5f;
+
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
 // See docs/gt_depth_validation/PLAN.md
 int setting_depthSource = DEPTH_SOURCE_ML;

@@ -190,8 +190,10 @@ extern float setting_vsWeight;           // Direct.VS: weight multiplier (defaul
 // Naming: "Indirect.P0" = MapPoint storage, "Indirect.P1" = BA depth prior, "Indirect.P2" = loop scale validation
 extern bool setting_disableIndirectMLDepth;      // Indirect: Global kill switch for all indirect ML depth
 extern float setting_indirectMLDepthWeight;      // Indirect.P1: Weight multiplier for g2o depth prior edges (INERT — consumer is dead BundleAdjustment)
-extern bool setting_disableIndirectP2LoopCloser; // Indirect.P2: gate loop-closure ML/RANSAC scale-disagreement rejection (default true — never experimentally validated)
+extern bool setting_disableIndirectP2LoopCloser; // Indirect.P2: DEPRECATED. Was the original P2 rejection-gate kill-switch; superseded by setting_indirectP2RejectGate below. Retained as-declared for paper-doc traceability but no longer consumed in code.
 extern bool setting_indirectMlSemanticFix;       // Indirect.H0: when true, s_ml in LoopCloser is computed from current-KF ML depth images at matched feature pixels (correct inter-KF scale) instead of source-frame MapPoint ML idepth ratios. Default true. SML_COMPARE diagnostic always prints both regardless of this flag. CLI: --indirect-ml-semantic-fix.
+extern bool setting_indirectP2RejectGate;        // Indirect.H2: when true, reject loop-closure Sim3 candidates with |s_RANSAC − s_ML|/max > setting_indirectP2RejectThresh. Uses new s_ml when available (n≥5), else falls back to old s_ml (n≥5), else bypasses (coverage_low). Default false. CLI: --p2-gate.
+extern float setting_indirectP2RejectThresh;     // Indirect.H2: disagreement threshold for the gate. Default 0.5 (i.e. reject if |s_RANSAC − s_ML| / max > 50%). CLI: --p2-gate-thresh.
 
 // GT Depth Validation (Phase B) — research-only, NOT a shipped feature
 // When depthSource=GT, load GT depth from --associations PNG files and route it through
