@@ -191,6 +191,7 @@ extern float setting_vsWeight;           // Direct.VS: weight multiplier (defaul
 extern bool setting_disableIndirectMLDepth;      // Indirect: Global kill switch for all indirect ML depth
 extern float setting_indirectMLDepthWeight;      // Indirect.P1: Weight multiplier for g2o depth prior edges (INERT — consumer is dead BundleAdjustment)
 extern bool setting_disableIndirectP2LoopCloser; // Indirect.P2: gate loop-closure ML/RANSAC scale-disagreement rejection (default true — never experimentally validated)
+extern bool setting_indirectMlSemanticFix;       // Indirect.H0: when true, s_ml in LoopCloser is computed from current-KF ML depth images at matched feature pixels (correct inter-KF scale) instead of source-frame MapPoint ML idepth ratios. Default true. SML_COMPARE diagnostic always prints both regardless of this flag. CLI: --indirect-ml-semantic-fix.
 
 // GT Depth Validation (Phase B) — research-only, NOT a shipped feature
 // When depthSource=GT, load GT depth from --associations PNG files and route it through

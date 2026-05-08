@@ -147,6 +147,11 @@ namespace HSLAM
         FrameHessian *fh;
         FrameShell *fs;
 
+        // ML depth image (Indirect.H0 — May 7 2026): shared_ptr copy from the source FrameHessian's
+        // ml_depth_map_ at KF insertion time. Survives FrameHessian marginalization so loop-closure
+        // candidate KFs retain their ML depth map for current-frame s_ml computation.
+        std::shared_ptr<cv::Mat> mlDepthImage;
+
         long unsigned int mnLoopQuery;
         int mnLoopWords;
         float mLoopScore;

@@ -237,6 +237,16 @@ float setting_vsWeight = 1e-5f;          // Direct.VS: weight multiplier (intent
 bool setting_disableIndirectMLDepth = false;     // Indirect: Global kill switch
 float setting_indirectMLDepthWeight = 0.3f;      // Indirect.P1v2: INERT — consumer is dead BundleAdjustment() in Optimizer.cpp (heap corruption from g2o port; only caller in main.cpp:915 is commented out). See feedback_bundleadjustment_dead_code memory entry.
 bool setting_disableIndirectP2LoopCloser = true; // Indirect.P2: DISABLED BY DEFAULT (May 5, 2026). Loop-closure ML/RANSAC scale-disagreement rejection (commit ea9c5e2) was implemented in LoopCloser.cpp::computeSim3 but the rejection branch was never experimentally validated — only fires when there's a loop closure with ≥30 inliers, observed ~1 event in TUM and 0 in KITTI/EuRoC across all eval runs. Kept in code for paper documentation; gated off pending real loop-closure exposure in evaluation.
+// Indirect.H0 (May 7, 2026): semantic fix for s_ml in LoopCloser::computeSim3. The legacy P2 code computed s_ml as
+// the median of (mpCandidate->getMLIdepth() / mpCurrent->getMLIdepth()) — both source-frame ML idepths from whichever
+// past frames the matched MapPoints were created in, NOT the inter-KF scale being validated by Sim3. The fix computes
+// s_ml from the current-frame ML depth images of pKF and currentKF at the matched feature pixels:
+//   s_ml = median(d_ml_currentKF[kp_currentKF] / d_ml_pKF[kp_pKF])
+// Plumbing: mlDepthImage shared_ptr is copied from FrameHessian to indirect Frame at IndirectMapper time so it
+// survives FH marginalization. INDIRECT.SML_COMPARE diagnostic always prints old + new s_ml on every loop event for
+// audit; this flag only controls which value the (off-by-default) P2 rejection gate consumes. See
+// docs/indirect_depth_integration/LOOP_CLOSURE_ML_TEST_PLAN.md §4 H0.
+bool setting_indirectMlSemanticFix = true;
 
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
 // See docs/gt_depth_validation/PLAN.md

@@ -8,6 +8,7 @@
 
 #include "FullSystem/FullSystem.h"
 #include <iostream>
+#include <cmath>
 
 
 namespace HSLAM {
@@ -380,35 +381,90 @@ namespace HSLAM {
                     // If optimization is succesful stop ransacs and continue
                     if (nInliers >= 30) //20
                     {
-                        // Indirect.P2: ML scale validation — reject loops where RANSAC and ML scales disagree.
-                        // Gated off by default (setting_disableIndirectP2LoopCloser=true) since the rejection
-                        // branch was never experimentally validated — see settings.cpp comment + EXPERIMENT_LOG.md.
+                        const float s_optimized = gScm.scale();
+
+                        // Indirect.H0 (May 7, 2026): compute s_ml two ways for comparison.
+                        // - s_ml_old: legacy ratio of source-frame MapPoint ML idepths (semantically conflated; see audit R2).
+                        // - s_ml_new: ratio of current-KF ML depth images at matched feature pixels (correct inter-KF scale,
+                        //   indexing convention: vpMapPointMatches indexed by pKF feature; the stored MapPoint is currentKF's
+                        //   matched MP, located in currentKF via getIndexInKF). Direction matches legacy: candidate→current,
+                        //   i.e. d_currentKF / d_pKF (in idepth: i_pKF / i_currentKF).
+                        // The SML_COMPARE diagnostic always prints both regardless of any flag so we can audit before
+                        // shipping the new estimator. The P2 rejection gate (when enabled) consumes whichever the
+                        // setting_indirectMlSemanticFix flag selects (default: new).
+                        std::vector<float> ml_ratios_old;
+                        std::vector<float> ml_ratios_new;
+
+                        const bool haveBothMlImages = pKF->mlDepthImage && !pKF->mlDepthImage->empty()
+                            && currentKF->mlDepthImage && !currentKF->mlDepthImage->empty();
+
+                        for (size_t j = 0; j < vpMapPointMatches.size(); j++) {
+                            auto mpCurrent = vpMapPointMatches[j];   // MP stored on currentKF, matched to pKF feature j
+                            auto mpCandidate = pKF->getMapPoint(j);  // MP stored on pKF at feature j
+
+                            // Legacy s_ml: source-frame idepth ratio
+                            if (mpCurrent && mpCandidate &&
+                                mpCurrent->getHasMLDepth() && mpCandidate->getHasMLDepth() &&
+                                mpCurrent->getMLIdepth() > 0 && mpCandidate->getMLIdepth() > 0) {
+                                ml_ratios_old.push_back(mpCandidate->getMLIdepth() / mpCurrent->getMLIdepth());
+                            }
+
+                            // New s_ml: per-pixel ML depth at the matched features in each KF's own ML image.
+                            if (haveBothMlImages && mpCurrent) {
+                                const int idxCur = mpCurrent->getIndexInKF(currentKF);
+                                if (idxCur >= 0 && idxCur < currentKF->nFeatures &&
+                                    j < (size_t)pKF->nFeatures) {
+                                    const cv::Point2f& ppKF = pKF->mvKeys[j].pt;
+                                    const cv::Point2f& pCur = currentKF->mvKeys[idxCur].pt;
+                                    const int yp = (int)ppKF.y, xp = (int)ppKF.x;
+                                    const int yc = (int)pCur.y, xc = (int)pCur.x;
+                                    if (yp >= 0 && yp < pKF->mlDepthImage->rows &&
+                                        xp >= 0 && xp < pKF->mlDepthImage->cols &&
+                                        yc >= 0 && yc < currentKF->mlDepthImage->rows &&
+                                        xc >= 0 && xc < currentKF->mlDepthImage->cols) {
+                                        const float d_pKF = pKF->mlDepthImage->at<float>(yp, xp);
+                                        const float d_cur = currentKF->mlDepthImage->at<float>(yc, xc);
+                                        if (std::isfinite(d_pKF) && std::isfinite(d_cur) && d_pKF > 0.f && d_cur > 0.f) {
+                                            ml_ratios_new.push_back(d_cur / d_pKF);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        auto medianOf = [](std::vector<float>& v) -> float {
+                            if (v.empty()) return -1.f;
+                            std::sort(v.begin(), v.end());
+                            return v[v.size() / 2];
+                        };
+                        const float s_ml_old = medianOf(ml_ratios_old);
+                        const float s_ml_new = medianOf(ml_ratios_new);
+
+                        // [INDIRECT.SML_COMPARE]: always print on accepted (≥30-inlier) loop events for audit.
+                        printf("[INDIRECT.SML_COMPARE] cur=%d cand=%d s_ransac=%.3f s_ml_old=%.3f s_ml_new=%.3f n_old=%zu n_new=%zu\n",
+                               (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                               s_optimized, s_ml_old, s_ml_new,
+                               ml_ratios_old.size(), ml_ratios_new.size());
+
+                        // Indirect.P2 rejection gate (committed-inert by default). Consumes either old or new s_ml
+                        // depending on setting_indirectMlSemanticFix. Logs coverage_low when ml_ratios.size() < 5
+                        // so future analysis can distinguish "no rejection needed" from "no data to decide".
                         if (!setting_disableIndirectP2LoopCloser) {
                             bool mlScaleValid = true;
-                            float s_optimized = gScm.scale();
-                            {
-                                std::vector<float> ml_ratios;
-                                for (size_t j = 0; j < vpMapPointMatches.size(); j++) {
-                                    auto mpCurrent = vpMapPointMatches[j];
-                                    auto mpCandidate = pKF->getMapPoint(j);
-                                    if (mpCurrent && mpCandidate &&
-                                        mpCurrent->getHasMLDepth() && mpCandidate->getHasMLDepth() &&
-                                        mpCurrent->getMLIdepth() > 0 && mpCandidate->getMLIdepth() > 0) {
-                                        float ratio = mpCandidate->getMLIdepth() / mpCurrent->getMLIdepth();
-                                        ml_ratios.push_back(ratio);
-                                    }
+                            const std::vector<float>& chosen = setting_indirectMlSemanticFix ? ml_ratios_new : ml_ratios_old;
+                            const float s_ml_chosen = setting_indirectMlSemanticFix ? s_ml_new : s_ml_old;
+                            if (chosen.size() >= 5) {
+                                const float scale_disagreement = std::abs(s_optimized - s_ml_chosen) / std::max(s_optimized, s_ml_chosen);
+                                printf("[INDIRECT.P2] RANSAC=%.3f ML=%.3f disagreement=%.1f%% matches=%zu source=%s\n",
+                                       s_optimized, s_ml_chosen, scale_disagreement * 100.0f, chosen.size(),
+                                       setting_indirectMlSemanticFix ? "new" : "old");
+                                if (scale_disagreement > 0.5f) {
+                                    printf("[INDIRECT.P2] REJECTED: scale disagreement too large\n");
+                                    mlScaleValid = false;
                                 }
-                                if (ml_ratios.size() >= 5) {
-                                    std::sort(ml_ratios.begin(), ml_ratios.end());
-                                    float s_ml = ml_ratios[ml_ratios.size() / 2];
-                                    float scale_disagreement = std::abs(s_optimized - s_ml) / std::max(s_optimized, s_ml);
-                                    printf("[INDIRECT.P2] RANSAC=%.3f ML=%.3f disagreement=%.1f%% matches=%zu\n",
-                                           s_optimized, s_ml, scale_disagreement * 100.0f, ml_ratios.size());
-                                    if (scale_disagreement > 0.5f) {
-                                        printf("[INDIRECT.P2] REJECTED: scale disagreement too large\n");
-                                        mlScaleValid = false;
-                                    }
-                                }
+                            } else {
+                                printf("[INDIRECT.P2] coverage_low source=%s n=%zu (gate bypassed)\n",
+                                       setting_indirectMlSemanticFix ? "new" : "old", chosen.size());
                             }
                             if (!mlScaleValid) continue;
                         }
