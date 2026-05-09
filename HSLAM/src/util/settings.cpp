@@ -294,6 +294,14 @@ float setting_indirectSim3MlSeedAlpha = 1.0f;
 bool setting_indirectS1ConfidenceGate = false;
 float setting_indirectS1ConfidenceThresh = 5.0f;
 
+// Indirect.P0 kill switch (May 9, 2026): gates MapPoint::MapPoint(PointHessian*, ...) ML-field copy.
+// Default true preserves all prior behavior. Set false to construct MapPoints without ml_idepth /
+// ml_uncertainty / hasMLDepth — disables the old-estimator fallback consumed by H2 (LoopCloser) and
+// H3 (OptimizeEssentialGraph). Used for the mono / direct-only / full ablation per
+// LOOP_CLOSURE_ML_TEST_PLAN.md §21. Note: Step2a/2b matchers are NOT affected (they read live ML
+// image at currentMLDepthImage, not the per-MP stored fields).
+bool setting_indirectMapPointMLStorage = true;
+
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
 // See docs/gt_depth_validation/PLAN.md
 int setting_depthSource = DEPTH_SOURCE_ML;

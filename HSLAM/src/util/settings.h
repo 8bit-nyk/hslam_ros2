@@ -202,6 +202,7 @@ extern bool setting_indirectSim3MlSeed;          // Indirect.H1 (seed-sensitivit
 extern float setting_indirectSim3MlSeedAlpha;    // Indirect.H1: blend weight on s_RANSAC. alpha=1.0 (default) is no-op (pure RANSAC). alpha=0.0 is pure ML. Sweep {0.0, 0.3, 0.5, 0.7, 0.9, 1.0} per plan §6.2. CLI: --sim3-seed-alpha.
 extern bool setting_indirectS1ConfidenceGate;    // Indirect.S.1 (lit audit §3.6 LR4): wrap H2 gate with ML κ-confidence check. When mean κ over matched-feature pixels < setting_indirectS1ConfidenceThresh, BYPASS H2 (ML unreliable; fall back to RANSAC-only). Default false; no effect when --p2-gate=false. CLI: --s1-confidence-gate.
 extern float setting_indirectS1ConfidenceThresh; // Indirect.S.1: AngMF κ threshold (raw, not sigmoid). Sweep {1, 5, 10, 25, 50}. Default 5.0 (loose initial bar). CLI: --s1-confidence-thresh.
+extern bool setting_indirectMapPointMLStorage;   // Indirect.P0 kill switch: when false, MapPoints are constructed WITHOUT ml_idepth/ml_uncertainty/hasMLDepth fields populated. Disables H2's old-estimator fallback and H3's old-estimator fallback. Step2a/2b matchers unaffected (they read live ML image, not MP fields). Default true (preserves existing behavior). CLI: --indirect-mp-ml-storage.
 
 // GT Depth Validation (Phase B) — research-only, NOT a shipped feature
 // When depthSource=GT, load GT depth from --associations PNG files and route it through

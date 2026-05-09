@@ -154,6 +154,7 @@ int main(int argc, char **argv)
 		("sim3-seed-alpha", "Indirect.H1 blend weight on s_RANSAC. alpha=1.0 (default) is no-op (pure RANSAC). alpha=0.0 is pure ML. Sweep {0, 0.3, 0.5, 0.7, 0.9, 1.0}.", cxxopts::value<float>()->default_value("1.0"))
 		("s1-confidence-gate", "Indirect.S.1 ML-confidence wrapper: bypass H2 P2 gate when mean κ over matched-feature pixels < --s1-confidence-thresh. No effect when --p2-gate=false. Default false.", cxxopts::value<bool>()->default_value("false"))
 		("s1-confidence-thresh", "Indirect.S.1 AngMF κ threshold (raw, not sigmoid). Sweep {1, 5, 10, 25, 50}. Default 5.0.", cxxopts::value<float>()->default_value("5.0"))
+		("indirect-mp-ml-storage", "Indirect.P0 kill switch: when false, MapPoints constructed without ml_idepth/uncertainty/hasMLDepth (disables H2 + H3 old-estimator fallbacks). Default true (preserves prior behavior). Used for the mono / direct-only / full ablation.", cxxopts::value<bool>()->default_value("true"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
 		// Phase toggles for the Phase C config matrix (Phase B/C research). Defaults match current production.
@@ -224,6 +225,7 @@ int main(int argc, char **argv)
 	setting_indirectSim3MlSeedAlpha = result["sim3-seed-alpha"].as<float>();
 	setting_indirectS1ConfidenceGate = result["s1-confidence-gate"].as<bool>();
 	setting_indirectS1ConfidenceThresh = result["s1-confidence-thresh"].as<float>();
+	setting_indirectMapPointMLStorage = result["indirect-mp-ml-storage"].as<bool>();
 	
 	// Validate and normalize ML strategy parameters for ablation study
 	if (ml_strategy != "keyframe_only" && ml_strategy != "snapshot_mode") {
