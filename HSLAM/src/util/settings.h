@@ -198,6 +198,8 @@ extern bool setting_indirectH3AbsScalePrior;     // Indirect.H3-abs: per-KF unar
 extern bool setting_indirectH3RelScalePrior;     // Indirect.H3-rel: pairwise EdgeSim3RelScalePrior (covisible KF pairs) in OptimizeEssentialGraph. Bias cancels by construction, no correction needed. Default false (opt-in). CLI: --h3-rel.
 extern float setting_indirectH3InfoWeight;       // Indirect.H3: information-matrix weight for both abs and rel scale priors. Greene & Roy ICRA 2020 left this open; sweep {1e-3, 1e-1, 1, 1e1, 1e3} per plan §6.4. Default 1.0. CLI: --h3-weight.
 extern float setting_indirectH3BiasCorrection;   // Indirect.H3-abs: scalar bias multiplier applied to s_ml_implied before use as unary-prior target. Default 0.55 (Phase C empirical Metric3D effective bias factor mapping outdoor scale 0.55 floor → 1.0). For bias-cancelling H3-rel this is unused. CLI: --h3-bias.
+extern bool setting_indirectSim3MlSeed;          // Indirect.H1 (seed-sensitivity diagnostic): when true, blend RANSAC scale with ML-derived s_ml before OptimizeSim3. s_seed = alpha*s_RANSAC + (1-alpha)*s_ml. Default false. Per lit-audit reframing as diagnostic, not ATE-test. CLI: --sim3-seed.
+extern float setting_indirectSim3MlSeedAlpha;    // Indirect.H1: blend weight on s_RANSAC. alpha=1.0 (default) is no-op (pure RANSAC). alpha=0.0 is pure ML. Sweep {0.0, 0.3, 0.5, 0.7, 0.9, 1.0} per plan §6.2. CLI: --sim3-seed-alpha.
 
 // GT Depth Validation (Phase B) — research-only, NOT a shipped feature
 // When depthSource=GT, load GT depth from --associations PNG files and route it through

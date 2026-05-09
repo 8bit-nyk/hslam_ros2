@@ -150,6 +150,8 @@ int main(int argc, char **argv)
 		("h3-rel", "Indirect.H3-rel pairwise EdgeSim3RelScalePrior over covisible KF pairs (anchors relative scale ratio to ML; bias cancels by construction). Default false.", cxxopts::value<bool>()->default_value("false"))
 		("h3-weight", "Indirect.H3 information-matrix weight for both abs and rel scale priors. Sweep {1e-3, 1e-1, 1, 1e1, 1e3} per plan §6.4. Default 1.0.", cxxopts::value<float>()->default_value("1.0"))
 		("h3-bias", "Indirect.H3-abs bias correction factor multiplied into s_ml_implied before use as unary-prior target. Default 0.55 (Phase C Metric3D effective bias). Unused for h3-rel.", cxxopts::value<float>()->default_value("0.55"))
+		("sim3-seed", "Indirect.H1 seed-sensitivity diagnostic: blend RANSAC scale with ML-derived s_ml before OptimizeSim3. Default false.", cxxopts::value<bool>()->default_value("false"))
+		("sim3-seed-alpha", "Indirect.H1 blend weight on s_RANSAC. alpha=1.0 (default) is no-op (pure RANSAC). alpha=0.0 is pure ML. Sweep {0, 0.3, 0.5, 0.7, 0.9, 1.0}.", cxxopts::value<float>()->default_value("1.0"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
 		// Phase toggles for the Phase C config matrix (Phase B/C research). Defaults match current production.
@@ -216,6 +218,8 @@ int main(int argc, char **argv)
 	setting_indirectH3RelScalePrior = result["h3-rel"].as<bool>();
 	setting_indirectH3InfoWeight = result["h3-weight"].as<float>();
 	setting_indirectH3BiasCorrection = result["h3-bias"].as<float>();
+	setting_indirectSim3MlSeed = result["sim3-seed"].as<bool>();
+	setting_indirectSim3MlSeedAlpha = result["sim3-seed-alpha"].as<float>();
 	
 	// Validate and normalize ML strategy parameters for ablation study
 	if (ml_strategy != "keyframe_only" && ml_strategy != "snapshot_mode") {

@@ -277,6 +277,14 @@ bool setting_indirectH3RelScalePrior = false;
 float setting_indirectH3InfoWeight = 1.0f;
 float setting_indirectH3BiasCorrection = 0.55f;
 
+// Indirect.H1 (May 8, 2026): OptimizeSim3 scale-seeding diagnostic. Reframed by lit audit as
+// a seed-sensitivity diagnostic (predicted null per LM convergence theory: RANSAC inliers place
+// s_RANSAC near the inlier-energy minimum; LM converges to the same minimum regardless of seed).
+// Sweep alpha ∈ {0, 0.3, 0.5, 0.7, 0.9, 1.0} per plan §6.2; verdict NULL if mean across loops of
+// |s_post_optimize - s_RANSAC| / s_RANSAC < 1% for all alpha. Default off.
+bool setting_indirectSim3MlSeed = false;
+float setting_indirectSim3MlSeedAlpha = 1.0f;
+
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
 // See docs/gt_depth_validation/PLAN.md
 int setting_depthSource = DEPTH_SOURCE_ML;

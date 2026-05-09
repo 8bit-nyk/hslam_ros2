@@ -377,11 +377,74 @@ namespace HSLAM {
                     Sim3 gScm = Sim3(SE3(R.cast<double>(), t.cast<double>()).matrix());
                     gScm.setScale(s);
 
+                    // Indirect.H1 (May 8, 2026): optionally seed OptimizeSim3 scale with ML-derived blend.
+                    // s_seed = alpha * s_RANSAC + (1 - alpha) * s_ml; alpha=1.0 (default) is no-op identity.
+                    // Per lit-audit reframing as a *seed-sensitivity diagnostic* (plan §6.2), we sweep alpha
+                    // ∈ {0, 0.3, 0.5, 0.7, 0.9, 1.0} and measure |s_post_optimize - s_RANSAC| / s_RANSAC. Predicted
+                    // null per LM convergence theory: RANSAC inlier sets typically place s_RANSAC near the inlier-
+                    // energy minimum, and LM should converge to the same minimum regardless of starting scale.
+                    // Uses new ?: old fallback identical to H2's policy. Only fires when seed has data (n>=5).
+                    float s_h1_seed_used = -1.f, s_h1_ml_used = -1.f;
+                    if (setting_indirectSim3MlSeed) {
+                        std::vector<float> h1_ratios_new, h1_ratios_old;
+                        const bool haveBothMl = pKF->mlDepthImage && !pKF->mlDepthImage->empty()
+                            && currentKF->mlDepthImage && !currentKF->mlDepthImage->empty();
+                        for (size_t j = 0; j < vpMapPointMatches.size(); j++) {
+                            auto mpCur = vpMapPointMatches[j];
+                            if (!mpCur) continue;
+                            // Old fallback: source-frame MP idepth ratios
+                            auto mpCand = pKF->getMapPoint(j);
+                            if (mpCand && mpCur->getHasMLDepth() && mpCand->getHasMLDepth()
+                                && mpCur->getMLIdepth() > 0 && mpCand->getMLIdepth() > 0)
+                                h1_ratios_old.push_back(mpCand->getMLIdepth() / mpCur->getMLIdepth());
+                            // New: per-pixel current-KF ML depth at matched features
+                            if (haveBothMl) {
+                                const int idxCur = mpCur->getIndexInKF(currentKF);
+                                if (idxCur >= 0 && idxCur < currentKF->nFeatures && j < (size_t)pKF->nFeatures) {
+                                    const cv::Point2f& ppKF = pKF->mvKeys[j].pt;
+                                    const cv::Point2f& pCur = currentKF->mvKeys[idxCur].pt;
+                                    const int yp = (int)ppKF.y, xp = (int)ppKF.x;
+                                    const int yc = (int)pCur.y, xc = (int)pCur.x;
+                                    if (yp >= 0 && yp < pKF->mlDepthImage->rows && xp >= 0 && xp < pKF->mlDepthImage->cols
+                                        && yc >= 0 && yc < currentKF->mlDepthImage->rows && xc >= 0 && xc < currentKF->mlDepthImage->cols) {
+                                        const float d_pKF = pKF->mlDepthImage->at<float>(yp, xp);
+                                        const float d_cur = currentKF->mlDepthImage->at<float>(yc, xc);
+                                        if (std::isfinite(d_pKF) && std::isfinite(d_cur) && d_pKF > 0.f && d_cur > 0.f)
+                                            h1_ratios_new.push_back(d_cur / d_pKF);
+                                    }
+                                }
+                            }
+                        }
+                        std::vector<float>* chosen = nullptr; const char* h1_src = "none";
+                        if (h1_ratios_new.size() >= 5) { chosen = &h1_ratios_new; h1_src = "new"; }
+                        else if (h1_ratios_old.size() >= 5) { chosen = &h1_ratios_old; h1_src = "old"; }
+                        if (chosen) {
+                            std::sort(chosen->begin(), chosen->end());
+                            const float s_ml_h1 = (*chosen)[chosen->size() / 2];
+                            const float alpha = setting_indirectSim3MlSeedAlpha;
+                            const float s_blend = alpha * s + (1.0f - alpha) * s_ml_h1;
+                            printf("[INDIRECT.SIM3_SEED] cur=%d cand=%d s_ransac=%.3f s_ml=%.3f source=%s alpha=%.2f s_seed=%.3f n=%zu\n",
+                                   (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                   s, s_ml_h1, h1_src, alpha, s_blend, chosen->size());
+                            gScm.setScale((double)s_blend);
+                            s_h1_seed_used = s_blend; s_h1_ml_used = s_ml_h1;
+                        }
+                    }
+
                     const int nInliers = OptimizeSim3(pKF, currentKF, vpMapPointMatches, gScm, 10, false); //def: currentKf, pKF
                     // If optimization is succesful stop ransacs and continue
                     if (nInliers >= 30) //20
                     {
                         const float s_optimized = gScm.scale();
+
+                        // Indirect.H1 sensitivity diagnostic: how much did the seed actually move s_post?
+                        // If LM is convergent (predicted), |s_post - s_RANSAC| / s_RANSAC < 1% across all alpha.
+                        if (setting_indirectSim3MlSeed && s_h1_seed_used > 0.f) {
+                            const float sensitivity = std::abs(s_optimized - s) / std::max(s, 1e-6f);
+                            printf("[INDIRECT.SIM3_SEED] cur=%d cand=%d s_seed=%.3f s_post=%.3f s_ransac=%.3f sensitivity=%.4f (vs_ransac=%.2f%%)\n",
+                                   (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                   s_h1_seed_used, s_optimized, s, sensitivity, sensitivity * 100.0f);
+                        }
 
                         // Indirect.H0 (May 7, 2026): compute s_ml two ways for comparison.
                         // - s_ml_old: legacy ratio of source-frame MapPoint ML idepths (semantically conflated; see audit R2).
