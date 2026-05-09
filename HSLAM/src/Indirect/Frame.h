@@ -152,6 +152,12 @@ namespace HSLAM
         // candidate KFs retain their ML depth map for current-frame s_ml computation.
         std::shared_ptr<cv::Mat> mlDepthImage;
 
+        // ML confidence map (Indirect.S.1 — May 8 2026): shared_ptr copy from the source FH's
+        // ml_confidence_map_. Used by the S.1 ML-confidence gating wrapper around the H2 P2 gate
+        // (per lit audit §3.6 LR4): when mean κ over matched feature pixels is below threshold,
+        // the H2 gate is bypassed (ML scale unreliable on this loop pair → fall back to RANSAC-only).
+        std::shared_ptr<cv::Mat> mlConfidenceImage;
+
         long unsigned int mnLoopQuery;
         int mnLoopWords;
         float mLoopScore;

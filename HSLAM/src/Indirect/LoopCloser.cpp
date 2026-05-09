@@ -516,6 +516,41 @@ namespace HSLAM {
                                ml_ratios_old.size(), ml_ratios_new.size(),
                                degenerateRansac ? "YES" : "no");
 
+                        // Indirect.S.1 (May 8, 2026): ML-confidence (κ) gating wrapper around the H2 P2 gate.
+                        // Per lit audit §3.6 LR4: Metric3D's AngMF κ over matched-feature pixels indicates
+                        // ML reliability for this loop pair. Below κ < τ, H2 should NOT veto a loop (ML is
+                        // unreliable here; fall back to RANSAC-only behavior). Mean κ computed over matched
+                        // pixels in currentKF's confidence map. Default off (--s1-confidence-gate=false);
+                        // wraps H2 only — has no effect when --p2-gate=false.
+                        bool s1_bypass_h2 = false;
+                        if (setting_indirectS1ConfidenceGate && setting_indirectP2RejectGate) {
+                            auto confImg = currentKF->mlConfidenceImage;
+                            if (confImg && !confImg->empty()) {
+                                double sum_kappa = 0.0; int n_kappa = 0;
+                                for (size_t j = 0; j < vpMapPointMatches.size(); j++) {
+                                    auto mpCur = vpMapPointMatches[j];
+                                    if (!mpCur) continue;
+                                    const int idxCur = mpCur->getIndexInKF(currentKF);
+                                    if (idxCur < 0 || idxCur >= currentKF->nFeatures) continue;
+                                    const cv::Point2f& pCur = currentKF->mvKeys[idxCur].pt;
+                                    const int yc = (int)pCur.y, xc = (int)pCur.x;
+                                    if (yc >= 0 && yc < confImg->rows && xc >= 0 && xc < confImg->cols) {
+                                        const float kappa = confImg->at<float>(yc, xc);
+                                        if (std::isfinite(kappa) && kappa > 0.f) { sum_kappa += kappa; n_kappa++; }
+                                    }
+                                }
+                                const double mean_kappa = (n_kappa > 0) ? sum_kappa / n_kappa : -1.0;
+                                s1_bypass_h2 = (n_kappa > 0 && mean_kappa < setting_indirectS1ConfidenceThresh);
+                                printf("[INDIRECT.S1] cur=%d cand=%d mean_kappa=%.3f n=%d thresh=%.3f decision=%s\n",
+                                       (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                       mean_kappa, n_kappa, setting_indirectS1ConfidenceThresh,
+                                       s1_bypass_h2 ? "BYPASS_H2" : "ALLOW_H2");
+                            } else {
+                                printf("[INDIRECT.S1] cur=%d cand=%d no_confidence_map (no S1 effect)\n",
+                                       (int)currentKF->fs->KfId, (int)pKF->fs->KfId);
+                            }
+                        }
+
                         // Indirect.H2 (May 8, 2026): loop-closure Sim3 scale-disagreement rejection gate.
                         // Fallback policy decided by C0_post finding (plan §12.2): prefer new s_ml (≥5 samples) for
                         // semantic correctness, fall back to old s_ml (≥5 samples) when production ML cadence
@@ -523,7 +558,7 @@ namespace HSLAM {
                         // BOTH estimators are < 5 samples — that's true coverage_low. Diagnostic always prints
                         // the gate's decision (REJECTED / ACCEPTED / BYPASS_COVERAGE_LOW) so §6.3 measurement can
                         // count, per estimator, would-the-gate-have-caught-this. Default off (--p2-gate=false).
-                        if (setting_indirectP2RejectGate) {
+                        if (setting_indirectP2RejectGate && !s1_bypass_h2) {
                             bool mlScaleValid = true;
                             float s_ml_used = -1.f; size_t n_used = 0; const char* source_used = "none";
                             if (ml_ratios_new.size() >= 5) {

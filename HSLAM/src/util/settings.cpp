@@ -285,6 +285,15 @@ float setting_indirectH3BiasCorrection = 0.55f;
 bool setting_indirectSim3MlSeed = false;
 float setting_indirectSim3MlSeedAlpha = 1.0f;
 
+// Indirect.S.1 (May 8, 2026): ML-confidence (AngMF κ) gating wrapper around the H2 P2 gate.
+// Per lit audit §3.6 LR4: when mean κ over matched feature pixels < threshold, ML is too noisy
+// to base a rejection on — bypass H2 gate (allow loop) on this event. Falls back to RANSAC-only
+// behavior. Default off; no effect when --p2-gate=false. Threshold sweep {1, 5, 10, 25, 50} per
+// LR4. Per project_kappa_depth_error_correlation.md, raw AngMF κ ∈ [0.13, 66] empirically with
+// indoor mean ~5; threshold 5 is a loose initial bar.
+bool setting_indirectS1ConfidenceGate = false;
+float setting_indirectS1ConfidenceThresh = 5.0f;
+
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
 // See docs/gt_depth_validation/PLAN.md
 int setting_depthSource = DEPTH_SOURCE_ML;
