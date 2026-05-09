@@ -485,7 +485,67 @@ int OptimizeSim3(std::shared_ptr<Frame> pKF1, std::shared_ptr<Frame> pKF2, std::
 }
 
 
-void OptimizeEssentialGraph(std::vector<FrameShell*> & vpKFs, std::vector<std::shared_ptr<MapPoint>> &vpMPs, std::set<std::shared_ptr<Frame>> &TempFixed, 
+// Indirect.H3 helper (May 8, 2026): per-KF s_ml_implied = median(z_slam / z_ml) over MapPoints
+// visible in pKF, where z_slam = MP-projected depth in pKF's camera frame and z_ml = ML depth at
+// the MP's pixel in pKF. Returns -1.0 when neither the new estimator (current-KF mlDepthImage at
+// matched pixels) nor the old fallback (source-frame MP idepth ratios) reaches >= 5 samples.
+// Used by OptimizeEssentialGraph to set unary EdgeSim3ScalePrior measurements (H3-abs, gated by
+// setting_indirectH3AbsScalePrior) and pairwise EdgeSim3RelScalePrior measurements (H3-rel, gated
+// by setting_indirectH3RelScalePrior). Decoupling ?: fallback mirrors H2's design — production ML
+// cadence (every-Nth-KF) leaves only ~50% of KFs with their own mlDepthImage, but most have at
+// least 5 ML-bearing MapPoints from earlier source frames, so the gate rarely starves.
+static double computePerKFSmlImplied(std::shared_ptr<Frame> pKF)
+{
+    if (!pKF) return -1.0;
+    const SE3 T_cw = pKF->fs->getPose();
+    auto mlImg = pKF->mlDepthImage;
+    const bool hasMlImg = (mlImg && !mlImg->empty());
+
+    std::vector<double> ratios_new;
+    std::vector<double> ratios_old;
+    auto MPs = pKF->getMapPointsV();
+
+    for (size_t i = 0; i < MPs.size(); ++i)
+    {
+        auto MP = MPs[i];
+        if (!MP || MP->isBad()) continue;
+
+        if (hasMlImg && (int)i < pKF->nFeatures)
+        {
+            const cv::Point2f& p = pKF->mvKeys[i].pt;
+            const int yi = (int)p.y, xi = (int)p.x;
+            if (yi >= 0 && yi < mlImg->rows && xi >= 0 && xi < mlImg->cols)
+            {
+                Vec3 MPw = MP->getWorldPose().cast<double>();
+                Vec3 MPc = T_cw * MPw;
+                const double z_slam = MPc[2];
+                const double z_ml = (double)mlImg->at<float>(yi, xi);
+                if (std::isfinite(z_slam) && std::isfinite(z_ml) && z_slam > 0.0 && z_ml > 0.0)
+                    ratios_new.push_back(z_slam / z_ml);
+            }
+        }
+
+        if (MP->getHasMLDepth())
+        {
+            const float idepth_slam = MP->getidepth();
+            const float idepth_ml = MP->getMLIdepth();
+            if (idepth_slam > 0.f && idepth_ml > 0.f)
+                ratios_old.push_back((double)idepth_ml / (double)idepth_slam);
+        }
+    }
+
+    auto medianOf = [](std::vector<double>& v) -> double {
+        if (v.empty()) return -1.0;
+        std::sort(v.begin(), v.end());
+        return v[v.size() / 2];
+    };
+    if (ratios_new.size() >= 5) return medianOf(ratios_new);
+    if (ratios_old.size() >= 5) return medianOf(ratios_old);
+    return -1.0;
+}
+
+
+void OptimizeEssentialGraph(std::vector<FrameShell*> & vpKFs, std::vector<std::shared_ptr<MapPoint>> &vpMPs, std::set<std::shared_ptr<Frame>> &TempFixed,
                             std::shared_ptr<Frame> pLoopKF, std::shared_ptr<Frame> pCurKF,
                             const KeyFrameAndPose &NonCorrectedSim3, const KeyFrameAndPose &CorrectedSim3, 
                             const std::map<std::shared_ptr<Frame>, std::set<std::shared_ptr<Frame>, std::owner_less<std::shared_ptr<Frame>>>, std::owner_less<std::shared_ptr<Frame>>> &LoopConnections,
@@ -767,9 +827,99 @@ void OptimizeEssentialGraph(std::vector<FrameShell*> & vpKFs, std::vector<std::s
                 optimizer.addEdge(en);
             }
 
+            // Indirect.H3 (May 8, 2026): optional ML-derived per-KF Sim3 scale priors.
+            // - H3-abs: unary EdgeSim3ScalePrior anchoring s_v toward bias-corrected s_ml_implied.
+            // - H3-rel: pairwise EdgeSim3RelScalePrior over already-inserted covisible KF pairs,
+            //           anchoring relative scale to ratio of independent ML estimates (bias cancels).
+            // Both default off; opt in via --h3-abs / --h3-rel. Information weight via --h3-weight.
+            // See LOOP_CLOSURE_ML_TEST_PLAN.md §4 H3 + §6.4 + Sim3_impl.h EdgeSim3*ScalePrior comments.
+            std::map<int, double> kfid_to_sml;
+            int h3_abs_added = 0, h3_rel_added = 0;
+            if (setting_indirectH3AbsScalePrior || setting_indirectH3RelScalePrior)
+            {
+                int n_with_data = 0, n_total = 0;
+                for (size_t i = 0; i < vpKFs.size(); i++)
+                {
+                    if (vpKFs[i]->KfId > maxKfIdatCand) continue;
+                    auto pKF = vpKFs[i]->frame;
+                    if (!pKF) continue;
+                    n_total++;
+                    const double s_ml = computePerKFSmlImplied(pKF);
+                    kfid_to_sml[vpKFs[i]->KfId] = s_ml;
+                    if (s_ml > 0.0) n_with_data++;
+                }
+                printf("[INDIRECT.ESSGRAPH_SCALE] H3 prior data: %d / %d KFs have s_ml_implied (n>=5)\n",
+                       n_with_data, n_total);
+
+                if (setting_indirectH3AbsScalePrior)
+                {
+                    for (auto& kv : kfid_to_sml)
+                    {
+                        if (kv.second <= 0.0) continue;
+                        auto* v = optimizer.vertex(kv.first);
+                        if (!v) continue;
+                        EdgeSim3ScalePrior* e = new EdgeSim3ScalePrior();
+                        e->setVertex(0, v);
+                        const double s_target = kv.second * setting_indirectH3BiasCorrection;
+                        e->setMeasurement(s_target);
+                        Eigen::Matrix<double, 1, 1> info; info(0, 0) = setting_indirectH3InfoWeight;
+                        e->setInformation(info);
+                        e->setId(index++);
+                        optimizer.addEdge(e);
+                        h3_abs_added++;
+                    }
+                }
+                if (setting_indirectH3RelScalePrior)
+                {
+                    for (auto& pr : sInsertedEdges)
+                    {
+                        const int kfi = (int)pr.first, kfj = (int)pr.second;
+                        auto it_i = kfid_to_sml.find(kfi);
+                        auto it_j = kfid_to_sml.find(kfj);
+                        if (it_i == kfid_to_sml.end() || it_j == kfid_to_sml.end()) continue;
+                        if (it_i->second <= 0.0 || it_j->second <= 0.0) continue;
+                        auto* vi = optimizer.vertex(kfi);
+                        auto* vj = optimizer.vertex(kfj);
+                        if (!vi || !vj) continue;
+                        EdgeSim3RelScalePrior* e = new EdgeSim3RelScalePrior();
+                        e->setVertex(0, vi);
+                        e->setVertex(1, vj);
+                        const double s_target_ratio = it_i->second / it_j->second;
+                        e->setMeasurement(s_target_ratio);
+                        Eigen::Matrix<double, 1, 1> info; info(0, 0) = setting_indirectH3InfoWeight;
+                        e->setInformation(info);
+                        e->setId(index++);
+                        optimizer.addEdge(e);
+                        h3_rel_added++;
+                    }
+                }
+                printf("[INDIRECT.ESSGRAPH_SCALE] H3 edges added: abs=%d rel=%d (weight=%.3g, bias_corr=%.3f)\n",
+                       h3_abs_added, h3_rel_added, setting_indirectH3InfoWeight, setting_indirectH3BiasCorrection);
+            }
+
             // Optimize!
             optimizer.initializeOptimization(0);
             optimizer.optimize(25);
+
+            // Indirect.H3 post-optimize diagnostic: log per-KF Sim3 vertex pre/post scale + s_ml_implied
+            // for up to first 10 KFs that had a prior. Lets us see whether the optimizer pulled scales
+            // toward the targets or LM stayed in the photo/covis basin.
+            if (!kfid_to_sml.empty())
+            {
+                int sample_count = 0;
+                for (auto& kv : kfid_to_sml)
+                {
+                    if (sample_count >= 10) break;
+                    if (kv.second <= 0.0) continue;
+                    Sim3Vertex* v = static_cast<Sim3Vertex*>(optimizer.vertex(kv.first));
+                    if (!v) continue;
+                    const double s_pre = vScw[kv.first].scale();
+                    const double s_post = v->estimate().scale();
+                    printf("[INDIRECT.ESSGRAPH_SCALE] kf=%d pre_scale=%.4f post_scale=%.4f s_ml_implied=%.4f\n",
+                           kv.first, s_pre, s_post, kv.second);
+                    sample_count++;
+                }
+            }
 
             for (size_t i = 0; i < vpKFs.size(); i++)
             {

@@ -262,6 +262,21 @@ bool setting_indirectMlSemanticFix = true;
 bool setting_indirectP2RejectGate = true;
 float setting_indirectP2RejectThresh = 0.5f;
 
+// Indirect.H3 (May 8, 2026): per-KF Sim3 scale priors in OptimizeEssentialGraph.
+// Two arms (parallel/independent toggles per plan §4.0 + §6.4):
+//   H3-abs: unary EdgeSim3ScalePrior pulling s_vertex toward bias-corrected s_ml_implied.
+//   H3-rel: pairwise EdgeSim3RelScalePrior over covisible KF pairs anchoring relative scale
+//           to ratio of independent ML estimates (bias-cancels by construction).
+// Both default off (opt-in). H3-abs requires the bias correction or it pulls the gauge to
+// Metric3D's ~0.55 outdoor floor (cf. Direct.P2 KILL). H3-rel does not need bias correction.
+// Information weight is a free hyperparameter per Greene & Roy ICRA 2020; sweep planned.
+// Per-KF s_ml_implied uses H2's new ?: old fallback so that production cadence (every-Nth-KF
+// ML) doesn't starve the priors of data on most KFs.
+bool setting_indirectH3AbsScalePrior = false;
+bool setting_indirectH3RelScalePrior = false;
+float setting_indirectH3InfoWeight = 1.0f;
+float setting_indirectH3BiasCorrection = 0.55f;
+
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
 // See docs/gt_depth_validation/PLAN.md
 int setting_depthSource = DEPTH_SOURCE_ML;

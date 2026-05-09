@@ -141,10 +141,15 @@ int main(int argc, char **argv)
 		("ml-idepth-uncertainty", "Phase 1 base idepth uncertainty for ML bounds (default 0.20 = cross-regime optimum per Apr 27 sweep). Smaller = tighter; was 0.05 pre-Apr27.", cxxopts::value<float>()->default_value("0.20"))
 		("ml-mean-strategy", "mlMeanDepth computation: 0=arith mean of valid (legacy), 1=median, 2=trimmed mean 5-95%. Default 0.", cxxopts::value<int>()->default_value("0"))
 		("ml-inference-mode", "ML inference cadence: 0=every Nth KF (legacy), 1=init_only (lean), 2=disabled. Default 0.", cxxopts::value<int>()->default_value("0"))
+		("ml-inference-every-n", "Indirect.H3 testing: run ML inference every Nth keyframe (only used when --ml-inference-mode=0). Default 2 (paper Table V optimum). Set to 1 for full per-KF coverage when validating H3 priors. Revert after testing.", cxxopts::value<int>()->default_value("2"))
 		("ml-indirect-filter", "Indirect.Step2 ML depth-ratio filter in feature matchers. true=enabled (legacy), false=disabled. Default true.", cxxopts::value<bool>()->default_value("true"))
 		("indirect-ml-semantic-fix", "Indirect.H0 s_ml semantic fix in LoopCloser: compute s_ml from current-KF ML depth images at matched pixels (true) vs legacy source-frame MapPoint ML idepth ratios (false). Default true. SML_COMPARE diagnostic prints both regardless.", cxxopts::value<bool>()->default_value("true"))
 		("p2-gate", "Indirect.H2 P2 rejection gate: reject loop-closure Sim3 candidates whose ML-derived scale disagrees with RANSAC-fit scale by more than --p2-gate-thresh. Uses new s_ml if available, falls back to old. Default true (shipped May 8, 2026 after C2 verdict).", cxxopts::value<bool>()->default_value("true"))
 		("p2-gate-thresh", "Indirect.H2 disagreement threshold for the P2 gate. Reject if |s_RANSAC - s_ML| / max(s_RANSAC, s_ML) > thresh. Default 0.5 (50%).", cxxopts::value<float>()->default_value("0.5"))
+		("h3-abs", "Indirect.H3-abs unary EdgeSim3ScalePrior in OptimizeEssentialGraph (anchors per-KF Sim3 scale to bias-corrected ML estimate). Default false. Requires --h3-bias.", cxxopts::value<bool>()->default_value("false"))
+		("h3-rel", "Indirect.H3-rel pairwise EdgeSim3RelScalePrior over covisible KF pairs (anchors relative scale ratio to ML; bias cancels by construction). Default false.", cxxopts::value<bool>()->default_value("false"))
+		("h3-weight", "Indirect.H3 information-matrix weight for both abs and rel scale priors. Sweep {1e-3, 1e-1, 1, 1e1, 1e3} per plan §6.4. Default 1.0.", cxxopts::value<float>()->default_value("1.0"))
+		("h3-bias", "Indirect.H3-abs bias correction factor multiplied into s_ml_implied before use as unary-prior target. Default 0.55 (Phase C Metric3D effective bias). Unused for h3-rel.", cxxopts::value<float>()->default_value("0.55"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
 		// Phase toggles for the Phase C config matrix (Phase B/C research). Defaults match current production.
@@ -202,10 +207,15 @@ int main(int argc, char **argv)
 	setting_idepthUncertaintyForMLInit = result["ml-idepth-uncertainty"].as<float>();
 	setting_mlMeanDepthStrategy = result["ml-mean-strategy"].as<int>();
 	setting_mlInferenceMode = result["ml-inference-mode"].as<int>();
+	setting_mlInferenceEveryN = result["ml-inference-every-n"].as<int>();
 	setting_indirectMatcherUseML = result["ml-indirect-filter"].as<bool>();
 	setting_indirectMlSemanticFix = result["indirect-ml-semantic-fix"].as<bool>();
 	setting_indirectP2RejectGate = result["p2-gate"].as<bool>();
 	setting_indirectP2RejectThresh = result["p2-gate-thresh"].as<float>();
+	setting_indirectH3AbsScalePrior = result["h3-abs"].as<bool>();
+	setting_indirectH3RelScalePrior = result["h3-rel"].as<bool>();
+	setting_indirectH3InfoWeight = result["h3-weight"].as<float>();
+	setting_indirectH3BiasCorrection = result["h3-bias"].as<float>();
 	
 	// Validate and normalize ML strategy parameters for ablation study
 	if (ml_strategy != "keyframe_only" && ml_strategy != "snapshot_mode") {
