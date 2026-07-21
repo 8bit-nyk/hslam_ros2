@@ -1,7 +1,8 @@
 SET(PROJECT_NAME HSLAM)
-CMAKE_MINIMUM_REQUIRED(VERSION 2.9)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.18) # gd -dev -16june2026; was set to 2.9
 
-set(OpenCV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/share/OpenCV)
+# set(OpenCV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/share/OpenCV) # gd -dev -17june2026
+set(OpenCV_DIR /home/ahmad/Desktop/GD/MGSO_GD/thirdparty/opencv-4.9.0-cuda/lib/cmake/opencv4) # gd -dev -17june2026
 set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake)
 #set(G2O_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake/g2o)
 Set(G2O_INCLUDE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/include/g2o)
@@ -9,7 +10,7 @@ Set(G2O_INCLUDE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/include
 message ("OPENCV Directory: ${OpenCV_DIR}")
 message("The CMAKE prefix path is: ${CMAKE_PREFIX_PATH}")
 
-PROJECT(${PROJECT_NAME})
+PROJECT(${PROJECT_NAME} LANGUAGES CXX CUDA) # gd -dev -16june2026
 #set(BUILD_TYPE Release)
 set(BUILD_TYPE RelWithDebInfo)
 
@@ -29,6 +30,14 @@ find_package(OpenCV 4.9.0 REQUIRED)
 # find_package(OpenCV 4.9.0 REQUIRED PATHS ${HARDCODED_PROJECT_DIR}/colcon_ws/src/HSLAM/Thirdparty/CompiledLibs NO_DEFAULT_PATH)
 find_package(G2O REQUIRED)
 find_package(DBoW3 REQUIRED) #PATHS ~/colcon_ws/src/HSLAM/Thirdparty/CompiledLibs)
+# gd -dev -16june2026
+find_package(glm REQUIRED)
+find_package(CUDAToolkit REQUIRED) 
+# set(Torch_DIR /home/ahmad/anaconda3/envs/surfel_splatting/lib/python3.8/site-packages/torch/share/cmake/Torch)
+set(Torch_DIR /home/ahmad/Desktop/GD/MGSO_GD/thirdparty/libtorch/share/cmake/Torch)  # gd -dev -17june2026
+find_package(Torch REQUIRED)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -pthread")
+# gd -dev -16june2016
 
 # optional libraries
 find_package(LibZip QUIET)
@@ -77,18 +86,33 @@ if(ENABLE_DEPTH_DEBUG)
     message(STATUS "DEPTH_DEBUG: ML depth debugging enabled (temporary)")
 endif()
 
+# set(CMAKE_GENERATOR "Unix Makefiles")
+# set(CMAKE_CXX_FLAGS
+#    "${SSE_FLAGS} -O3 -g -std=c++14 -march=native -Wno-deprecated -Wno-deprecated-declarations" #-fopenmp is added if g2o is compiled with openmp capabilities
+# #   "${SSE_FLAGS} -O3 -g -std=c++14 -fno-omit-frame-pointer"
+# )
+# #SET CXX FLAGS to use march antive and gcc
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -std=gnu++14")
+# set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -march=native -std=gnu++14")
+# set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -march=native -std=gnu++14")
+# set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native -std=gnu++14")
+# set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -march=native -std=gnu++14")
+
+# gd -dev -16june2026
 set(CMAKE_GENERATOR "Unix Makefiles")
 set(CMAKE_CXX_FLAGS
-   "${SSE_FLAGS} -O3 -g -std=c++14 -march=native -Wno-deprecated -Wno-deprecated-declarations" #-fopenmp is added if g2o is compiled with openmp capabilities
-#   "${SSE_FLAGS} -O3 -g -std=c++14 -fno-omit-frame-pointer"
+   "${SSE_FLAGS} -O3 -g -march=native -Wno-deprecated -Wno-deprecated-declarations" #-fopenmp is added if g2o is compiled with openmp capabilities
 )
 #SET CXX FLAGS to use march antive and gcc
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -std=gnu++14")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -march=native -std=gnu++14")
-set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -march=native -std=gnu++14")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native -std=gnu++14")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -march=native -std=gnu++14")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -march=native")
+set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -march=native")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -march=native")
 
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+# gd -dev -16june2026
 if (MSVC)
      set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
 endif (MSVC)
@@ -126,6 +150,20 @@ set(SOURCE_FILES
   ${PROJECT_SOURCE_DIR}/src/Indirect/Optimizer.cpp
   ${PROJECT_SOURCE_DIR}/src/Indirect/Sim3Solver.cpp
   ${PROJECT_SOURCE_DIR}/src/Indirect/LoopCloser.cpp
+# gd -dev -16june2026
+  ${PROJECT_SOURCE_DIR}/src/GSIntegration/gaussian_mapper.cpp
+  ${PROJECT_SOURCE_DIR}/src/GSIntegration/gaussian_mapper_utils.cpp
+  ${PROJECT_SOURCE_DIR}/src/GSIntegration/gaussian_mapper_IO.cpp
+  ${PROJECT_SOURCE_DIR}/3DGS/src/gaussian_rasterizer.cpp
+  ${PROJECT_SOURCE_DIR}/3DGS/src/gaussian_scene.cpp
+  ${PROJECT_SOURCE_DIR}/3DGS/src/gaussian_model_utils.cpp
+  ${PROJECT_SOURCE_DIR}/3DGS/src/gaussian_parameters.cpp
+  ${PROJECT_SOURCE_DIR}/3DGS/src/gaussian_keyframe.cpp
+  ${PROJECT_SOURCE_DIR}/3DGS/src/gaussian_model.cpp
+  ${PROJECT_SOURCE_DIR}/3DGS/src/gaussian_renderer.cpp
+  ${PROJECT_SOURCE_DIR}/3DGS/src/gaussian_trainer.cpp
+  ${PROJECT_SOURCE_DIR}/Thirdparty/tinyply/tinyply.cpp   # gd -dev -17june2026
+# gd -dev -16june2026
 )
 
 
@@ -138,6 +176,10 @@ include_directories(
   ${EIGEN3_INCLUDE_DIR}
   ${G2O_INCLUDE_DIR}
   ${ONNXRUNTIME_INCLUDE_DIR}
+# gd -dev -16june2026
+  ${PROJECT_SOURCE_DIR}
+  ${TORCH_INCLUDE_DIRS}
+# gd -dev -16june2026
 ) 
 
 
@@ -183,6 +225,37 @@ else()
 	set(LIBZIP_LIBRARY "")
 endif()
 
+# gd -dev -16june2026
+# Compiled GS libraries
+add_library(simple_knn SHARED
+    ${PROJECT_SOURCE_DIR}/Thirdparty/simple-knn/simple_knn.cu
+    ${PROJECT_SOURCE_DIR}/Thirdparty/simple-knn/simple_knn.h
+    ${PROJECT_SOURCE_DIR}/Thirdparty/simple-knn/spatial.cu
+    ${PROJECT_SOURCE_DIR}/Thirdparty/simple-knn/spatial.h)
+target_link_libraries(simple_knn "${TORCH_LIBRARIES}")
+
+add_library(cuda_rasterizer SHARED
+    ${PROJECT_SOURCE_DIR}/3DGS/include/operate_points.h
+    ${PROJECT_SOURCE_DIR}/3DGS/src/operate_points.cu
+    ${PROJECT_SOURCE_DIR}/3DGS/include/rasterize_points.h
+    ${PROJECT_SOURCE_DIR}/3DGS/src/rasterize_points.cu
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/auxiliary.h
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/backward.cu
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/backward.h
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/config.h
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/forward.cu
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/forward.h
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/operate_points.h
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/rasterizer.h
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/rasterizer_impl.cu
+    ${PROJECT_SOURCE_DIR}/cuda_rasterizer/rasterizer_impl.h)
+set_target_properties(cuda_rasterizer PROPERTIES CUDA_ARCHITECTURES "61;75;86")
+target_include_directories(cuda_rasterizer PRIVATE
+    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+target_link_libraries(cuda_rasterizer
+    glm::glm
+    "${TORCH_LIBRARIES}")
+# gd -dev -16june2026
 
 # compile main library.
 include_directories( ${CSPARSE_INCLUDE_DIR} ${CHOLMOD_INCLUDE_DIR}) 
@@ -205,6 +278,12 @@ set(LIBS
   ${Pangolin_LIBRARIES}
   ${DBoW3_LIB_DIR}/libDBoW3.so
   ${BOOST_THREAD_LIBRARY}
+# gd -dev -16junee2026
+  ${TORCH_LIBRARIES}
+  glm::glm
+  simple_knn
+  cuda_rasterizer
+# gd -dev -16june2026
   boost_system
   cxsparse
   cholmod

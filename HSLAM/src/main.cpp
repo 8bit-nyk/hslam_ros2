@@ -33,6 +33,9 @@
 // FPS logging includes
 #include "util/FPSLogger.h"
 
+// GS integration
+#include "GSIntegration/gaussian_mapper.h" // gd -dev -16june2026
+
 // Custom structure for parsing associations.txt
 struct RGBDAssociation {
     double rgb_timestamp;
@@ -134,7 +137,9 @@ int main(int argc, char **argv)
 		("ml-gpu-device", "GPU device ID for ML inference", cxxopts::value<int>()->default_value("0"))
 		("ml-gpu-memory", "GPU memory limit in MB", cxxopts::value<size_t>()->default_value("2048"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
-		("h,help", "Print usage")
+		 // ("gauss", "Enable 3DGS integration (requires --colour)", cxxopts::value<bool>()->default_value("false")) // gd -dev -9june2026
+		("gauss", "Config path for 3DGS (requires --colour).", cxxopts::value<std::string>()->default_value("")) // gd -dev -16june2026
+        ("h,help", "Print usage")
     ;
 
 	auto result = options.parse(argc, argv);
@@ -194,6 +199,20 @@ int main(int argc, char **argv)
 	
 	// ML initialization control (for A/B testing)
 	bool ml_init_enabled = result["ml-init"].as<bool>();
+
+    // // gd -dev -9june2026
+    // bool gauss_enabled = result["gauss"].as<bool>();
+    // gd -dev -16june2026
+    std::string gauss_config_path = result["gauss"].as<std::string>();
+    bool gauss_enabled = !gauss_config_path.empty();
+
+    // dI_c is null without colour
+    if (gauss_enabled && !use_colour)
+    {
+        printf("ERROR: --gauss requires --colour. dI_c is not allocated without colour mode. Exiting.\n");
+        return -1;
+    }
+    // gd -dev -9june2026
 
 	if(source.empty() || calib.empty()) { std::cout<< "Path to images or calibration not provided! cannot function without them. exit." << std::endl; return(0);}
 
@@ -314,6 +333,44 @@ int main(int argc, char **argv)
 	FullSystem* fullSystem = new FullSystem();
 	fullSystem->setGammaFunction(reader->getPhotometricGamma());
 	fullSystem->linearizeOperation = (playbackSpeed == 0);
+
+    // // gd -dev -9june2026
+    // if (gauss_enabled)
+    // {
+    //     setting_use3DGS = true;
+    //     printf("[GSI] GS integration enabled — queue will fill after each keyframe.\n");
+    //     printf("[GSI] NOTE: GaussianMapper thread not started yet (Phase 2).\n");
+    // }
+
+    // // gd -dev -9june2026
+    // gd -dev -16june2026
+    std::shared_ptr<HSLAM::GaussianMapper> pGausMapper;
+    std::thread gs_thread;
+
+    if (gauss_enabled)
+    {
+        setting_use3DGS = true;
+        printf("[GSI] GS integration enabled — queue will fill after each keyframe.\n");
+
+        torch::DeviceType device_type =
+            torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
+
+        // Non-owning shared_ptr: main.cpp still owns fullSystem and deletes it itself.
+        // This wrapper lets GaussianMapper hold a shared_ptr without taking ownership —
+        // the no-op deleter means destroying this shared_ptr never calls delete on fullSystem.
+        std::shared_ptr<HSLAM::FullSystem> pSLAM(fullSystem, [](HSLAM::FullSystem*){});
+
+        pGausMapper = std::make_shared<HSLAM::GaussianMapper>(
+            pSLAM,
+            std::filesystem::path(gauss_config_path),
+            std::filesystem::path("./gs_output"),
+            0,
+            device_type);
+
+        gs_thread = std::thread(&HSLAM::GaussianMapper::run, pGausMapper.get());
+        printf("[GSI] GaussianMapper thread started.\n");
+    }
+    // gd -dev -16june2026
 	
 	// Apply ML initialization setting from command line
 	setting_useMLForInitialization = ml_init_enabled;
@@ -613,6 +670,12 @@ int main(int argc, char **argv)
                 
                 if(fullSystem->initFailed || setting_fullResetRequested) {
                     if(processedFrames < 250 || setting_fullResetRequested) {
+                        // gd -dev -16june2026
+                        if (setting_use3DGS) {
+                            printf("ERROR: Full system reset with 3DGS active is not supported. Exiting.\n");
+                            exit(1);
+                        }
+                        // gd -dev -16june2026
                         printf("RESETTING!\n");
                         std::vector<IOWrap::Output3DWrapper*> wraps = fullSystem->outputWrapper;
                         for(IOWrap::Output3DWrapper* ow : wraps) ow->reset();
@@ -769,6 +832,12 @@ int main(int argc, char **argv)
                 {
                     if(ii < 250 || setting_fullResetRequested)
                     {
+                        // gd -dev -16june2026
+                        if (setting_use3DGS) {
+                            printf("ERROR: Full system reset with 3DGS active is not supported. Exiting.\n");
+                            exit(1);
+                        }
+                        // gd -dev -16june2026
                         printf("RESETTING!\n");
                         std::vector<IOWrap::Output3DWrapper*> wraps = fullSystem->outputWrapper;
                         for(IOWrap::Output3DWrapper* ow : wraps) ow->reset();
@@ -832,6 +901,14 @@ int main(int argc, char **argv)
         }
 		// fullSystem->BAatExit();
 		fullSystem->blockUntilMappingIsFinished();
+        // gd -dev -16june2026
+        // blockUntilMappingIsFinished() has already set fullSystem->shutDown = true
+        // (Task 2b), which signals GaussianMapper::run() to exit its loops.
+        if (setting_use3DGS && gs_thread.joinable()) {
+            gs_thread.join();
+            printf("[GSI] GaussianMapper thread joined.\n");
+        }
+        // gd -dev -16june2026
 		clock_t ended = clock();
         struct timeval tv_end;
         gettimeofday(&tv_end, NULL);

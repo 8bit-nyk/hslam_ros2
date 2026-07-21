@@ -279,6 +279,7 @@ FullSystem::~FullSystem()
 	matcher.reset();
 	detector.reset();
 	globalMap.reset();
+	clearMappingOperation();  // gd -dev -9june2026 
 }
 
 void FullSystem::setOriginalCalib(const VecXf &originalCalib, int originalW, int originalH)
@@ -1803,6 +1804,7 @@ void FullSystem::blockUntilMappingIsFinished()
 
 	mappingThread.join();
 	printf("Mapping Thread has been joined\n"); //debugNA
+	shutDown = true; // gd -dev -16june2026
 
 }
 
@@ -2415,6 +2417,68 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 			i = 0;
 		}
 
+	// gd -dev -9june2026
+	// =========================== GS Integration Push =========================
+	if(setting_use3DGS && !frameHessians.empty() && PointHessian::instanceCounter > 0)
+	{
+		GSI::MappingOperation opr(&Hcalib, GSI::MappingOperation::OprType::LocalMappingBA);
+		opr.reserveKeyFrames(frameHessians.size());
+
+		// keyframes 
+		for (FrameHessian* kfh : frameHessians)
+		{
+			if (kfh->colourValid)
+				opr.addKeyFrame(kfh);
+		}
+
+		// active points (pointHessian)
+		for (FrameHessian* kfh : frameHessians)
+		{
+			for (PointHessian* p : kfh->pointHessians)
+			{
+				if (p->isRetrived()) continue;
+				if (p->idepth <= 0 || !std::isfinite(p->idepth)) continue;
+
+				GSI::PointType type = GSI::PointType::DIRECT;
+				float std_dev = 0.0f;
+
+				if(!p->Mp.expired())
+				{
+					auto mp = p->Mp.lock();
+					if (mp && !mp->isBad())
+					{
+						type = GSI::PointType::HYBRID;
+						std_dev = mp->getStdDev();
+					}
+				}
+
+				p->setRetrived(true);
+				SE3 Twc = kfh->shell->getPose();
+				opr.addMapPoint(p, Twc, false, type, std_dev);
+
+				// noist copy only for direct points 
+				if (type == GSI::PointType::DIRECT)
+					opr.addMapPoint(p, Twc, true, type, 0.0f);      
+			}
+		}
+
+		// immature points (ImmaturePoint)
+		for (FrameHessian* kfh : frameHessians)
+		{
+			for (ImmaturePoint* ip : kfh->immaturePoints)
+			{
+				if (ip->isRetrived()) continue;
+				if (ip->lastTraceStatus == ImmaturePointStatus::IPS_OUTLIER) continue;
+				if (ip->idepth_min <= 0 || ip->idepth_max <= 0) continue;
+				if (!std::isfinite(ip->idepth_min) || !std::isfinite(ip->idepth_max)) continue;
+				
+				ip->setRetrived(true);
+				opr.addMapPoint(ip, kfh->shell->getPose(), false, GSI::PointType::DIRECT, 0.0f);
+			}
+		}
+		pushMappingOperation(std::move(opr));
+	}
+	// gd -dev -9june2026
 	
 	// SearchInNeighbors(fh->shell->frame);
 	// KeyFrameCulling(fh->shell->frame);
@@ -2443,6 +2507,10 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	{
 		firstFrame->idx = frameHessians.size();
 		frameHessians.push_back(firstFrame);
+		// gd -dev -16june2026
+		// H-SLAM's SE3 is sophus::se3f (float) but firstPose is defined as sophus::se3d (doouble)
+		firstPose = firstFrame->shell->getPoseInverse().cast<double>(); 
+		// gd -dev -16june2026
 	}
 	
 	firstFrame->frameID = allKeyFramesHistory.size();
@@ -4610,4 +4678,49 @@ int FullSystem::getMLReferenceFrameId() const {
 	return ml_reference_frame_id_;
 }
 
+// gd -dev -9june2026
+// controlled interface for mapping operations queue [push, pop, check, clear]
+void FullSystem::pushMappingOperation(GSI::MappingOperation opr)
+{
+    boost::unique_lock<boost::mutex> lock(GSMapMutex);
+    mqMappingOperations.push(std::move(opr));
+	printf("[GSI] Queue size: %zu\n", mqMappingOperations.size());
+}
+
+GSI::MappingOperation FullSystem::getAndPopMappingOperation()
+{
+    boost::unique_lock<boost::mutex> lock(GSMapMutex);
+    GSI::MappingOperation opr = mqMappingOperations.front();
+    mqMappingOperations.pop();
+    return opr;
+}
+
+bool FullSystem::hasMappingOperation()
+{
+    boost::unique_lock<boost::mutex> lock(GSMapMutex);
+    return !mqMappingOperations.empty();
+}
+
+void FullSystem::clearMappingOperation()
+{
+    boost::unique_lock<boost::mutex> lock(GSMapMutex);
+    while (!mqMappingOperations.empty())
+        mqMappingOperations.pop();
+}
+// gd -dev -9june2026
+
+// gd -dev -16june2026
+std::vector<FrameHessian*> FullSystem::GetAllKeyFrames()
+{
+	return frameHessians;
+}
+
+std::unordered_set<unsigned long> FullSystem::GetCurrentKeyFrameIds()
+{
+	std::unordered_set<unsigned long> ids;
+	for (auto* fh : frameHessians)
+		ids.insert(static_cast<unsigned long>(fh->frameID));
+	return ids;
+}
+// gd -dev -16june2026
 }

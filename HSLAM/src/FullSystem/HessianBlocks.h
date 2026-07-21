@@ -551,6 +551,55 @@ struct PointHessian
 	float maxRelBaseline;
 	int numGoodResiduals;
 	std::weak_ptr<MapPoint> Mp;
+	
+	// gd -dev -8june2026 (from MGSO)
+	// GS integration -> retrieval tracking 
+	bool mbRetrived = false;
+	void setRetrived(const bool retrived)
+	{
+		this->mbRetrived = retrived;
+	}
+
+	bool isRetrived()
+	{
+		return this->mbRetrived;
+	}
+
+	// GS integration -> host frame ID 
+	int getHostFrameID() const
+	{
+		return host->frameID;
+	}
+
+	// GS integration -> average colour3 entries and normalize to [0, 1]
+	inline Eigen::Vector3f getColourRGBfloat() const
+	{
+		if (!colourValid)
+			return Eigen::Vector3f::Zero();
+		float r = 0.0f, g = 0.0f, b = 0.0f;
+		for (unsigned char i = 0; i < MAX_RES_PER_POINT; i++)
+		{
+			r = (colour3[i][0] + i * r) / (i + 1);
+			g = (colour3[i][1] + i * g) / (i + 1);
+			b = (colour3[i][2] + i * b) / (i + 1);
+		}
+		return Eigen::Vector3f(r / 255.0f, g / 255.0f, b / 255.0f);
+	}
+
+	// GS integration: back-project pixel to 3D world coordinates
+	inline virtual Eigen::Vector3d getWorldPosition(float fxi, float fyi, float cxi, float cyi, SE3 camToWorld) const
+	{
+		if (idepth <= 0 || !std::isfinite(idepth))
+			return Eigen::Vector3d::Zero();
+		float z = 1.0f / idepth;
+		Eigen::Vector3d pt_cam(
+			(fxi * u + cxi) * z, 
+			(fyi * v + cyi) * z, 
+			z);
+		return camToWorld.matrix3x4() * pt_cam.homogeneous();	
+	};
+	// gd -dev -8june2026 
+
 	enum PtStatus {ACTIVE=0, INACTIVE, OUTLIER, OOB, MARGINALIZED};
 	PtStatus status;
 

@@ -9,6 +9,7 @@
 #include <iostream>
 #include <fstream>
 #include <unordered_map> 
+#include <unordered_set> // gd -dev -16june2026
 #include "util/NumType.h"
 #include "FullSystem/Residuals.h"
 #include "FullSystem/HessianBlocks.h"
@@ -20,6 +21,10 @@
 #include <math.h>
 #include <chrono>
 #include <opencv2/opencv.hpp>
+// gd -dev -9june2026
+#include <queue>
+#include "GSIntegration/MappingOperation.hpp"
+// gd -dev -9june2026
 
 
 namespace HSLAM
@@ -167,7 +172,9 @@ public:
 	int getMLReferenceFrameId() const;
 	
 	// Performance monitoring
-	int getKeyframeCount() const { return static_cast<int>(frameHessians.size()); }
+	// int getKeyframeCount() const { return static_cast<int>(frameHessians.size()); }
+	int getKeyframeCount() const { return static_cast<int>(allKeyFramesHistory.size()); } // gd -dev -17june2026
+
 	
 	// Keyframe history for performance metrics
 	std::vector<FrameShell*> allKeyFramesHistory;
@@ -193,6 +200,22 @@ public:
 	void marginalizeFrame(FrameHessian* frame);
 	void blockUntilMappingIsFinished();
 
+	// gd -dev -9june2026
+	// GS integration -> queue interface for GaussianMapper thread
+	void pushMappingOperation(GSI::MappingOperation opr);
+	GSI::MappingOperation getAndPopMappingOperation();
+	bool hasMappingOperation();
+	void clearMappingOperation();
+	// gd -dev -9june2026
+	boost::mutex mapMutex; // gd -dev -16june2026 -- moved from private to public for GS thread access
+	
+	// gd -dev -16june2026
+	bool shutDown = false;
+	bool isShutDown() const { return shutDown; }
+	CalibHessian* getCalibPtr() { return &Hcalib; }
+	Sophus::SE3d firstPose;
+	// gd -dev -16june2026
+
 	float optimize(int mnumOptIts);
 
 	void printResult(std::string file, bool printSim = false);
@@ -211,6 +234,11 @@ public:
 	bool initFailed;
 	bool initialized;
 	bool linearizeOperation;
+
+	// gd -dev -16june2026
+	std::vector<FrameHessian*> GetAllKeyFrames();  
+	std::unordered_set<unsigned long> GetCurrentKeyFrameIds();
+	// gd -dev -16june2026
 
 	// RGB-D depth integration support
 	cv::Mat currentDepthImage;     // RGB-D sensor depth for direct component
@@ -362,6 +390,12 @@ public:
 private:
 	// Helper methods for ML integration
 	bool shouldCreateKeyframe() const;  // Forward declare existing keyframe logic
+	// boost::mutex mapMutex; // gd -dev -16june2026 -- need to move it to public 
+	// gd -dev -9june2026
+	// GS integration -> mapping thread pushes into it; GaussianMapper thread pops from it
+	std::queue<GSI::MappingOperation> mqMappingOperations;
+	boost::mutex GSMapMutex;  // Mutex to protect access to the mapping operation queue
+	// gd -dev -9june2026
 
 	boost::mutex mapMutex;
 

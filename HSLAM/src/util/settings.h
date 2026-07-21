@@ -186,6 +186,9 @@ extern float setting_mlInitConfidenceThreshold;  // Min confidence for ML scale
 extern int setting_mlInitMinPoints;              // Min points for scale estimation
 extern float setting_mlInitMinGoodRatio;         // Min fraction of well-triangulated points for ML init
 extern bool setting_mlReinitializationEnabled;   // Enable for re-init
+// gd -dev -9june2026
+extern bool setting_use3DGS;
+// gd -dev -9june2026
 
 extern bool debugSaveImages;
 

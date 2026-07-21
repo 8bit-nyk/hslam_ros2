@@ -1,0 +1,88 @@
+%YAML:1.0
+
+Record.record: 1
+Record.savePLY: 1
+
+#--------------------------------------------------------------------------------------------
+# Model Parameters
+#--------------------------------------------------------------------------------------------
+
+Model.sh_degree: 3 # 0 = constant color (fast); set to 1 for view-dependent color (2x memory)
+Model.resolution: -1.0
+Model.white_background: 0
+Model.eval: 0
+
+#--------------------------------------------------------------------------------------------
+# Pipeline Parameters
+#--------------------------------------------------------------------------------------------
+
+Camera.z_near: 0.01
+Camera.z_far: 100.0
+Monocular.inactive_geo_densify_max_pixel_dist: 1.0 # (squared distance)
+
+Mapper.depth_cache: 10
+Mapper.min_num_initial_map_kfs: 2
+Mapper.new_keyframe_times_of_use: 8
+Mapper.local_BA_increased_times_of_use: 0
+Mapper.cull_keyframes: 1
+Mapper.max_keyframes: 512
+Mapper.long_term_keyframes_iteration: 4
+Mapper.cull_iterations: 32
+Mapper.large_rotation_threshold: 20.0
+Mapper.large_translation_threshold: 0.5
+Mapper.stable_num_iter_existence: 1
+
+GausPyramid.do: 1
+GausPyramid.num_sub_levels: 2
+GausPyramid.sub_level_times_of_use: 8
+
+Pipeline.convert_SHs: 0
+Pipeline.compute_cov3D: 0
+
+Record.keyframe_record_interval: 0
+Record.all_keyframes_record_interval: 0
+Record.record_rendered_image: 1
+Record.record_ground_truth_image: 0
+Record.record_loss_image: 0
+Record.training_report_interval: 0
+Record.record_loop_ply: 0
+Record.record_viewer_ply: 1
+
+#--------------------------------------------------------------------------------------------
+# Optimization Parameters
+#--------------------------------------------------------------------------------------------
+
+# Learning rate
+Optimization.max_num_iterations: 30100
+Optimization.position_lr_init: 0.00016
+Optimization.position_lr_final: 0.00016
+Optimization.position_lr_delay_mult: 0.01
+Optimization.position_lr_max_steps: 24
+Optimization.feature_lr: 0.0025
+Optimization.opacity_lr: 0.05
+Optimization.scaling_lr: 0.005
+Optimization.rotation_lr: 0.001
+
+# Densification
+Optimization.percent_dense: 0.01
+Optimization.lambda_dssim: 0.2
+Optimization.lambda_isoreg: 0
+Optimization.densification_interval: 1000
+Optimization.pruning_interval: 1000
+Optimization.opacity_reset_interval: 0
+Optimization.visibility_threshold: 1.0
+Optimization.prune_big_point_after_iter: 30000
+Optimization.densify_min_opacity: 0.02
+Optimization.densify_from_iter: 1000       # replica_mono had 1000000 (disabled); 1000 enables densification
+Optimization.densify_until_iter: 15000
+Optimization.densify_grad_threshold: 0.0005  # replica_mono had 0.001; lower = more Gaussians added
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+
+GaussianViewer.glfw_window_width: 1400
+GaussianViewer.glfw_window_height: 1050
+GaussianViewer.image_scale: 1.0
+GaussianViewer.image_scale_main: 1.0
+GaussianViewer.camera_watch_dist: 0.000001

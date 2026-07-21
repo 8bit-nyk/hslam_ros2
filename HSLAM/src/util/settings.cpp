@@ -217,6 +217,9 @@ bool disableAllDisplay = false;
 bool outputPC = false;
 bool setting_onlyLogKFPoses = true;
 bool setting_logStuff = true;
+// ghina -dev -9june2026
+bool setting_use3DGS = false; 
+// ghina -dev -9june2026
 
 // ML Depth Integration Settings — Direct Pipeline (Photometric/DSO)
 // Direct.P0 = metric init (always on), Direct.P1 = depth bounds, Direct.P2 = BA energy, Direct.P3 = tracker
