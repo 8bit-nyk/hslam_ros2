@@ -67,9 +67,10 @@ Please cite these papers if used in academic context:
 - **GPU** (Optional): NVIDIA GPU with CUDA support for ML depth acceleration
 
 ### 3D Gaussian Splatting (3DGS) Requirements
-The 3DGS integration adds two hard requirements on top of the base SLAM:
+The 3DGS integration adds these requirements on top of the base SLAM:
 - **NVIDIA GPU + CUDA Toolkit ≥ 11** (validated on 11.6) — **required, not optional**. OpenCV is built with CUDA, and the Gaussian rasterizer runs on the GPU.
 - **libtorch 2.0.0** (LibTorch C++), CUDA build matching your toolkit — downloaded in the build steps below.
+- **Conda environment** (`environment.yml`: Python 3.8 + PyTorch 2.0.0) — provides the toolchain and the `libstdc++` the binary links against at runtime. Created in the install steps.
 
 ### Required System Dependencies
 ```bash
@@ -103,7 +104,18 @@ git clone <repository-url> src
 cd src/HSLAM
 ```
 
-### Step 2: Build Third-Party Dependencies
+### Step 2: Create the Conda Environment (required for 3DGS)
+
+The 3DGS build and run use a conda env (Python 3.8 + PyTorch 2.0.0). It also supplies the
+`libstdc++` the HSLAM binary needs at runtime. **Create it once and keep it activated for every
+step below and whenever you run the demo:**
+
+```bash
+conda env create -f environment.yml
+conda activate surfel_splatting
+```
+
+### Step 3: Build Third-Party Dependencies
 
 HSLAM requires several third-party libraries. The automated build script handles everything:
 
@@ -225,7 +237,7 @@ Then reload: `source ~/.bashrc`
 
 </details>
 
-### Step 3: Download ML Depth Model
+### Step 4: Download ML Depth Model
 
 HSLAM uses the Metric3D ViT-Small model for depth estimation:
 
@@ -248,7 +260,7 @@ ls -lh metric3d-vit-small/onnx/model.onnx
 # Should show: -rw-rw-r-- ... 144M ... model.onnx
 ```
 
-### Step 4: Get libtorch (required for 3DGS)
+### Step 5: Get libtorch (required for 3DGS)
 
 Download **libtorch 2.0.0** with the CUDA tag matching your toolkit and unzip into `Thirdparty/libtorch`:
 
@@ -259,9 +271,9 @@ wget https://download.pytorch.org/libtorch/cu118/libtorch-cxx11-abi-shared-with-
 unzip libtorch-cxx11-abi-shared-with-deps-2.0.0+cu118.zip     # -> Thirdparty/libtorch/
 ```
 
-### Step 5: Build HSLAM Application
+### Step 6: Build HSLAM Application
 
-Activate your CUDA toolkit in the terminal, then configure and build:
+With the conda env active, activate your CUDA toolkit in the terminal, then configure and build:
 
 ```bash
 export CUDA_HOME=/usr/local/cuda-11.6        # your CUDA >= 11
