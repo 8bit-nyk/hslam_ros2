@@ -281,6 +281,7 @@ protected:
     int add_keyframes_;
     int long_term_keyframes_iteration_;
     int stable_num_iter_existence_;
+    int min_post_slam_iterations_ = 0; // gd -dev -23june2026; done for debugging
 
     bool do_gaus_pyramid_training_;
 

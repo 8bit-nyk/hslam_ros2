@@ -66,6 +66,11 @@ Please cite these papers if used in academic context:
 - **CMake**: Version 3.0 or higher
 - **GPU** (Optional): NVIDIA GPU with CUDA support for ML depth acceleration
 
+### 3D Gaussian Splatting (3DGS) Requirements
+The 3DGS integration adds two hard requirements on top of the base SLAM:
+- **NVIDIA GPU + CUDA Toolkit ≥ 11** (validated on 11.6) — **required, not optional**. OpenCV is built with CUDA, and the Gaussian rasterizer runs on the GPU.
+- **libtorch 2.0.0** (LibTorch C++), CUDA build matching your toolkit — downloaded in the build steps below.
+
 ### Required System Dependencies
 ```bash
 sudo apt update
@@ -243,22 +248,84 @@ ls -lh metric3d-vit-small/onnx/model.onnx
 # Should show: -rw-rw-r-- ... 144M ... model.onnx
 ```
 
-### Step 4: Build HSLAM Application
+### Step 4: Get libtorch (required for 3DGS)
+
+Download **libtorch 2.0.0** with the CUDA tag matching your toolkit and unzip into `Thirdparty/libtorch`:
+
+```bash
+cd ~/hslam_ws/src/HSLAM/Thirdparty
+# CUDA 11.x example (cu118):
+wget https://download.pytorch.org/libtorch/cu118/libtorch-cxx11-abi-shared-with-deps-2.0.0%2Bcu118.zip
+unzip libtorch-cxx11-abi-shared-with-deps-2.0.0+cu118.zip     # -> Thirdparty/libtorch/
+```
+
+### Step 5: Build HSLAM Application
+
+Activate your CUDA toolkit in the terminal, then configure and build:
+
+```bash
+export CUDA_HOME=/usr/local/cuda-11.6        # your CUDA >= 11
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+
+cd ~/hslam_ws/src/HSLAM
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_CUDA_COMPILER=$CUDA_HOME/bin/nvcc \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+make -j$(nproc)
+```
+ 
+
+## Running the 3D Gaussian Splatting Demo
+
+Use `run_gs.sh` — it sets the runtime library paths (CUDA, OpenCV, libtorch, ONNX Runtime) for you:
 
 ```bash
 cd ~/hslam_ws/src/HSLAM
-mkdir -p build && cd build
-cmake ..
-make -j$(nproc)
+./run_gs.sh \
+  --files=/path/to/replica/dso/room0/images \
+  --calib=configs/replica_calib/camera.txt \
+  --vocab=misc/orbvoc.dbow3 \
+  --gauss=configs/gaussian_mapper/replica_mono.yaml \
+  --colour --loopclosure --mode=1
 ```
 
-**Build output**: Executable will be at `~/hslam_ws/src/HSLAM/build/bin/HSLAM`
+**Arguments:**
 
-**Verify build:**
+| Flag | Meaning |
+|---|---|
+| `--files` | Image sequence folder (DSO format) |
+| `--calib` | Camera calibration file |
+| `--vocab` | ORB vocabulary for loop closure (`misc/orbvoc.dbow3`) |
+| `--gauss` | Gaussian mapper config (see `configs/gaussian_mapper/`) |
+| `--colour` | Enable colour rendering |
+| `--loopclosure` | Enable loop closure |
+| `--mode` | DSO processing mode (`1` = no photometric calibration) |
+
+> Built inside a conda env? `run_gs.sh` auto-preloads that env's `libstdc++`. If you get a
+> `GLIBCXX_... not found` error, activate your conda env or set `STDCXX_LIB=/path/to/libstdc++.so.6`.
+
+### Dataset (Replica)
+
+The example uses the **Replica** dataset (NICE-SLAM version — the same source used by Photo-SLAM):
+
 ```bash
-./bin/HSLAM --help
-# Should display usage information
+wget https://cvg-data.inf.ethz.ch/nice-slam/data/Replica.zip
+unzip Replica.zip
 ```
+
+HSLAM reads each sequence in **DSO layout** — a flat folder of frames:
+
+```
+replica/dso/room0/
+└── images/          # sequential RGB frames
+```
+
+> The NICE-SLAM download ships frames under `room0/results/`. If your copy isn't already in
+> the `dso/room0/images/` layout above, convert it to a flat `images/` folder first.
+
+Included Gaussian-mapper configs: `configs/gaussian_mapper/replica_mono.yaml`, `configs/gaussian_mapper/tumvi_mono.yaml`.
 
 ---
 

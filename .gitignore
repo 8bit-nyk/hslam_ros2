@@ -36,6 +36,8 @@ result.txt
 
 HSLAM/Thirdparty/CompiledLibs/
 HSLAM/build/
+HSLAM/Thirdparty/libtorch/
+HSLAM/Thirdparty
 # HSLAM/run_scripts/
 HSLAM/results/
 HSLAM/models/

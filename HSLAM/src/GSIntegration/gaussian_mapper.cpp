@@ -326,7 +326,7 @@ namespace HSLAM
         // Third loop: Tail gaussian optimization
         int densify_interval = densifyInterval();
         int n_delay_iters = densify_interval * 0.8;
-        while (getIteration() - SLAM_stop_iter <= n_delay_iters || getIteration() % densify_interval <= n_delay_iters || isKeepingTraining())
+        while (getIteration() - SLAM_stop_iter <= n_delay_iters || getIteration() % densify_interval <= n_delay_iters || getIteration() - SLAM_stop_iter < min_post_slam_iterations_ || isKeepingTraining()) // gd -dev -23june2026; done for debugging
         {
             trainForOneIteration();
             densify_interval = densifyInterval();

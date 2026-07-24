@@ -68,7 +68,7 @@ namespace HSLAM
             auto image_cv = tensor_utils::torchTensor2CvMat_Float32(rendered);
             cv::cvtColor(image_cv, image_cv, cv::COLOR_RGB2BGR);
             image_cv.convertTo(image_cv, CV_8UC3, 255.0f);
-            cv::imwrite(result_img_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + ".jpg"), image_cv);
+            cv::imwrite((result_img_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + ".jpg")).string(), image_cv);
         }
 
         if (record_ground_truth_image_)
@@ -76,7 +76,7 @@ namespace HSLAM
             auto gt_image_cv = tensor_utils::torchTensor2CvMat_Float32(ground_truth);
             cv::cvtColor(gt_image_cv, gt_image_cv, cv::COLOR_RGB2BGR);
             gt_image_cv.convertTo(gt_image_cv, CV_8UC3, 255.0f);
-            cv::imwrite(result_gt_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_gt.jpg"), gt_image_cv);
+            cv::imwrite((result_gt_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_gt.jpg")).string(), gt_image_cv);
         }
 
         if (record_loss_image_)
@@ -85,7 +85,7 @@ namespace HSLAM
             auto loss_image_cv = tensor_utils::torchTensor2CvMat_Float32(loss_tensor);
             cv::cvtColor(loss_image_cv, loss_image_cv, cv::COLOR_RGB2BGR);
             loss_image_cv.convertTo(loss_image_cv, CV_8UC3, 255.0f);
-            cv::imwrite(result_loss_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_loss.jpg"), loss_image_cv);
+            cv::imwrite((result_loss_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_loss.jpg")).string(), loss_image_cv);
         }
     }
 

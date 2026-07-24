@@ -397,7 +397,7 @@ private:
 	boost::mutex GSMapMutex;  // Mutex to protect access to the mapping operation queue
 	// gd -dev -9june2026
 
-	boost::mutex mapMutex;
+	// boost::mutex mapMutex;
 
 	CalibHessian Hcalib;
 	std::shared_ptr<Matcher> matcher;

@@ -2,6 +2,8 @@
 # nyk 22/05/2023
 # Run this script once as it will clean up after itself. Everytime you run it will recompile packages (except opencv)
 BuildType="RelWithDebInfo" 
+# GPU compute capability for the CUDA-enabled OpenCV build.
+cudaArch="6.1 7.5 8.6"
 
 SCRIPTPATH=$(dirname $0)
 if [ $SCRIPTPATH = '.' ]
@@ -16,7 +18,7 @@ InstallDir=$SCRIPTPATH/CompiledLibs
 #install system wide dependencies
 #================================
 export DEBIAN_FRONTEND=noninteractive
-sudo apt -y install libgl1-mesa-dev libglew-dev libsuitesparse-dev libeigen3-dev libboost-all-dev cmake build-essential git libzip-dev ccache freeglut3-dev libgoogle-glog-dev libatlas-base-dev ninja-build unzip wget
+sudo apt -y install libgl1-mesa-dev libglew-dev libsuitesparse-dev libeigen3-dev libboost-all-dev cmake build-essential git libzip-dev ccache freeglut3-dev libgoogle-glog-dev libatlas-base-dev ninja-build unzip wget libglm-dev qtbase5-dev libqt5opengl5-dev
 
 #install libceres for compatibility with ubuntu 22:
 echo -e "Setting up Ceres Solver\n"
@@ -31,7 +33,7 @@ else
 fi
 
 cd ceres-solver-1.14.0 && mkdir -p build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DCXX11=ON && make -j $(nproc) && make install
+cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DCXX11=ON && make -j $(nproc) && make install
 cd ../.. && rm -rf ceres-solver-1.14.0/build
 echo "Ceres Solver build complete"
 
@@ -64,7 +66,9 @@ cmake .. \
     -DCMAKE_BUILD_TYPE=$BuildType \
     -DCMAKE_INSTALL_PREFIX=$InstallDir \
     -DWITH_V4L=ON \
-    -DWITH_CUDA=OFF \
+    -DWITH_CUDA=ON \
+    -DCUDA_ARCH_BIN="${cudaArch}" \
+    -DBUILD_LIST=core,imgproc,imgcodecs,highgui,videoio,features2d,flann,calib3d,xfeatures2d,cudev,cudaarithm,cudawarping,cudaimgproc \
     -DBUILD_PERF_TESTS=OFF \
     -DBUILD_TESTS=OFF \
     -DWITH_QT=ON \
@@ -81,16 +85,16 @@ echo "OpenCV build complete"
 #=====================
 echo -e "Compiling Pangolin\n"
 cd $SCRIPTPATH/Pangolin
-mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=$BuildType -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_PANGOLIN_PYTHON=OFF -DDISPLAY_WAYLAND=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF && make -j $(nproc) && make install && cd .. && rm -r build
+mkdir -p build && cd build && cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=$BuildType -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_PANGOLIN_PYTHON=OFF -DDISPLAY_WAYLAND=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF && make -j $(nproc) && make install && cd .. && rm -r build
 
 #echo -e "Compiling G2O\n"
 cd $SCRIPTPATH/g2o
-mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=$BuildType -DCMAKE_INSTALL_PREFIX=$InstallDir -DCMAKE_RELWITHDEBINFO_POSTFIX="" -DCMAKE_MINSIZEREL_POSTFIX="" -DG2O_BUILD_APPS=OFF -DG2O_BUILD_EXAMPLES=OFF -DBUILD_WITH_MARCH_NATIVE=ON -DG2O_USE_OPENMP=OFF
+mkdir -p build && cd build && cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=$BuildType -DCMAKE_INSTALL_PREFIX=$InstallDir -DCMAKE_RELWITHDEBINFO_POSTFIX="" -DCMAKE_MINSIZEREL_POSTFIX="" -DG2O_BUILD_APPS=OFF -DG2O_BUILD_EXAMPLES=OFF -DBUILD_WITH_MARCH_NATIVE=ON -DG2O_USE_OPENMP=OFF
 make -j $(nproc) && make install && cd .. && rm -r build && rm -r bin && rm -r lib
 
 echo -e "Compiling DBoW3\n"
 cd $SCRIPTPATH/DBow3
-mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=$BuildType -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_UTILS=OFF -DCMAKE_CXX_FLAGS=-std=c++11 -DUSE_CONTRIB=true -DOpenCV_DIR=$InstallDir/share/OpenCV && make -j $(nproc) && make install && cd .. && rm -r build
+mkdir -p build && cd build && cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=$BuildType -DCMAKE_INSTALL_PREFIX=$InstallDir -DBUILD_UTILS=OFF -DCMAKE_CXX_FLAGS=-std=c++11 -DUSE_CONTRIB=true -DOpenCV_DIR=$InstallDir/lib/cmake/opencv4 && make -j $(nproc) && make install && cd .. && rm -r build
 
 # Download and setup ONNX Runtime GPU for deep learning integration
 echo -e "Setting up ONNX Runtime GPU\n"

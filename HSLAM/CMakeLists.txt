@@ -1,8 +1,8 @@
 SET(PROJECT_NAME HSLAM)
 CMAKE_MINIMUM_REQUIRED(VERSION 3.18) # gd -dev -16june2026; was set to 2.9
 
-# set(OpenCV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/share/OpenCV) # gd -dev -17june2026
-set(OpenCV_DIR /home/ahmad/Desktop/GD/MGSO_GD/thirdparty/opencv-4.9.0-cuda/lib/cmake/opencv4) # gd -dev -17june2026
+set(OpenCV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake/opencv4)
+# set(OpenCV_DIR /home/ahmad/Desktop/GD/MGSO_GD/thirdparty/opencv-4.9.0-cuda/lib/cmake/opencv4)
 set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake)
 #set(G2O_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake/g2o)
 Set(G2O_INCLUDE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/include/g2o)
@@ -33,8 +33,8 @@ find_package(DBoW3 REQUIRED) #PATHS ~/colcon_ws/src/HSLAM/Thirdparty/CompiledLib
 # gd -dev -16june2026
 find_package(glm REQUIRED)
 find_package(CUDAToolkit REQUIRED) 
-# set(Torch_DIR /home/ahmad/anaconda3/envs/surfel_splatting/lib/python3.8/site-packages/torch/share/cmake/Torch)
-set(Torch_DIR /home/ahmad/Desktop/GD/MGSO_GD/thirdparty/libtorch/share/cmake/Torch)  # gd -dev -17june2026
+set(Torch_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/libtorch/share/cmake/Torch)
+# set(Torch_DIR /home/ahmad/Desktop/GD/MGSO_GD/thirdparty/libtorch/share/cmake/Torch)
 find_package(Torch REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -pthread")
 # gd -dev -16june2016
