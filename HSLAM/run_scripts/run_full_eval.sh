@@ -12,8 +12,11 @@
 # Output: iteration_summary_<timestamp>.txt in hslam_evaluation/results/
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EVO_EVAL_SCRIPT="/home/aub/Dev/evo/hslam_evaluation/scripts/run_hslam_eval_all.sh"
-EVO_ACTIVATE="/home/aub/Dev/evo/activate_evo.sh"
+# Portable across machines with different $HOME (laptop=/home/aub, eval-server=/home/nyk).
+# Override EVO_ROOT if evo lives elsewhere.
+EVO_ROOT="${EVO_ROOT:-$HOME/Dev/evo}"
+EVO_EVAL_SCRIPT="$EVO_ROOT/hslam_evaluation/scripts/run_hslam_eval_all.sh"
+EVO_ACTIVATE="$EVO_ROOT/activate_evo.sh"
 
 SKIP_TUM=false; SKIP_KITTI=false; SKIP_EUROC=false
 EVO_ARGS=(-a "$EVO_ACTIVATE")
