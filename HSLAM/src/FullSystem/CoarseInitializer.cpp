@@ -756,12 +756,16 @@ void CoarseInitializer::optReg(int lvl)
 	}
 
 
+	// Sprint 5 (CD-H7/B-NEW-1): optional normal-cosine-weighted neighbour iR (vs uniform median).
+	int optreg_with_normals = 0, optreg_cosine = 0, optreg_fallback = 0;
+	float optreg_wsum_acc = 0.0f;
+
 	for(int i=0;i<npts;i++)
 	{
 		Pnt* point = ptsl+i;
 		if(!point->isGood) continue;
 
-		// Get all of the iR values for the good neighbours
+		// Get all of the iR values for the good neighbours (needed by both branches)
 		float idnn[10];
 		int nnn=0;
 		for(int j=0;j<10;j++) // for all point neighbours
@@ -773,15 +777,43 @@ void CoarseInitializer::optReg(int lvl)
 			nnn++;
 		}
 
-		if(nnn > 2)
+		if(nnn <= 2) continue;
+
+		if(setting_useNormalOptReg && point->normal.squaredNorm() > 0.25f)
 		{
-			// Sort to get median value of iR for the good neighbours
-			// idnn[nnn/2] will be the median
+			// Weight each neighbour by max(0, n_center . n_neighbour): same-surface neighbours
+			// dominate, off-plane (discontinuity) neighbours are downweighted toward zero, so the
+			// smoother stops blending foreground/background iR across depth edges.
+			optreg_with_normals++;
+			float weight_sum = 0.0f, weighted_iR = 0.0f;
+			for(int j=0;j<10;j++)
+			{
+				if(point->neighbours[j] == -1) continue;
+				Pnt* other = ptsl+point->neighbours[j];
+				if(!other->isGood || other->normal.squaredNorm() < 0.25f) continue;
+				float wgt = point->normal.dot(other->normal);
+				if(wgt < 0.0f) wgt = 0.0f;
+				weight_sum  += wgt;
+				weighted_iR += wgt * other->iR;
+			}
+			optreg_wsum_acc += weight_sum;
+			float neighbour_iR;
+			if(weight_sum > 1e-6f) { neighbour_iR = weighted_iR / weight_sum; optreg_cosine++; }
+			else { std::nth_element(idnn,idnn+nnn/2,idnn+nnn); neighbour_iR = idnn[nnn/2]; optreg_fallback++; } // all neighbours off-plane -> median
+			point->iR = (1-regWeight)*point->idepth + regWeight*neighbour_iR;
+		}
+		else
+		{
+			// Legacy uniform median (unchanged default behavior).
 			std::nth_element(idnn,idnn+nnn/2,idnn+nnn);
-			// Set new iR to account for current inverse depth and median iR value of neighbours
 			point->iR = (1-regWeight)*point->idepth + regWeight*idnn[nnn/2];
 		}
 	}
+
+	if(setting_useNormalOptReg)
+		printf("[OPTREG_NORMAL] lvl=%d pts_with_normals=%d using_cosine=%d fallback_median=%d mean_weight_sum=%.3f\n",
+		       lvl, optreg_with_normals, optreg_cosine, optreg_fallback,
+		       optreg_cosine > 0 ? optreg_wsum_acc / optreg_cosine : 0.0f);
 
 }
 
@@ -976,6 +1008,11 @@ void CoarseInitializer::setFirst(CalibHessian* HCalib, FrameHessian* newFrameHes
 
 				pl[nl].outlierTH = PATTERNNUM*setting_outlierTH;
 
+				// Sprint 5 (CD-H7): default normal to Zero(); it is populated later in
+				// seedPointsWithMLDepth() from the first-frame ML normal map (the FrameHessian
+				// normal map is not attached at this init stage). Zero() => optReg falls back to
+				// the legacy median for this point (graceful degradation for mono / ML-off).
+				pl[nl].normal = Vec3f::Zero();
 
 				nl++;
 				assert(nl <= npts);
@@ -1231,17 +1268,24 @@ void CoarseInitializer::makeNN()
  * @param confidence ML depth confidence score [0,1]
  * @param meanDepth ML mean depth for streamlined scale computation
  */
-void CoarseInitializer::setMLDepth(const cv::Mat& mlDepth, float confidence, float meanDepth)
+void CoarseInitializer::setMLDepth(const cv::Mat& mlDepth, float confidence, float meanDepth, const cv::Mat& mlNormal)
 {
     if (mlDepth.empty() || mlDepth.type() != CV_32F) {
         printf("CoarseInitializer: Invalid ML depth format\n");
         return;
     }
-    
+
     firstFrameMLDepth = mlDepth.clone();
     mlConfidence = confidence;
     mlMeanDepth = meanDepth;
     hasMLDepth = true;
+
+    // Sprint 5 (CD-H7): keep the first-frame surface-normal map alongside depth, so
+    // seedPointsWithMLDepth() can populate Pnt::normal for optReg cosine-weighting.
+    if (!mlNormal.empty() && mlNormal.type() == CV_32FC3)
+        firstFrameMLNormal = mlNormal.clone();
+    else
+        firstFrameMLNormal.release();
     
     printf("CoarseInitializer: ML depth stored (mean=%.2fm, confidence=%.2f)\n", 
            mlMeanDepth, confidence);
@@ -1275,6 +1319,18 @@ void CoarseInitializer::seedPointsWithMLDepth()
         int lvlSeeded = 0, lvlFallback = 0;
         for (int i = 0; i < numPoints[lvl]; i++) {
             Pnt& pt = points[lvl][i];
+
+            // Sprint 5 (CD-H7): populate the per-point surface normal (camera frame) for optReg
+            // cosine-weighting. firstFrameMLNormal is full-res (level 0); (pt.u,pt.v) is level-lvl
+            // -> scale up. Independent of depth-seeding validity below.
+            if (!firstFrameMLNormal.empty()) {
+                int un = (int)(pt.u * (float)firstFrameMLNormal.cols / (float)w[lvl] + 0.5f);
+                int vn = (int)(pt.v * (float)firstFrameMLNormal.rows / (float)h[lvl] + 0.5f);
+                if (un >= 0 && vn >= 0 && un < firstFrameMLNormal.cols && vn < firstFrameMLNormal.rows) {
+                    const cv::Vec3f& nn = firstFrameMLNormal.at<cv::Vec3f>(vn, un);
+                    pt.normal = Vec3f(nn[0], nn[1], nn[2]);
+                }
+            }
 
             int u = (int)(pt.u + 0.5f);
             int v = (int)(pt.v + 0.5f);

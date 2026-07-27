@@ -315,6 +315,7 @@ bool setting_useAngmfConfidence = true;
 // Ablation fr1_desk mask-on vs mask-off: 0.095 vs 0.093 m (no measurable difference).
 // Default false (KILL). CLI: --ml-normal-gapfill-mask / --ml-normal-gapfill-cos
 bool setting_useNormalGapfillMask = false;
+bool setting_useNormalOptReg = false;   // Sprint 5 (CD-H7/B-NEW-1): default OFF until it earns default-on with data
 float setting_normalGapfillCosThreshold = 0.866f;
 
 bool goStepByStep = false;

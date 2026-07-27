@@ -161,6 +161,7 @@ int main(int argc, char **argv)
 		("ml-angmf-confidence", "Sprint 3 A.2: use AngMF expected-angle formula 1-E_angle(kappa)/pi instead of mis-oriented sigmoid 1/(1+kappa/5) (default true after Sprint 3a WIN: unc recalibrated to 0.30)", cxxopts::value<bool>()->default_value("true"))
 		("ml-normal-gapfill-mask", "Sprint 4 CD-H3: gate CoarseTracker lvl=0 gap-fill on normal-cosine agreement (default false — KILL: cos_min=0.873 at threshold 0.866, 0% skip on TUM)", cxxopts::value<bool>()->default_value("false"))
 		("ml-normal-gapfill-cos", "Sprint 4 CD-H3: cosine threshold for normal gap-fill mask; cos(30deg)=0.866, cos(40deg)=0.766 (default 0.866)", cxxopts::value<float>()->default_value("0.866"))
+		("ml-normal-optreg", "Sprint 5 CD-H7/B-NEW-1: normal-cosine-weighted iR smoothing in CoarseInitializer::optReg (default false until WIN verdict)", cxxopts::value<bool>()->default_value("false"))
 		("h,help", "Print usage")
     ;
 
@@ -259,6 +260,10 @@ int main(int argc, char **argv)
 	setting_normalGapfillCosThreshold = result["ml-normal-gapfill-cos"].as<float>();
 	printf("[PHASE_CONFIG] ml-normal-gapfill-mask=%s cos_thresh=%.3f\n",
 	       setting_useNormalGapfillMask ? "on" : "off", setting_normalGapfillCosThreshold);
+
+	// Sprint 5 — CD-H7/B-NEW-1: normal-cosine-weighted iR smoothing in CoarseInitializer::optReg
+	setting_useNormalOptReg = result["ml-normal-optreg"].as<bool>();
+	printf("[PHASE_CONFIG] ml-normal-optreg=%s\n", setting_useNormalOptReg ? "on" : "off");
 
 	// Depth source selection (Phase B — research-only validation switch)
 	{

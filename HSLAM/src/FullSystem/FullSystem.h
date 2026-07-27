@@ -244,6 +244,7 @@ public:
 	
 	// GPU Warmup Result Caching (optimization to avoid duplicate processing)
 	cv::Mat warmup_depth_map_;           // Stored depth map from GPU warmup
+	cv::Mat warmup_normal_map_;          // Sprint 5 (CD-H7): stored normal map from GPU warmup (for optReg)
 	float warmup_mean_depth_ = -1.0f;    // Mean depth from warmup inference
 	float warmup_confidence_ = 0.0f;     // Confidence score from warmup
 	bool warmup_results_available_ = false; // Flag indicating stored results are available

@@ -76,6 +76,8 @@ public:
 
 	float my_type;		// my_type is block level where point was selected (1,2 or 4) or ORB type
 	float outlierTH;
+
+	Vec3f normal;		// Sprint 5 (CD-H7/B-NEW-1): per-point ML surface normal in camera frame; Zero() if unavailable
 };
 
 class CoarseInitializer {
@@ -89,7 +91,7 @@ public:
 	bool trackFrame(FrameHessian* newFrameHessian, std::vector<IOWrap::Output3DWrapper*> &wraps);
 	
 	// ML depth initialization methods
-	void setMLDepth(const cv::Mat& mlDepth, float confidence, float meanDepth = 0.0f);
+	void setMLDepth(const cv::Mat& mlDepth, float confidence, float meanDepth = 0.0f, const cv::Mat& mlNormal = cv::Mat());
 	void seedPointsWithMLDepth();  // Seed initializer points with ML inverse depth
 	float computeMetricScaleFactor();
 	bool mlSeededInit = false;    // True if points were seeded with ML depth
@@ -109,6 +111,7 @@ public:
 	
 	// ML depth storage for metric scale initialization
 	cv::Mat firstFrameMLDepth;      // ML depth for first frame
+	cv::Mat firstFrameMLNormal;    // Sprint 5 (CD-H7): ML surface normals (CV_32FC3, camera frame) for first frame
 	float mlMeanDepth;              // ML mean depth for streamlined scale computation
 	bool hasMLDepth;                // ML depth availability flag
 	float mlConfidence;             // ML quality metric

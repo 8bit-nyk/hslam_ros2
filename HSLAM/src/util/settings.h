@@ -240,6 +240,7 @@ extern bool setting_useAngmfConfidence;
 // KILL verdict (2026-05-07): cos_min=0.873 across TUM; threshold 0.866 catches nothing.
 // Default false (KILL). CLI: --ml-normal-gapfill-mask / --ml-normal-gapfill-cos
 extern bool setting_useNormalGapfillMask;
+extern bool setting_useNormalOptReg;   // Sprint 5 (CD-H7/B-NEW-1): normal-cosine-weighted iR smoothing in CoarseInitializer::optReg
 extern float setting_normalGapfillCosThreshold;  // cos(30°) ≈ 0.866
 
 extern bool debugSaveImages;

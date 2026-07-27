@@ -1578,7 +1578,8 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					printf("[SCALE_INIT] Using GPU warmup results for metric scale...\n");
 					coarseInitializer->setMLDepth(warmup_depth_map_,
 												 warmup_confidence_,
-												 warmup_mean_depth_);
+												 warmup_mean_depth_,
+														 warmup_normal_map_);  // Sprint 5 (CD-H7): normals for optReg
 					printf("[SCALE_INIT] Metric scale set from warmup: %.2fm (saved ~70ms processing)\n",
 						   warmup_mean_depth_);
 
@@ -1586,6 +1587,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					coarseInitializer->seedPointsWithMLDepth();
 					// Clear the stored results to free memory
 					warmup_depth_map_.release();
+						warmup_normal_map_.release();  // Sprint 5 (CD-H7)
 					warmup_results_available_ = false;
 				} else if (!rgb_image.empty()) {
 					printf("[SCALE_INIT] Processing ML depth for metric scale initialization...\n");
@@ -1593,7 +1595,8 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					if (ml_result.success) {
 						coarseInitializer->setMLDepth(ml_result.depth_map,
 													 ml_result.confidence,
-													 ml_result.mean_depth);
+													 ml_result.mean_depth,
+													 ml_result.normal_map);  // Sprint 5 (CD-H7): normals for optReg
 						printf("[SCALE_INIT] ML depth set for initialization (mean=%.2fm, confidence=%.2f)\n",
 							   ml_result.mean_depth, ml_result.confidence);
 						// Seed initializer points with ML inverse depth
@@ -4729,6 +4732,7 @@ bool FullSystem::performMLWarmup(const cv::Mat& warmup_image)
 		if (warmup_result.success && !warmup_result.depth_map.empty()) {
 			// STORE the warmup results for initialization
 			warmup_depth_map_ = warmup_result.depth_map.clone();
+				warmup_normal_map_ = warmup_result.normal_map.empty() ? cv::Mat() : warmup_result.normal_map.clone();  // Sprint 5 (CD-H7)
 			warmup_mean_depth_ = warmup_result.mean_depth;
 			warmup_confidence_ = warmup_result.confidence;
 			warmup_results_available_ = true;
@@ -4892,15 +4896,17 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms)
 	const bool ml_ran   = (ml_inference_counter_ > 0);
 	const char* dsrc    = (setting_depthSource == DEPTH_SOURCE_ML) ? "ml"
 	                    : (setting_depthSource == DEPTH_SOURCE_GT) ? "gt" : "none";
+	// normal-derived features only contribute when ML depth/normals exist (irrelevant in mono)
 	const bool norm_any = (setting_depthSource == DEPTH_SOURCE_ML)
 	                   && (setting_useNormalIntegration || setting_useNormalForeshortening
-	                    || setting_useAngmfConfidence   || setting_useNormalGapfillMask);
+	                    || setting_useAngmfConfidence   || setting_useNormalGapfillMask
+	                    || setting_useNormalOptReg);
 	const char* arm     = (setting_depthSource == DEPTH_SOURCE_NONE) ? "mono"
 	                    : (setting_depthSource == DEPTH_SOURCE_GT)   ? "gt"
 	                    : (norm_any ? "ml-normals" : "ml-depth");
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s "
-	       "norm_integ=%s foreshort=%s angmf=%s gapfill=%s "
+	       "norm_integ=%s foreshort=%s angmf=%s gapfill=%s optreg=%s "
 	       "p0=%s p1=%s p2=%s p3=%s loop=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
@@ -4908,6 +4914,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms)
 	       setting_useNormalForeshortening? "on" : "off",
 	       setting_useAngmfConfidence     ? "on" : "off",
 	       setting_useNormalGapfillMask   ? "on" : "off",
+	       setting_useNormalOptReg        ? "on" : "off",
 	       setting_useMLForInitialization ? "on" : "off",
 	       setting_enableDirectP1Bounds   ? "on" : "off",
 	       !setting_disableDirectP2BA     ? "on" : "off",
