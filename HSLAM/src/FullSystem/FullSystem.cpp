@@ -4883,6 +4883,37 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms)
 	if (avg_ml_inference_ms > 0)
 		printf(" ml_ms=%.1f", avg_ml_inference_ms);
 	printf("\n");
+
+	// [RUN_SUMMARY] — authoritative, machine-readable run descriptor. Replaces the run-scripts'
+	// stale "Metric3D model validation: PASSED" log-grep heuristic (which false-negatives on this
+	// branch). Composable ablation-arm label = depth_src x normal-feature flags; the granular
+	// flags are ground truth (foreshort/angmf ship ON by default, so they, not a single toggle,
+	// distinguish "ml-depth" from "ml-normals"). status=OK unless ML was requested but never ran.
+	const bool ml_ran   = (ml_inference_counter_ > 0);
+	const char* dsrc    = (setting_depthSource == DEPTH_SOURCE_ML) ? "ml"
+	                    : (setting_depthSource == DEPTH_SOURCE_GT) ? "gt" : "none";
+	const bool norm_any = (setting_depthSource == DEPTH_SOURCE_ML)
+	                   && (setting_useNormalIntegration || setting_useNormalForeshortening
+	                    || setting_useAngmfConfidence   || setting_useNormalGapfillMask);
+	const char* arm     = (setting_depthSource == DEPTH_SOURCE_NONE) ? "mono"
+	                    : (setting_depthSource == DEPTH_SOURCE_GT)   ? "gt"
+	                    : (norm_any ? "ml-normals" : "ml-depth");
+	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
+	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s "
+	       "norm_integ=%s foreshort=%s angmf=%s gapfill=%s "
+	       "p0=%s p1=%s p2=%s p3=%s loop=%s "
+	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
+	       arm, dsrc, norm_any ? "on" : "off",
+	       setting_useNormalIntegration   ? "on" : "off",
+	       setting_useNormalForeshortening? "on" : "off",
+	       setting_useAngmfConfidence     ? "on" : "off",
+	       setting_useNormalGapfillMask   ? "on" : "off",
+	       setting_useMLForInitialization ? "on" : "off",
+	       setting_enableDirectP1Bounds   ? "on" : "off",
+	       !setting_disableDirectP2BA     ? "on" : "off",
+	       !setting_disableDirectP3Tracker? "on" : "off",
+	       (loopCloser ? "on" : "off"),
+	       ml_inference_counter_, kf_count, perf_tracking_frame_count_, status);
 }
 
 }

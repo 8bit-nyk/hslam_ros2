@@ -313,10 +313,10 @@ main() {
         print_ml_info "ML Performance Analysis:"
         
         # Check for ML initialization success
-        if grep -q "Metric3D model validation: PASSED" "$output_log"; then
-            print_success "✓ ML model validation: PASSED"
+        if grep -q "\[RUN_SUMMARY\].*status=OK" "$output_log"; then
+            print_success "✓ $(grep -oE "\[RUN_SUMMARY\].*" "$output_log" | tail -1)"
         else
-            print_error "✗ ML model validation: FAILED"
+            print_error "✗ No [RUN_SUMMARY] status=OK (run failed or ML inactive — see log)"
         fi
         
         # Check for performance metrics
