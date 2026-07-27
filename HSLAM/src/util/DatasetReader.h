@@ -89,7 +89,32 @@ inline int getdir (std::string dir, std::vector<std::string> &files)
 
 
 	// files are sorted alphabetically
-    std::sort(files.begin(), files.end());
+    // Natural (numeric-aware) sort so non-zero-padded numeric filenames (e.g. ICL-NUIM
+    // 0.png,1.png,...,1000.png) order correctly on the --files path. Zero-padded (KITTI) and
+    // timestamp (TUM <sec>.<frac>) names are unaffected: numeric order == lexicographic there.
+    std::sort(files.begin(), files.end(),
+        [](const std::string& a, const std::string& b) {
+            size_t i = 0, j = 0;
+            auto dig = [](char c){ return c >= '0' && c <= '9'; };
+            while (i < a.size() && j < b.size()) {
+                if (dig(a[i]) && dig(b[j])) {
+                    size_t ia = i, jb = j;
+                    while (ia < a.size() && dig(a[ia])) ++ia;
+                    while (jb < b.size() && dig(b[jb])) ++jb;
+                    size_t sa = i; while (sa + 1 < ia && a[sa] == '0') ++sa;  // strip leading zeros
+                    size_t sb = j; while (sb + 1 < jb && b[sb] == '0') ++sb;
+                    size_t la = ia - sa, lb = jb - sb;
+                    if (la != lb) return la < lb;                 // more significant digits => larger
+                    int cmp = a.compare(sa, la, b, sb, lb);
+                    if (cmp != 0) return cmp < 0;
+                    i = ia; j = jb;
+                } else {
+                    if (a[i] != b[j]) return a[i] < b[j];
+                    ++i; ++j;
+                }
+            }
+            return a.size() < b.size();
+        });
 
     if(dir.at( dir.length() - 1 ) != '/') dir = dir+"/";
 	for(unsigned int i=0;i<files.size();i++)

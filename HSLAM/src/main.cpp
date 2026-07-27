@@ -487,39 +487,47 @@ int main(int argc, char **argv)
 		auto warmup_start = std::chrono::high_resolution_clock::now();
 
 		try {
-			// Load warmup frame from dataset (respects --startindex)
-			ImageAndExposure* first_img = reader->getImage(startIndex);
-			if (first_img && first_img->useColour && first_img->r_image != nullptr) {
-				// Convert first real frame to RGB using the same pipeline
-				cv::Mat first_rgb = convertUndistortedToRGB(first_img);
-				
-				if (!first_rgb.empty()) {
-					printf("GPU warmup: processing first real frame (expected ~6000ms)...\n");
-					
-					// Process first real frame - this triggers full GPU kernel compilation
-					bool warmup_success = fullSystem->performMLWarmup(first_rgb);
-					
-					auto warmup_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-						std::chrono::high_resolution_clock::now() - warmup_start).count();
-					
-					if (warmup_success) {
-						printf("GPU warmup complete in %ldms - subsequent ML inferences ~40ms\n", warmup_duration);
-					} else {
-						printf("ERROR: Real frame warmup failed - disabling ML depth\n");
-						fullSystem->ml_depth_enabled_ = false;
-						ml_depth_enabled = false;
-					}
+			// Obtain a real colour warmup frame. For --associations runs the ImageFolderReader
+			// globbed the dataset directory (files[0] may be associations.txt, NOT an image, and
+			// reading a text file as colour segfaults) — so source the warmup frame from the first
+			// association RGB entry, matching how the RGB-D loop below loads frames (cv::imread).
+			cv::Mat first_rgb;
+			ImageAndExposure* first_img = nullptr;
+			if (!associations.empty()) {
+				typedef tum_benchmark::FileReader<RGBDAssociation> WarmupReader;
+				WarmupReader warmup_assoc(associations);
+				auto wit = warmup_assoc.begin();
+				for (int k = 0; k < startIndex && wit != warmup_assoc.end(); ++k) ++wit;
+				if (wit != warmup_assoc.end())
+					first_rgb = cv::imread(source + "/" + (*wit).rgb_file, cv::IMREAD_COLOR);
+			} else {
+				// --files path (TUM/KITTI): use the reader's undistorted colour frame
+				first_img = reader->getImage(startIndex);
+				if (first_img && first_img->useColour && first_img->r_image != nullptr)
+					first_rgb = convertUndistortedToRGB(first_img);
+			}
+
+			if (!first_rgb.empty()) {
+				printf("GPU warmup: processing first real frame (expected ~6000ms)...\n");
+				// Process first real frame - this triggers full GPU kernel compilation
+				bool warmup_success = fullSystem->performMLWarmup(first_rgb);
+
+				auto warmup_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+					std::chrono::high_resolution_clock::now() - warmup_start).count();
+
+				if (warmup_success) {
+					printf("GPU warmup complete in %ldms - subsequent ML inferences ~40ms\n", warmup_duration);
 				} else {
-					printf("ERROR: Could not convert first frame to RGB - disabling ML depth\n");
+					printf("ERROR: Real frame warmup failed - disabling ML depth\n");
 					fullSystem->ml_depth_enabled_ = false;
 					ml_depth_enabled = false;
 				}
-				delete first_img; // Clean up
 			} else {
-				printf("ERROR: Could not load first frame - disabling ML depth\n");
+				printf("ERROR: Could not load first frame for warmup - disabling ML depth\n");
 				fullSystem->ml_depth_enabled_ = false;
 				ml_depth_enabled = false;
 			}
+			if (first_img) delete first_img; // Clean up (--files path only)
 		} catch (const std::exception& e) {
 			printf("ERROR: Exception during ML warmup: %s - disabling ML depth\n", e.what());
 			fullSystem->ml_depth_enabled_ = false;
