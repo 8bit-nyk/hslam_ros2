@@ -136,14 +136,19 @@ public:
 	// contains all residuals.
 	std::vector<EFResidual*> residualsAll;
 
-	float bdSumF;
-	float HdiF;
-	float Hdd_accLF;
-	VecCf Hcd_accLF;
-	float bd_accLF;
-	float Hdd_accAF;
-	VecCf Hcd_accAF;
-	float bd_accAF;
+	// Zero-initialized. The accumulation pass (AccumulatedTopHessian) writes these before the Schur
+	// pass (AccumulatedSCHessian) reads them, so in the stock flow the initial value is never
+	// observed — but the EFPoint constructor left them indeterminate, so any code that inspects a
+	// freshly inserted point's accumulators BEFORE its first accumulation reads garbage. That is
+	// undefined behaviour, and it silently produced ~1e19 values when exercised.
+	float bdSumF = 0;
+	float HdiF = 0;
+	float Hdd_accLF = 0;
+	VecCf Hcd_accLF = VecCf::Zero();
+	float bd_accLF = 0;
+	float Hdd_accAF = 0;
+	VecCf Hcd_accAF = VecCf::Zero();
+	float bd_accAF = 0;
 
 
 	EFPointStatus stateFlag;
