@@ -128,7 +128,10 @@ int main(int argc, char **argv)
 		("E,pauseEnd", "Pause at end", cxxopts::value<bool>()->default_value("false"))
 		("ml-depth", "Enable ML depth estimation", cxxopts::value<bool>()->default_value("false"))
 		("ml-model", "Path to ONNX ML depth model", cxxopts::value<std::string>()->default_value("models/metric3d-vit-small/onnx/model.onnx"))
-		("ml-strategy", "ML inference strategy (every_frame|keyframe_only|snapshot_mode)", cxxopts::value<std::string>()->default_value("keyframe_only"))
+		// NOTE: "every_frame" was advertised here but never implemented — the validator below
+		// silently rewrites it to keyframe_only, and no per-frame inference path exists (ML is
+		// gated inside makeKeyFrame). Use --ml-inference-every-n to control cadence instead.
+		("ml-strategy", "ML inference strategy (keyframe_only|snapshot_mode)", cxxopts::value<std::string>()->default_value("keyframe_only"))
 		("ml-snapshot-interval", "Frames between ML inference in snapshot mode", cxxopts::value<int>()->default_value("5"))
 		("ml-benchmark", "Enable ML performance benchmarking", cxxopts::value<bool>()->default_value("false"))
 		("ml-gpu", "Enable GPU acceleration for ML inference", cxxopts::value<bool>()->default_value("false"))
@@ -143,6 +146,7 @@ int main(int argc, char **argv)
 		("ml-idepth-uncertainty", "Phase 1 base idepth uncertainty for ML bounds (default 0.30 = re-calibrated for AngMF per Sprint 3a; was 0.20 pre-Sprint3a). Smaller = tighter.", cxxopts::value<float>()->default_value("0.30"))
 		("ml-mean-strategy", "mlMeanDepth computation: 0=arith mean of valid (legacy), 1=median, 2=trimmed mean 5-95%. Default 0.", cxxopts::value<int>()->default_value("0"))
 		("ml-inference-mode", "ML inference cadence: 0=every Nth KF (legacy), 1=init_only (lean), 2=disabled. Default 0.", cxxopts::value<int>()->default_value("0"))
+		("ml-inference-every-n", "ML inference cadence N (mode 0): run ML every Nth keyframe. 1=every keyframe (densest normals, ~2x ML cost), 2=default (Paper Table V).", cxxopts::value<int>()->default_value("2"))
 		("ml-indirect-filter", "Indirect.Step2 ML depth-ratio filter in feature matchers. true=enabled (legacy), false=disabled. Default true.", cxxopts::value<bool>()->default_value("true"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
@@ -211,6 +215,7 @@ int main(int argc, char **argv)
 	setting_idepthUncertaintyForMLInit = result["ml-idepth-uncertainty"].as<float>();
 	setting_mlMeanDepthStrategy = result["ml-mean-strategy"].as<int>();
 	setting_mlInferenceMode = result["ml-inference-mode"].as<int>();
+	setting_mlInferenceEveryN = std::max(1, result["ml-inference-every-n"].as<int>());
 	setting_indirectMatcherUseML = result["ml-indirect-filter"].as<bool>();
 	
 	// Validate and normalize ML strategy parameters for ablation study
