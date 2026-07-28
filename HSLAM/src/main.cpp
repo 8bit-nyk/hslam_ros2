@@ -819,7 +819,14 @@ int main(int argc, char **argv)
                 {
                     double tsThis = reader->getTimestamp(idsToPlay[idsToPlay.size()-1]);
                     double tsPrev = reader->getTimestamp(idsToPlay[idsToPlay.size()-2]);
-                    timesToPlayAt.push_back(timesToPlayAt.back() +  fabs(tsThis-tsPrev)/playbackSpeed);
+                    // playbackSpeed==0 means "no real-time pacing" (linearize / eval mode). Dividing
+                    // by it produced inf schedule entries, which the init branch below then copied
+                    // into sInitializerOffset, poisoning MilliSecondsTakenMT and every pipeline-level
+                    // fps number downstream (console printed "infms per frame", FPSLogger fell back
+                    // to a bogus 0.0 fps). The schedule is unused when playbackSpeed==0, so keep it 0.
+                    timesToPlayAt.push_back(playbackSpeed != 0
+                        ? timesToPlayAt.back() + fabs(tsThis-tsPrev)/playbackSpeed
+                        : 0.0);
                 }
             }
 
@@ -845,7 +852,7 @@ int main(int argc, char **argv)
                 {
                     gettimeofday(&tv_start, NULL);
                     started = clock();
-                    sInitializerOffset = timesToPlayAt[ii];
+                    sInitializerOffset = std::isfinite(timesToPlayAt[ii]) ? timesToPlayAt[ii] : 0.0;
                 }
 
                 int i = idsToPlay[ii];
@@ -972,6 +979,14 @@ int main(int argc, char **argv)
         struct timeval tv_end;
         gettimeofday(&tv_end, NULL);
 
+        // End-to-end pipeline wall-clock: first tracked frame -> after the mapping/BA backlog has
+        // drained (blockUntilMappingIsFinished above). Unlike track_fps (tracking thread only) this
+        // includes mapping, BA, ML inference and loop closure — i.e. the true cost of the pipeline.
+        // Deliberately excludes sInitializerOffset, which is a playback-schedule offset, not work.
+        double pipelineWallMs = (tv_end.tv_sec  - tv_start.tv_sec) * 1000.0
+                              + (tv_end.tv_usec - tv_start.tv_usec) / 1000.0;
+        int pipelineFrames = abs(idsToPlay[0] - idsToPlay.back()) + 1;
+
         fullSystem->printResult("result.txt");
 		if (outputPC) fullSystem->printPC("PC.PCD");
 
@@ -990,11 +1005,11 @@ int main(int argc, char **argv)
         {
             double avg_ml_ms = (ml_depth_enabled && fullSystem->ml_depth_enabled_)
                              ? fullSystem->ml_metrics_.avg_ml_inference_time_ms : -1.0;
-            fullSystem->printPerfSummary(avg_ml_ms);
+            fullSystem->printPerfSummary(avg_ml_ms, pipelineWallMs, pipelineFrames);
         }
-        
+
         double MilliSecondsTakenSingle = 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC);
-        double MilliSecondsTakenMT = sInitializerOffset + ((tv_end.tv_sec-tv_start.tv_sec)*1000.0f + (tv_end.tv_usec-tv_start.tv_usec)/1000.0f);
+        double MilliSecondsTakenMT = pipelineWallMs;
         
         // Log performance statistics using FPSLogger
         if (!associations.empty()) {
@@ -1033,9 +1048,12 @@ int main(int argc, char **argv)
                 );
             }
             
-            // Console output for compatibility
+            // Console output for compatibility.
+            // NOTE: the first figure is the DATASET capture rate (frames / timestamp span) — a
+            // property of the sequence, constant regardless of compute. It is NOT throughput and
+            // must never be quoted as achieved fps; use pipeline_fps in [PERF_SUMMARY] for that.
             printf("\n======================"
-                    "\n%d Frames (%.1f fps)"
+                    "\n%d Frames (%.1f fps dataset capture rate, NOT throughput)"
                     "\n%.2fms per frame (single core); "
                     "\n%.2fms per frame (multi core); "
                     "\n%.3fx (single core); "

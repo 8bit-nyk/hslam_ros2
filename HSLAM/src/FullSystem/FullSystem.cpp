@@ -4874,16 +4874,29 @@ int FullSystem::getMLReferenceFrameId() const {
 	return ml_reference_frame_id_;
 }
 
-void FullSystem::printPerfSummary(double avg_ml_inference_ms)
+void FullSystem::printPerfSummary(double avg_ml_inference_ms,
+                                  double pipeline_wall_ms, int pipeline_frames)
 {
+	// track_fps: TRACKING THREAD ONLY (inter-frame wall clock in addActiveFrame). Answers "can the
+	// front-end keep up with the camera" — mapping/BA/loop-closure run concurrently and are excluded.
 	double track_fps = (perf_tracking_frame_count_ > 0 && perf_total_tracking_ms_ > 0)
 	                 ? perf_tracking_frame_count_ * 1000.0 / perf_total_tracking_ms_
 	                 : 0.0;
+	// pipeline_fps: WHOLE PIPELINE, end to end — first tracked frame until the mapping/BA backlog
+	// has drained. This is the number to quote against the >=24fps real-time goal, and the one that
+	// moves when ML inference cadence changes.
+	double pipeline_fps = (pipeline_wall_ms > 0 && pipeline_frames > 0)
+	                    ? pipeline_frames * 1000.0 / pipeline_wall_ms
+	                    : 0.0;
 	int kf_count  = static_cast<int>(allKeyFramesHistory.size());
 	int mp_count  = globalMap ? globalMap->MapPointsInMap() : 0;
 
 	printf("[PERF_SUMMARY] track_fps=%.2f frames=%d kfs=%d mps=%d",
 	       track_fps, perf_tracking_frame_count_, kf_count, mp_count);
+	if (pipeline_fps > 0)
+		printf(" pipeline_fps=%.2f pipeline_frames=%d pipeline_ms=%.0f ms_per_frame=%.2f",
+		       pipeline_fps, pipeline_frames, pipeline_wall_ms,
+		       pipeline_wall_ms / pipeline_frames);
 	if (avg_ml_inference_ms > 0)
 		printf(" ml_ms=%.1f", avg_ml_inference_ms);
 	printf("\n");

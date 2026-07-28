@@ -170,7 +170,11 @@ public:
 	int getKeyframeCount() const { return static_cast<int>(frameHessians.size()); }
 
 	// Run-end performance summary — call after blockUntilMappingIsFinished()
-	void printPerfSummary(double avg_ml_inference_ms = -1.0);
+	// avg_ml_inference_ms: mean ML forward-pass time. pipeline_wall_ms / pipeline_frames: end-to-end
+	// wall clock and frame count for the WHOLE pipeline (tracking + mapping/BA + ML + loop closure),
+	// measured in main.cpp after the mapping backlog drains. Pass <=0 to omit the pipeline figures.
+	void printPerfSummary(double avg_ml_inference_ms = -1.0,
+	                      double pipeline_wall_ms = -1.0, int pipeline_frames = -1);
 
 	// Perf accumulators (updated per-frame in TrackMonocularWithML)
 	struct timeval perf_last_frame_time_;
