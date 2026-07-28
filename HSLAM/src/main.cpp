@@ -162,6 +162,8 @@ int main(int argc, char **argv)
 		("ml-normal-gapfill-mask", "Sprint 4 CD-H3: gate CoarseTracker lvl=0 gap-fill on normal-cosine agreement (default false — KILL: cos_min=0.873 at threshold 0.866, 0% skip on TUM)", cxxopts::value<bool>()->default_value("false"))
 		("ml-normal-gapfill-cos", "Sprint 4 CD-H3: cosine threshold for normal gap-fill mask; cos(30deg)=0.866, cos(40deg)=0.766 (default 0.866)", cxxopts::value<float>()->default_value("0.866"))
 		("ml-normal-optreg", "Sprint 5 CD-H7/B-NEW-1: normal-cosine-weighted iR smoothing in CoarseInitializer::optReg (default false until WIN verdict)", cxxopts::value<bool>()->default_value("false"))
+		("ml-normal-pixel-gate", "Sprint 6 CD-H2: gate lvl-0 pixel selection on |n·z_hat| (skip edge-on surfaces) (default false until WIN verdict)", cxxopts::value<bool>()->default_value("false"))
+		("ml-normal-pixel-gate-cos", "Sprint 6 CD-H2: cosine threshold for the pixel gate; 0.5=60deg (default), 0.3=73deg (permissive)", cxxopts::value<float>()->default_value("0.5"))
 		("h,help", "Print usage")
     ;
 
@@ -264,6 +266,12 @@ int main(int argc, char **argv)
 	// Sprint 5 — CD-H7/B-NEW-1: normal-cosine-weighted iR smoothing in CoarseInitializer::optReg
 	setting_useNormalOptReg = result["ml-normal-optreg"].as<bool>();
 	printf("[PHASE_CONFIG] ml-normal-optreg=%s\n", setting_useNormalOptReg ? "on" : "off");
+
+	// Sprint 6 — CD-H2: normal-direction gate on lvl-0 pixel selection
+	setting_useNormalPixelGate = result["ml-normal-pixel-gate"].as<bool>();
+	setting_normalPixelGateCos = result["ml-normal-pixel-gate-cos"].as<float>();
+	printf("[PHASE_CONFIG] ml-normal-pixel-gate=%s cos_thresh=%.3f\n",
+	       setting_useNormalPixelGate ? "on" : "off", setting_normalPixelGateCos);
 
 	// Depth source selection (Phase B — research-only validation switch)
 	{

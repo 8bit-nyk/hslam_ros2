@@ -316,6 +316,8 @@ bool setting_useAngmfConfidence = true;
 // Default false (KILL). CLI: --ml-normal-gapfill-mask / --ml-normal-gapfill-cos
 bool setting_useNormalGapfillMask = false;
 bool setting_useNormalOptReg = false;   // Sprint 5 (CD-H7/B-NEW-1): default OFF until it earns default-on with data
+bool setting_useNormalPixelGate = false;   // Sprint 6 (CD-H2): default OFF until it earns default-on with data
+float setting_normalPixelGateCos = 0.5f;   // Sprint 6 (CD-H2): cos(60deg); pixels with |n·z_hat| <= this are skipped
 float setting_normalGapfillCosThreshold = 0.866f;
 
 bool goStepByStep = false;

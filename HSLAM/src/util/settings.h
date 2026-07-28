@@ -241,6 +241,8 @@ extern bool setting_useAngmfConfidence;
 // Default false (KILL). CLI: --ml-normal-gapfill-mask / --ml-normal-gapfill-cos
 extern bool setting_useNormalGapfillMask;
 extern bool setting_useNormalOptReg;   // Sprint 5 (CD-H7/B-NEW-1): normal-cosine-weighted iR smoothing in CoarseInitializer::optReg
+extern bool setting_useNormalPixelGate;    // Sprint 6 (CD-H2): gate lvl-0 pixel selection on |n·z_hat|
+extern float setting_normalPixelGateCos;   // Sprint 6 (CD-H2): cosine threshold (default 0.5 = 60deg)
 extern float setting_normalGapfillCosThreshold;  // cos(30°) ≈ 0.866
 
 extern bool debugSaveImages;

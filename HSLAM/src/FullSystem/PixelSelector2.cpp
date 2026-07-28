@@ -372,6 +372,19 @@ Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 	int w2 = wG[2];
 	int h = hG[0];
 
+	// Sprint 6 (CD-H2): optional normal-direction gate on lvl-0 pixel selection. Skip pixels whose
+	// surface is edge-on to the optical axis (|n·z_hat| <= cos_thresh): strong gradient but poor
+	// photometric trace. nmap holds a ref and is used only if it matches the full-res grid; null
+	// (mono / ML off / init frame) => original selection path unchanged.
+	std::shared_ptr<cv::Mat> nmap_sp;
+	const cv::Mat* nmap = nullptr;
+	if (setting_useNormalPixelGate) {
+		nmap_sp = fh->getMLNormalMap();
+		if (nmap_sp && nmap_sp->cols == w && nmap_sp->rows == h) nmap = nmap_sp.get();
+	}
+	const float normalGateCos = setting_normalPixelGateCos;
+	long psn_total = 0, psn_gated = 0; double psn_nz_sum = 0.0;  // [PIXEL_SELECT_NORMAL] diagnostic
+
 
 	// Set of random directions to chose from
 	// Gradient is multiplied by random direction to add variance to point selection
@@ -462,12 +475,23 @@ Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 
 					if(ag0 > pixelTH0*thFactor)
 					{
-						Vec2f ag0d = map0[idx].tail<2>();
-						float dirNorm = fabsf((float)(ag0d.dot(dir2)));
-						if(!setting_selectDirectionDistribution) dirNorm = ag0;
+						// Sprint 6 (CD-H2): skip edge-on surfaces (|n·z_hat| <= cos_thresh).
+						bool gated = false;
+						if(nmap)
+						{
+							const cv::Vec3f& nrm = nmap->at<cv::Vec3f>(yf, xf);
+							psn_total++; psn_nz_sum += std::fabs(nrm[2]);
+							if(std::fabs(nrm[2]) <= normalGateCos) { psn_gated++; gated = true; }
+						}
+						if(!gated)
+						{
+							Vec2f ag0d = map0[idx].tail<2>();
+							float dirNorm = fabsf((float)(ag0d.dot(dir2)));
+							if(!setting_selectDirectionDistribution) dirNorm = ag0;
 
-						if(dirNorm > bestVal2)
-						{ bestVal2 = dirNorm; bestIdx2 = idx; bestIdx3 = -2; bestIdx4 = -2;}
+							if(dirNorm > bestVal2)
+							{ bestVal2 = dirNorm; bestIdx2 = idx; bestIdx3 = -2; bestIdx4 = -2;}
+						}
 					}
 					if(bestIdx3==-2) continue; // Invaliate grid for 2nd and 3rd grid levels
 
@@ -523,6 +547,10 @@ Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 	}
 
 
+	if(nmap)
+		printf("[PIXEL_SELECT_NORMAL] total_candidates=%ld normal_gated_skipped=%ld gate_pct=%.3f mean_n_z=%.3f\n",
+		       psn_total, psn_gated, psn_total>0 ? (double)psn_gated/psn_total : 0.0,
+		       psn_total>0 ? psn_nz_sum/psn_total : 0.0);
 	return Eigen::Vector3i(n2,n3,n4);
 }
 
