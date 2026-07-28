@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Absolute path to this script's directory, captured BEFORE any cd (sourcing hslam_env.sh
+# later with a relative path breaks once the script changes directory).
+HSLAM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 ########################
 # HSLAM KITTI ML Depth Mode Script
 # Generates trajectory WITH ML depth integration on KITTI dataset
@@ -266,7 +270,8 @@ main() {
     cd "$build_directory_path"
     
     # Set proper library path for ONNX Runtime
-    export LD_LIBRARY_PATH="$HOME/Dev/hslam_ros2_ws/src/HSLAM/Thirdparty/onnxruntime/lib:${LD_LIBRARY_PATH:-}"
+    # Shared env: ONNX Runtime + SONAME compat shims (see run_scripts/hslam_env.sh)
+    source "$HSLAM_SCRIPT_DIR/hslam_env.sh"
     print_info "Library path configured for ONNX Runtime"
     
     # Run HSLAM with ML depth

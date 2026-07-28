@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Absolute path to this script's directory, captured BEFORE any cd (sourcing hslam_env.sh
+# later with a relative path breaks once the script changes directory).
+HSLAM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 ########################
 # HSLAM ML Depth Mode — ICL-NUIM Dataset
 # Sprint 0d follow-up: HSLAM² depth-only baseline for the 3-way ablation
@@ -60,8 +64,8 @@ main() {
     if [ -f "$vocab_path" ]; then enable_loop_closure=true; fi
 
     # ONNX Runtime needs the GPU lib path
-    export LD_LIBRARY_PATH="$HOME/Dev/hslam_ros2_ws/src/HSLAM/Thirdparty/onnxruntime/lib:${LD_LIBRARY_PATH:-}"
-
+    # Shared env: ONNX Runtime + SONAME compat shims (see run_scripts/hslam_env.sh)
+    source "$HSLAM_SCRIPT_DIR/hslam_env.sh"
     mkdir -p "$results_directory"
     timestamp=$(date +"%Y%m%d_%H%M%S")
 

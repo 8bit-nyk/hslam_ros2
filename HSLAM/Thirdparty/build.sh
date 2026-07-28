@@ -1,7 +1,16 @@
-#!/bin/bash 
+#!/bin/bash
 # nyk 22/05/2023
 # Run this script once as it will clean up after itself. Everytime you run it will recompile packages (except opencv)
-BuildType="RelWithDebInfo" 
+
+# Fail fast. Without this the script silently continued past a failed OpenCV build and still exited
+# 0, so a broken Thirdparty tree looked like a successful provision.
+# -u is safe here: every variable (SCRIPTPATH, InstallDir, BuildType, cvVersion) is assigned before
+# use. pipefail is currently a no-op (no pipelines) but guards future edits.
+# NOTE: not validated by a full clean rebuild — that needs sudo and ~20+ min. If a step that
+# legitimately returns non-zero starts aborting the script, that step needs an explicit `|| true`.
+set -euo pipefail
+
+BuildType="RelWithDebInfo"
 
 SCRIPTPATH=$(dirname $0)
 if [ $SCRIPTPATH = '.' ]
@@ -16,7 +25,10 @@ InstallDir=$SCRIPTPATH/CompiledLibs
 #install system wide dependencies
 #================================
 export DEBIAN_FRONTEND=noninteractive
-sudo apt -y install libgl1-mesa-dev libglew-dev libsuitesparse-dev libeigen3-dev libboost-all-dev cmake build-essential git libzip-dev ccache freeglut3-dev libgoogle-glog-dev libatlas-base-dev ninja-build unzip wget
+# libgtk2.0-dev + pkg-config are REQUIRED: OpenCV below is configured with -DWITH_QT=ON, but
+# without a GUI dev lib present highgui builds with no display backend and every `--nogui=false`
+# run dies with a GTK error. Missing them is a silent misconfiguration, not a build failure.
+sudo apt -y install libgl1-mesa-dev libglew-dev libsuitesparse-dev libeigen3-dev libboost-all-dev cmake build-essential git libzip-dev ccache freeglut3-dev libgoogle-glog-dev libatlas-base-dev ninja-build unzip wget libgtk2.0-dev pkg-config
 
 #install libceres for compatibility with ubuntu 22:
 echo -e "Setting up Ceres Solver\n"

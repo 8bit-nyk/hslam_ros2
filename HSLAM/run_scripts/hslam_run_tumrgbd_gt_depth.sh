@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Absolute path to this script's directory, captured BEFORE any cd (sourcing hslam_env.sh
+# later with a relative path breaks once the script changes directory).
+HSLAM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ########################
 # HSLAM GT Depth Validation Mode (Phase B — research only)
 # Uses Kinect GT depth from TUM-RGBD associations.txt in place of Metric3D.
@@ -64,8 +68,9 @@ mkdir -p "$results_directory"
 timestamp=$(date +"%Y%m%d_%H%M%S")
 cd "$build_directory_path"
 
-export LD_LIBRARY_PATH="$HOME/Dev/hslam_ros2_ws/src/HSLAM/Thirdparty/onnxruntime/lib:${LD_LIBRARY_PATH:-}"
+# Shared env: ONNX Runtime + SONAME compat shims (see run_scripts/hslam_env.sh)
 
+source "$HSLAM_SCRIPT_DIR/hslam_env.sh"
 cmd="$build_directory_path/HSLAM \
     --files $dataset_path \
     --calib $calib_path \
