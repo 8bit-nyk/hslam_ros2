@@ -21,6 +21,13 @@
 #include "IOWrapper/Pangolin/PangolinDSOViewer.h"
 #include "IOWrapper/OutputWrapper/SampleOutputWrapper.h"
 
+// gd -gui -27july2026: 3DGS ImGui viewer (ported from MGSO)
+#if HAS_GSVIEWER
+#include "IOWrapper/ImguiBridge/imguiBridgeViewer.h"
+#include "3DGSviewer/imgui_viewer.h"
+#endif
+// gd -gui -27july2026
+
 #include <cxxopts.hpp>
 
 // RGB-D pipeline includes
@@ -115,7 +122,8 @@ int main(int argc, char **argv)
 		("usesampleoutput", "Replace pangolinViewer with another output wrapper", cxxopts::value<bool>()->default_value("false"))
 		("nolog", "Disable logging optimization data", cxxopts::value<bool>()->default_value("false"))
 		("nogui", "Disable GUI", cxxopts::value<bool>()->default_value("false"))
-		("save", "Save debug images", cxxopts::value<bool>()->default_value("false"))
+        ("gsgui", "Open the 3DGS imgui viewer (requires --gauss)", cxxopts::value<bool>()->default_value("false")) // gd -gui -27july2026
+        ("save", "Save debug images", cxxopts::value<bool>()->default_value("false"))
 		("quiet", "Disable message printing", cxxopts::value<bool>()->default_value("true"))
 		("nomt", "Turns off multiThreading", cxxopts::value<bool>()->default_value("false"))
 		("s,startindex", "Image to start from", cxxopts::value<int>()->default_value("0"))
@@ -205,6 +213,7 @@ int main(int argc, char **argv)
     // gd -dev -16june2026
     std::string gauss_config_path = result["gauss"].as<std::string>();
     bool gauss_enabled = !gauss_config_path.empty();
+    bool gsgui_enabled = result["gsgui"].as<bool>(); // gd -gui -27july2026
 
     // dI_c is null without colour
     if (gauss_enabled && !use_colour)
@@ -346,6 +355,12 @@ int main(int argc, char **argv)
     // gd -dev -16june2026
     std::shared_ptr<HSLAM::GaussianMapper> pGausMapper;
     std::thread gs_thread;
+// gd -gui -27july2026
+#if HAS_GSVIEWER
+    std::shared_ptr<ImGuiViewer> pGSViewer;
+    std::thread gs_viewer_thread;
+#endif
+// gd -gui -27july2026
 
     if (gauss_enabled)
     {
@@ -367,6 +382,34 @@ int main(int argc, char **argv)
             0,
             device_type);
 
+// gd -gui -27july2026: the 3DGS imgui viewer. Constructed BEFORE the mapper
+// thread starts — safe because GaussianMapper's *constructor* is what fills
+// scene_->cameras_, which ImGuiViewer reads immediately.
+#if HAS_GSVIEWER
+        if (gsgui_enabled)
+        {
+            try
+            {
+                HSLAM::IOWrap::ImguiBrigeViewer* GSviewer =
+                    new HSLAM::IOWrap::ImguiBrigeViewer(wG[0], hG[0]);
+                fullSystem->outputWrapper.push_back(GSviewer);
+
+                pGSViewer = std::make_shared<ImGuiViewer>(GSviewer, pGausMapper);
+                gs_viewer_thread = std::thread(&ImGuiViewer::run, pGSViewer.get());
+                printf("[GSI] 3DGS imgui viewer thread started.\n");
+            }
+            catch (const std::exception& e)
+            {
+                printf("WARNING: could not start the 3DGS imgui viewer: %s\n", e.what());
+                printf("Continuing without it — training is unaffected.\n");
+                pGSViewer = nullptr;
+            }
+        }
+#else
+        if (gsgui_enabled)
+            printf("WARNING: --gsgui requested but this binary was built without GLFW/OpenGL.\n");
+#endif
+// gd -gui -27july2026
         gs_thread = std::thread(&HSLAM::GaussianMapper::run, pGausMapper.get());
         printf("[GSI] GaussianMapper thread started.\n");
     }
@@ -1005,6 +1048,18 @@ int main(int argc, char **argv)
 	    viewer->run();
 
 	runthread.join();
+// gd -gui -27july2026: the viewer holds raw pointers to the bridge (deleted in the
+// loop just below) and to the mapper, so it must be fully stopped before either goes away
+#if HAS_GSVIEWER
+	if (pGSViewer)
+	{
+		pGSViewer->viewer_signalStop();
+		if (gs_viewer_thread.joinable())
+			gs_viewer_thread.join();
+		printf("[GSI] 3DGS imgui viewer thread joined.\n");
+	}
+#endif
+// gd -gui -27july2026
 
 	for(IOWrap::Output3DWrapper* ow : fullSystem->outputWrapper)
 	{

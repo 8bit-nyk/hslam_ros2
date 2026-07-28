@@ -43,6 +43,20 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -pthread")
 find_package(LibZip QUIET)
 find_package(Pangolin 0.2 QUIET)# PATHS ~/colcon_ws/src/HSLAM/Thirdparty/CompiledLibs)
 
+# gd -gui -27july2026: 3DGS ImGui viewer 
+find_package(OpenGL QUIET)
+find_package(glfw3 QUIET)
+if (OpenGL_FOUND AND glfw3_FOUND)
+	message("--- found GLFW + OpenGL, compiling 3DGS imgui viewer.")
+	set(HAS_GSVIEWER 1)
+	add_definitions(-DHAS_GSVIEWER=1)
+else()
+	message("--- could not find GLFW / OpenGL, not compiling 3DGS imgui viewer.")
+	set(HAS_GSVIEWER 0)
+	add_definitions(-DHAS_GSVIEWER=0)
+endif()
+# gd -gui -27july2026
+
 # ONNX Runtime configuration
 set(ONNXRUNTIME_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/onnxruntime)
 if(EXISTS ${ONNXRUNTIME_DIR})
@@ -180,6 +194,7 @@ include_directories(
   ${PROJECT_SOURCE_DIR}
   ${TORCH_INCLUDE_DIRS}
 # gd -dev -16june2026
+  ${PROJECT_SOURCE_DIR}/3DGSviewer   # gd -gui -27july2026
 ) 
 
 
@@ -257,9 +272,31 @@ target_link_libraries(cuda_rasterizer
     "${TORCH_LIBRARIES}")
 # gd -dev -16june2026
 
+# gd -gui -27july2026: vendored Dear ImGui + the 3DGS viewer sources.
+if (HAS_GSVIEWER)
+	add_library(imgui STATIC
+	    ${PROJECT_SOURCE_DIR}/3DGSviewer/imgui/imgui.cpp
+	    ${PROJECT_SOURCE_DIR}/3DGSviewer/imgui/imgui_demo.cpp
+	    ${PROJECT_SOURCE_DIR}/3DGSviewer/imgui/imgui_draw.cpp
+	    ${PROJECT_SOURCE_DIR}/3DGSviewer/imgui/imgui_tables.cpp
+	    ${PROJECT_SOURCE_DIR}/3DGSviewer/imgui/imgui_widgets.cpp
+	    ${PROJECT_SOURCE_DIR}/3DGSviewer/imgui/imgui_impl_glfw.cpp
+	    ${PROJECT_SOURCE_DIR}/3DGSviewer/imgui/imgui_impl_opengl3.cpp)
+	target_include_directories(imgui PUBLIC ${PROJECT_SOURCE_DIR}/3DGSviewer)
+	# ${CMAKE_DL_LIBS}: imgui_impl_opengl3's loader dlopen()s the GL driver.
+	target_link_libraries(imgui glfw OpenGL::GL ${CMAKE_DL_LIBS})
+
+	set(gsviewer_SOURCE_FILES
+	  ${PROJECT_SOURCE_DIR}/3DGSviewer/imgui_viewer.cpp
+	  ${PROJECT_SOURCE_DIR}/3DGSviewer/map_drawer.cpp)
+else()
+	set(gsviewer_SOURCE_FILES )
+endif()
+# gd -gui -27july2026
+
 # compile main library.
 include_directories( ${CSPARSE_INCLUDE_DIR} ${CHOLMOD_INCLUDE_DIR}) 
-add_library(HSLAM_lib ${SOURCE_FILES} ${opencv_SOURCE_FILES} ${pangolin_SOURCE_FILES})
+add_library(HSLAM_lib ${SOURCE_FILES} ${opencv_SOURCE_FILES} ${pangolin_SOURCE_FILES} ${gsviewer_SOURCE_FILES}) # gd -gui -27july2026
 
 
 
@@ -293,6 +330,12 @@ set(LIBS
 if(HAS_ONNXRUNTIME)
     list(APPEND LIBS ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so)
 endif()
+
+# gd -gui -27july2026: link the 3DGS imgui viewer stack
+if(HAS_GSVIEWER)
+    list(APPEND LIBS imgui glfw OpenGL::GL ${CMAKE_DL_LIBS})
+endif()
+# gd -gui -27july2026
 
 # build main executable (only if we have both OpenCV and Pangolin)
 if (OpenCV_FOUND AND Pangolin_FOUND)

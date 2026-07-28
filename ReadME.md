@@ -300,7 +300,7 @@ cd ~/hslam_ws/src/HSLAM
   --calib=configs/replica_calib/camera.txt \
   --vocab=misc/orbvoc.dbow3 \
   --gauss=configs/gaussian_mapper/replica_mono.yaml \
-  --colour --loopclosure --mode=1
+  --colour --loopclosure --mode=1 --gsgui
 ```
 
 **Arguments:**
