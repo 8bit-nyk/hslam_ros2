@@ -2797,13 +2797,29 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 
 	// really no lock required, as we are initializing.
 	{
+		// Sprint 8 (CD-H6) gauge probe: optionally seed the world frame with a fixed rotation
+		// instead of Identity. Applied to BOTH init frames so the relative geometry is untouched —
+		// this is purely a re-choice of the gauge. See settings.h for why this is the decisive test.
+		SE3 T_w_0 = SE3();
+		if(setting_gravityAlignTestRotDeg != 0.0f)
+		{
+			const double th = setting_gravityAlignTestRotDeg * M_PI / 180.0;
+			Mat33 R;  // rotation about the camera x-axis
+			R <<  1, 0,        0,
+			      0, cos(th), -sin(th),
+			      0, sin(th),  cos(th);
+			T_w_0 = SE3(R, Vec3::Zero());
+			printf("[NORMAL_GRAVITY] GAUGE PROBE: seeding world frame with fixed R_x(%.1f deg)\n",
+			       setting_gravityAlignTestRotDeg);
+		}
+
 		// boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
-		firstFrame->shell->setPose(SE3());
+		firstFrame->shell->setPose(T_w_0);
 		firstFrame->shell->aff_g2l = AffLight(0,0);
 		firstFrame->setEvalPT_scaled(firstFrame->shell->getPose().inverse(),firstFrame->shell->aff_g2l);
 		firstFrame->shell->setPoseOpti(Sim3(firstFrame->shell->getPoseInverse().matrix()));
 
-		newFrame->shell->setPose(firstToNew.inverse());
+		newFrame->shell->setPose(T_w_0 * firstToNew.inverse());
 		newFrame->shell->aff_g2l = AffLight(0,0);
 		newFrame->setEvalPT_scaled(newFrame->shell->getPose().inverse(),newFrame->shell->aff_g2l);
 	}
@@ -4913,13 +4929,14 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	const bool norm_any = (setting_depthSource == DEPTH_SOURCE_ML)
 	                   && (setting_useNormalIntegration || setting_useNormalForeshortening
 	                    || setting_useAngmfConfidence   || setting_useNormalGapfillMask
-	                    || setting_useNormalOptReg);
+	                    || setting_useNormalOptReg      || setting_useNormalPixelGate
+	                    || setting_useNormalIndirectInfo || setting_useDepthNormalBA);
 	const char* arm     = (setting_depthSource == DEPTH_SOURCE_NONE) ? "mono"
 	                    : (setting_depthSource == DEPTH_SOURCE_GT)   ? "gt"
 	                    : (norm_any ? "ml-normals" : "ml-depth");
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s "
-	       "norm_integ=%s foreshort=%s angmf=%s gapfill=%s optreg=%s "
+	       "norm_integ=%s foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
 	       "p0=%s p1=%s p2=%s p3=%s loop=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
@@ -4928,6 +4945,9 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       setting_useAngmfConfidence     ? "on" : "off",
 	       setting_useNormalGapfillMask   ? "on" : "off",
 	       setting_useNormalOptReg        ? "on" : "off",
+	       setting_useNormalPixelGate     ? "on" : "off",
+	       setting_useNormalIndirectInfo  ? "on" : "off",
+	       setting_useDepthNormalBA       ? "on" : "off",
 	       setting_useMLForInitialization ? "on" : "off",
 	       setting_enableDirectP1Bounds   ? "on" : "off",
 	       !setting_disableDirectP2BA     ? "on" : "off",

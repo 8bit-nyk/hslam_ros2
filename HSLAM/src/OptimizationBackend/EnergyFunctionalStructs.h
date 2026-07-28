@@ -128,6 +128,13 @@ public:
 	float vs_h = 0;   // idepth Hessian contribution
 	float vs_b = 0;   // idepth gradient contribution
 
+	// Sprint 10 (E3 / Phase B.4): depth-normal surface-consistency prior. Recomputed once per BA
+	// round by FullSystem::computeDepthNormalPriors(); the residual (idepth - dn_target) is then
+	// evaluated against the CURRENT idepth each accumulation, mirroring ml_priorF/ml_reference.
+	// dn_h = lambda * (Hdd_accAF + Hdd_accLF) — weight tied to photometric stiffness, see settings.h.
+	float dn_h = 0;        // idepth Hessian contribution (0 = inactive for this point)
+	float dn_target = 0;   // plane-predicted inverse depth (median over neighbours)
+
 
 	// constant info (never changes in-between).
 	int idxInPoints;

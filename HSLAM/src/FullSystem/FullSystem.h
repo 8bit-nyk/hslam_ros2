@@ -208,6 +208,17 @@ public:
 
 	float optimize(int mnumOptIts);
 
+	// Sprint 10 (E3 / Phase B.4): recompute the per-point depth-normal surface-consistency prior
+	// (EFPoint::dn_h / dn_target) for every active point. Called once per BA round from optimize().
+	// Returns the number of points that received a prior; fills the [ENERGY_DN] diagnostic counters.
+	int computeDepthNormalPriors();
+	// Current DN energy, sum over active points of dn_h * (idepth - dn_target)^2.
+	double calcDepthNormalEnergy() const;
+	// [ENERGY_DN] counters, filled by computeDepthNormalPriors()
+	int dn_last_applied_ = 0, dn_last_candidates_ = 0, dn_last_frames_ = 0, dn_last_toofew_ = 0;
+	double dn_last_mean_rel_res_ = 0.0;
+	int dn_collapse_iters_ = 0, dn_total_iters_ = 0;   // Phase-2-collapse kill-criterion tracking
+
 	void printResult(std::string file, bool printSim = false);
 	void printPC(std::string file);
 	void printMapPly(std::string file);  // [MAP_EXPORT] Sprint 0d: ASCII PLY of marginalized PointHessians

@@ -124,14 +124,70 @@ namespace HSLAM
 
             initScale = getStdDev(initErr); //computeScale(initErr);
 
-            for (int i = 0, iend = vpEdgesMono.size(); i < iend; ++i)
+            // Sprint 7 (C-NEW-2 / H7): normal-viewing-angle information weighting. Each edge's
+            // information is scaled by max(|n·z_hat|, floor), n = the MapPoint's cached host-KF ML
+            // surface normal rotated into the CURRENT camera frame. Observations on surfaces seen
+            // edge-on couple weakly to camera motion, so they are down-weighted (soft weight, never
+            // a hard gate). Degrades to a strict no-op when normals are unavailable.
+            const bool useNormalInfo = setting_useNormalIndirectInfo;
+            const float wFloor = setting_normalIndirectInfoFloor;
+            const size_t nEdges = vpEdgesMono.size();
+            std::vector<float> vWNormal(nEdges, 0.0f);     // 0 = sentinel "this edge has no normal"
+            int nWithNormal = 0, nAtFloor = 0;             // [INDIRECT_INFO_NORMAL] diagnostic
+            double wSum = 0.0, wSumSq = 0.0, wScale = 1.0;
+
+            if (useNormalInfo)
+            {
+                const Mat33f R_cw = pFrame->fs->getPoseInverse().rotationMatrix().cast<float>();
+                for (size_t i = 0; i < nEdges; ++i)
+                {
+                    std::shared_ptr<MapPoint> pMP = pFrame->tMapPoints[vnIndexEdgeMono[i]];
+                    if (!pMP || !pMP->getHasMLNormal())
+                        continue;
+                    const Vec3f n_cur = R_cw * pMP->getMLNormalWorld();
+                    const float w = std::max(std::fabs(n_cur[2]), wFloor);
+                    vWNormal[i] = w;
+                    ++nWithNormal;
+                    if (w <= wFloor)
+                        ++nAtFloor;
+                    wSum += w;
+                    wSumSq += (double)w * w;
+                }
+
+                // Renormalize to unit mean over the normal-carrying subset. ML inference runs only
+                // every setting_mlInferenceEveryN-th keyframe, so only ~40% of MapPoints carry a
+                // normal; without this, the remaining edges (implicitly w=1.0, the maximum) would be
+                // systematically up-weighted relative to normal-carrying ones — an artifact of the
+                // inference cadence, not of viewing geometry. Normalizing makes the mechanism a
+                // purely RELATIVE re-weighting within the normal-carrying subset, which is what H7
+                // is about, and keeps total information roughly unchanged (augment, don't fight).
+                if (nWithNormal > 0 && wSum > 1e-6)
+                    wScale = (double)nWithNormal / wSum;
+            }
+
+            for (size_t i = 0; i < nEdges; ++i)
             {
                 vpEdgesMono[i]->setScale(initScale);
 
-                if (normalizeInfoWithVariance)
-                    vpEdgesMono[i]->setInformation(Eigen::Matrix2d::Identity() * (vInformation[i] / (stdDev + 0.00001)));  //* invSigma2); //set this to take into account depth variance!
-                else                                                                                                       //normalizing by the maximum
-                    vpEdgesMono[i]->setInformation(Eigen::Matrix2d::Identity() * (vInformation[i] / (maxInfo + 0.00001))); //* invSigma2); //set this to take into account depth variance!
+                // sentinel 0 (no normal, or feature disabled) => neutral weight 1.0
+                const double wNormal = (vWNormal[i] > 0.0f) ? (double)vWNormal[i] * wScale : 1.0;
+                const double infoNorm = normalizeInfoWithVariance
+                                            ? (vInformation[i] / (stdDev + 0.00001))    //set this to take into account depth variance!
+                                            : (vInformation[i] / (maxInfo + 0.00001));  //normalizing by the maximum
+                vpEdgesMono[i]->setInformation(Eigen::Matrix2d::Identity() * infoNorm * wNormal);
+            }
+
+            // Throttled: PoseOptimization runs 1-2x per frame, so emit every 25th call (~90 samples
+            // per TUM sequence) — enough for the weight distribution, small enough for the log.
+            static int indInfoCallCount = 0;
+            if (useNormalInfo && nWithNormal > 0 && (indInfoCallCount++ % 25) == 0)
+            {
+                const double mean = wSum / nWithNormal;
+                const double var = std::max(0.0, wSumSq / nWithNormal - mean * mean);
+                printf("[INDIRECT_INFO_NORMAL] n_edges=%d n_with_normal=%d (%.1f%%) mean_w=%.3f std_w=%.3f n_at_floor=%d (%.1f%%) renorm_scale=%.3f\n",
+                       (int)nEdges, nWithNormal,
+                       100.0 * nWithNormal / std::max<size_t>(1, nEdges),
+                       mean, std::sqrt(var), nAtFloor, 100.0 * nAtFloor / nWithNormal, wScale);
             }
         }
         if (nInitialCorrespondences < 10 || optimizer.edges().size() < 10)

@@ -33,6 +33,12 @@ namespace HSLAM
         float ml_uncertainty = 0;     // ML aleatoric uncertainty (std dev)
         bool hasMLDepth = false;
 
+        // Sprint 7 (C-NEW-2): ML surface normal cached at construction from the host keyframe's
+        // normal map, stored in WORLD frame (the host FrameHessian may be marginalized later, so
+        // we must not keep a pointer to it). Unit vector; only valid when hasMLNormal.
+        Vec3f ml_normal_world = Vec3f::Zero();
+        bool hasMLNormal = false;
+
     public:
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
         MapPoint(PointHessian *_ph, std::shared_ptr<Map> _globalMap);
@@ -146,6 +152,19 @@ namespace HSLAM
         {
             boost::lock_guard<boost::mutex> l(_mtx);
             return hasMLDepth;
+        }
+
+        // Sprint 7 (C-NEW-2): world-frame ML surface normal cached from the host keyframe.
+        inline bool getHasMLNormal()
+        {
+            boost::lock_guard<boost::mutex> l(_mtx);
+            return hasMLNormal;
+        }
+
+        inline Vec3f getMLNormalWorld()
+        {
+            boost::lock_guard<boost::mutex> l(_mtx);
+            return ml_normal_world;
         }
 
         inline bool checkVar()

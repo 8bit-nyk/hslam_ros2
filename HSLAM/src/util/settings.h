@@ -245,6 +245,47 @@ extern bool setting_useNormalPixelGate;    // Sprint 6 (CD-H2): gate lvl-0 pixel
 extern float setting_normalPixelGateCos;   // Sprint 6 (CD-H2): cosine threshold (default 0.5 = 60deg)
 extern float setting_normalGapfillCosThreshold;  // cos(30°) ≈ 0.866
 
+// Sprint 7 (C-NEW-2 / H7): normal-viewing-angle information weighting in Indirect::Optimizer::
+// PoseOptimization. Each observation edge's information matrix is scaled by max(|n·z_hat|, floor),
+// where n is the MapPoint's cached host-keyframe ML surface normal rotated into the current camera
+// frame. Soft weight (not a gate) — the Sprint 2 category, not the Sprints 4/5/6 category.
+// CLI: --ml-normal-indirect-info / --ml-normal-indirect-info-floor
+extern bool setting_useNormalIndirectInfo;
+extern float setting_normalIndirectInfoFloor;
+
+// Sprint 10 (E3 / Phase B.4 / H3.A-B-C): depth-normal surface-consistency residual in the
+// photometric BA. For each active point j with an ML normal n_j, the local tangent plane implied by
+// n_j predicts j's inverse depth from each spatial neighbour i's CURRENT (frozen) inverse depth:
+//     rho_hat_j^(i) = rho_i * (n_j . v_j) / (n_j . v_i),   v = K^-1 * p_tilde
+// rho_hat_j is the median over neighbours, and the residual r = rho_j - rho_hat_j is added as a
+// point-diagonal prior (exactly like ml_priorF / vs_h), so the Schur block-diagonal structure is
+// untouched. Two properties matter:
+//   * ML DEPTH NEVER ENTERS — only the normal direction (the tilt ratio). The residual's zero set is
+//     scale-invariant, so the Metric3D 1.7x/2.94x bias cannot be imported (unlike Direct.P2/VS,
+//     which pulled idepth toward the biased ML value and died on the 0.55 scale floor).
+//   * The weight is PROPORTIONAL TO THE POINT'S OWN PHOTOMETRIC HESSIAN (Hdd_accAF+Hdd_accLF), so
+//     the DN/photometric stiffness ratio is uniform across depths by construction. This is the
+//     direct antidote to the documented Phase-2 failure mode (constant-weight priors made far-point
+//     Hessians 833x stiffer than photometric). Points with no photometric conditioning get no DN
+//     prior at all.
+// Default OFF. CLI: --ml-dn-weight (0 disables) / --ml-dn-radius / --ml-dn-min-neighbors
+// Sprint 8 (CD-H6) gauge probe: apply a FIXED world-frame rotation of N degrees about the camera
+// x-axis at initialization, in place of the card's RANSAC floor normal. HSLAM's BA has a gauge
+// freedom (the frame-0 prior in FrameHessian::getPrior() constrains the frame's state INCREMENT,
+// not an absolute pose), so a one-time world rotation should propagate rigidly and leave both
+// pre-registered metrics — ATE under evo's Umeyama alignment, and RPE over relative poses —
+// mathematically unchanged. This probe tests that equivariance directly and decides whether the
+// full Sprint 8 (floor RANSAC) can be measurable at all. 0 = disabled.
+// CLI: --ml-gravity-test-rot
+extern float setting_gravityAlignTestRotDeg;
+
+extern bool setting_useDepthNormalBA;
+extern float setting_dnWeight;          // lambda: DN energy as a fraction of photometric stiffness
+extern float setting_dnNeighborRadius;  // px, lvl-0; neighbourhood for the local-plane prediction
+extern int setting_dnMinNeighbors;      // below this many valid neighbours, no DN prior for a point
+extern float setting_dnMaxRatio;        // reject neighbour predictions outside [1/r, r] x rho_j
+extern float setting_dnMinCosRay;       // reject neighbours whose ray is edge-on to the plane
+
 extern bool debugSaveImages;
 
 

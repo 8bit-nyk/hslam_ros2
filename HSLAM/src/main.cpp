@@ -168,6 +168,13 @@ int main(int argc, char **argv)
 		("ml-normal-optreg", "Sprint 5 CD-H7/B-NEW-1: normal-cosine-weighted iR smoothing in CoarseInitializer::optReg (default false until WIN verdict)", cxxopts::value<bool>()->default_value("false"))
 		("ml-normal-pixel-gate", "Sprint 6 CD-H2: gate lvl-0 pixel selection on |n·z_hat| (skip edge-on surfaces) (default false until WIN verdict)", cxxopts::value<bool>()->default_value("false"))
 		("ml-normal-pixel-gate-cos", "Sprint 6 CD-H2: cosine threshold for the pixel gate; 0.5=60deg (default), 0.3=73deg (permissive)", cxxopts::value<float>()->default_value("0.5"))
+		("ml-normal-indirect-info", "Sprint 7 C-NEW-2: weight indirect PoseOptimization edge information by |n·z_hat| (default false until WIN verdict)", cxxopts::value<bool>()->default_value("false"))
+		("ml-normal-indirect-info-floor", "Sprint 7 C-NEW-2: floor for the |n·z_hat| edge weight; 0.2=78deg (default)", cxxopts::value<float>()->default_value("0.2"))
+		("ml-gravity-test-rot", "Sprint 8 CD-H6 gauge probe: fixed world-frame rotation (deg, about camera x) applied at init; 0=off", cxxopts::value<float>()->default_value("0.0"))
+		("ml-dn-ba", "Sprint 10 E3/B.4: depth-normal surface-consistency residual in photometric BA (default false until WIN verdict)", cxxopts::value<bool>()->default_value("false"))
+		("ml-dn-weight", "Sprint 10 E3/B.4: lambda — DN prior stiffness as a fraction of each point's photometric Hessian (default 0.1)", cxxopts::value<float>()->default_value("0.1"))
+		("ml-dn-radius", "Sprint 10 E3/B.4: neighbourhood radius in lvl-0 px for the local-plane prediction (default 30)", cxxopts::value<float>()->default_value("30.0"))
+		("ml-dn-min-neighbors", "Sprint 10 E3/B.4: minimum valid neighbours before a point gets a DN prior (default 4)", cxxopts::value<int>()->default_value("4"))
 		("h,help", "Print usage")
     ;
 
@@ -277,6 +284,26 @@ int main(int argc, char **argv)
 	setting_normalPixelGateCos = result["ml-normal-pixel-gate-cos"].as<float>();
 	printf("[PHASE_CONFIG] ml-normal-pixel-gate=%s cos_thresh=%.3f\n",
 	       setting_useNormalPixelGate ? "on" : "off", setting_normalPixelGateCos);
+
+	// Sprint 7 — C-NEW-2: normal-viewing-angle information weighting in indirect PoseOptimization
+	setting_useNormalIndirectInfo = result["ml-normal-indirect-info"].as<bool>();
+	setting_normalIndirectInfoFloor = result["ml-normal-indirect-info-floor"].as<float>();
+	printf("[PHASE_CONFIG] ml-normal-indirect-info=%s floor=%.3f\n",
+	       setting_useNormalIndirectInfo ? "on" : "off", setting_normalIndirectInfoFloor);
+
+	// Sprint 8 — CD-H6 gauge probe
+	setting_gravityAlignTestRotDeg = result["ml-gravity-test-rot"].as<float>();
+	if(setting_gravityAlignTestRotDeg != 0.0f)
+		printf("[PHASE_CONFIG] ml-gravity-test-rot=%.1f deg\n", setting_gravityAlignTestRotDeg);
+
+	// Sprint 10 — E3 / Phase B.4: depth-normal surface-consistency residual in BA
+	setting_useDepthNormalBA = result["ml-dn-ba"].as<bool>();
+	setting_dnWeight = result["ml-dn-weight"].as<float>();
+	setting_dnNeighborRadius = result["ml-dn-radius"].as<float>();
+	setting_dnMinNeighbors = result["ml-dn-min-neighbors"].as<int>();
+	printf("[PHASE_CONFIG] ml-dn-ba=%s weight=%.4f radius=%.1f min_nb=%d\n",
+	       setting_useDepthNormalBA ? "on" : "off", setting_dnWeight,
+	       setting_dnNeighborRadius, setting_dnMinNeighbors);
 
 	// Depth source selection (Phase B — research-only validation switch)
 	{
@@ -825,10 +852,10 @@ int main(int argc, char **argv)
                     double tsThis = reader->getTimestamp(idsToPlay[idsToPlay.size()-1]);
                     double tsPrev = reader->getTimestamp(idsToPlay[idsToPlay.size()-2]);
                     // playbackSpeed==0 means "no real-time pacing" (linearize / eval mode). Dividing
-                    // by it produced inf schedule entries, which the init branch below then copied
-                    // into sInitializerOffset, poisoning MilliSecondsTakenMT and every pipeline-level
-                    // fps number downstream (console printed "infms per frame", FPSLogger fell back
-                    // to a bogus 0.0 fps). The schedule is unused when playbackSpeed==0, so keep it 0.
+                    // by it produced inf schedule entries, which line ~880 then copied into
+                    // sInitializerOffset, poisoning MilliSecondsTakenMT and every pipeline-level fps
+                    // number downstream (console printed "infms per frame", FPSLogger fell back to a
+                    // bogus 0.0 fps). The schedule is unused when playbackSpeed==0, so keep it at 0.
                     timesToPlayAt.push_back(playbackSpeed != 0
                         ? timesToPlayAt.back() + fabs(tsThis-tsPrev)/playbackSpeed
                         : 0.0);

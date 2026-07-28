@@ -490,6 +490,167 @@ void FullSystem::printOptRes(const Vec3 &res, double resL, double resM, double r
  * @param mnumOptIts 
  * @return float 
  */
+// ============================================================================================
+// Sprint 10 (E3 = Phase B.4) — depth-normal surface-consistency prior.
+//
+// For every active point j that has an ML surface normal n_j in its host frame, the local tangent
+// plane through X_j with normal n_j predicts j's inverse depth from each spatial neighbour i's
+// current inverse depth. With bearing vectors v = K^-1 * p_tilde (z = 1):
+//
+//     plane:  n_j . X = n_j . X_j        X = d * v
+//     =>      d_j (n_j.v_j) = d_i (n_j.v_i)
+//     =>      rho_hat_j^(i) = rho_i * (n_j.v_j) / (n_j.v_i)
+//
+// rho_hat_j is the MEDIAN over neighbours (robust to the ~10-20 deg per-pixel normal noise floor and
+// to neighbours that lie on a different surface). Neighbour inverse depths are FROZEN for the round,
+// so the residual is a function of rho_j alone — the point-block Hessian stays scalar and the Schur
+// complement's block-diagonal structure is untouched. This is why a pairwise coupling formulation
+// was avoided: it would create point-point off-diagonal blocks and break the backend.
+//
+// Guardrails against the documented Phase-2 BA-energy collapse:
+//   * dn_h is proportional to the point's OWN photometric Hessian, so the DN/photometric stiffness
+//     ratio is uniform across depths. Points whose photometric Hessian is 0 (unconditioned, e.g.
+//     brand new) get no prior. Constant-weight priors were what made far points 833x stiffer.
+//   * ML depth is never read — only the normal direction enters, via the ratio (n_j.v_j)/(n_j.v_i).
+//     The residual's zero set is scale-invariant, so Metric3D's 1.7x/2.94x bias cannot be imported.
+//   * [ENERGY_DN] reports the DN/photometric energy ratio every round; the pre-registered kill is
+//     ratio > 0.50 on > 5% of iterations.
+// ============================================================================================
+int FullSystem::computeDepthNormalPriors()
+{
+	// Always clear first: a stale prior must never survive a disabled flag or a frame losing normals.
+	for(FrameHessian* fh : frameHessians)
+		for(PointHessian* ph : fh->pointHessians)
+			if(ph->efPoint) { ph->efPoint->dn_h = 0; ph->efPoint->dn_target = 0; }
+
+	if(!setting_useDepthNormalBA || setting_dnWeight <= 0) return 0;
+
+	const float fxi = Hcalib.fxli(), fyi = Hcalib.fyli();
+	const float cxi = Hcalib.cxli(), cyi = Hcalib.cyli();
+	const float radius = setting_dnNeighborRadius;
+	const float radius2 = radius * radius;
+	const int   minNb  = setting_dnMinNeighbors;
+
+	int nApplied = 0, nFramesWithNormals = 0, nCandidates = 0, nTooFewNb = 0;
+	double sumRelRes = 0.0;
+
+	std::vector<float> preds;
+	preds.reserve(64);
+
+	for(FrameHessian* fh : frameHessians)
+	{
+		std::shared_ptr<cv::Mat> nmapPtr = fh->getMLNormalMap();
+		// Normals only exist on ML keyframes (setting_mlInferenceEveryN), so roughly half the active
+		// window contributes. Frames without them are skipped — graceful degradation, not an error.
+		if(!nmapPtr || nmapPtr->empty() || nmapPtr->type() != CV_32FC3 ||
+		   nmapPtr->cols != wG[0] || nmapPtr->rows != hG[0]) continue;
+		const cv::Mat& nmap = *nmapPtr;
+		nFramesWithNormals++;
+
+		std::vector<PointHessian*>& pts = fh->pointHessians;
+		const int N = (int)pts.size();
+		if(N < minNb + 1) continue;
+
+		// Uniform grid over the image at cell size = radius, so a neighbour query touches 3x3 cells.
+		const int gw = std::max(1, (int)(wG[0] / radius) + 1);
+		const int gh = std::max(1, (int)(hG[0] / radius) + 1);
+		std::vector<std::vector<int>> grid(gw * gh);
+		for(int i = 0; i < N; i++)
+		{
+			PointHessian* p = pts[i];
+			if(!p || p->idepth <= 0 || !std::isfinite(p->idepth)) continue;
+			const int gx = std::min(gw - 1, std::max(0, (int)(p->u / radius)));
+			const int gy = std::min(gh - 1, std::max(0, (int)(p->v / radius)));
+			grid[gy * gw + gx].push_back(i);
+		}
+
+		for(int i = 0; i < N; i++)
+		{
+			PointHessian* pj = pts[i];
+			if(!pj || !pj->efPoint) continue;
+			if(pj->idepth <= 0 || !std::isfinite(pj->idepth)) continue;
+
+			// Weight tied to this point's photometric conditioning (see header comment).
+			const float Hphoto = pj->efPoint->Hdd_accAF + pj->efPoint->Hdd_accLF;
+			if(!(Hphoto > 0) || !std::isfinite(Hphoto)) continue;
+
+			const int u = (int)(pj->u + 0.5f), v = (int)(pj->v + 0.5f);
+			if(u < 0 || v < 0 || u >= nmap.cols || v >= nmap.rows) continue;
+			const cv::Vec3f& nc = nmap.at<cv::Vec3f>(v, u);
+			Vec3f nj(nc[0], nc[1], nc[2]);
+			const float nn = nj.norm();
+			if(!std::isfinite(nn) || nn < 0.5f) continue;
+			nj /= nn;
+			nCandidates++;
+
+			const Vec3f vj(pj->u * fxi + cxi, pj->v * fyi + cyi, 1.0f);
+			const float denom_j = nj.dot(vj);
+			// Plane edge-on to j's own ray => the plane does not constrain j's depth at all.
+			if(std::fabs(denom_j) < setting_dnMinCosRay) continue;
+
+			preds.clear();
+			const int gx = std::min(gw - 1, std::max(0, (int)(pj->u / radius)));
+			const int gy = std::min(gh - 1, std::max(0, (int)(pj->v / radius)));
+			for(int dy = -1; dy <= 1; dy++)
+			for(int dx = -1; dx <= 1; dx++)
+			{
+				const int cx = gx + dx, cy = gy + dy;
+				if(cx < 0 || cy < 0 || cx >= gw || cy >= gh) continue;
+				for(int k : grid[cy * gw + cx])
+				{
+					if(k == i) continue;
+					PointHessian* pi = pts[k];
+					const float du = pi->u - pj->u, dv = pi->v - pj->v;
+					if(du * du + dv * dv > radius2) continue;
+
+					const Vec3f vi(pi->u * fxi + cxi, pi->v * fyi + cyi, 1.0f);
+					const float denom_i = nj.dot(vi);
+					if(std::fabs(denom_i) < setting_dnMinCosRay) continue;
+
+					const float pred = pi->idepth * (denom_j / denom_i);
+					if(!std::isfinite(pred) || pred <= 0) continue;
+					// Reject wild predictions (different surface / occlusion boundary) before the
+					// median rather than letting them widen it.
+					const float ratio = pred / pj->idepth;
+					if(ratio < 1.0f / setting_dnMaxRatio || ratio > setting_dnMaxRatio) continue;
+					preds.push_back(pred);
+				}
+			}
+
+			if((int)preds.size() < minNb) { nTooFewNb++; continue; }
+
+			std::nth_element(preds.begin(), preds.begin() + preds.size() / 2, preds.end());
+			const float target = preds[preds.size() / 2];
+
+			pj->efPoint->dn_h = setting_dnWeight * Hphoto;
+			pj->efPoint->dn_target = target;
+			nApplied++;
+			sumRelRes += std::fabs(pj->idepth - target) / pj->idepth;
+		}
+	}
+
+	dn_last_applied_ = nApplied;
+	dn_last_candidates_ = nCandidates;
+	dn_last_frames_ = nFramesWithNormals;
+	dn_last_toofew_ = nTooFewNb;
+	dn_last_mean_rel_res_ = (nApplied > 0) ? (sumRelRes / nApplied) : 0.0;
+	return nApplied;
+}
+
+double FullSystem::calcDepthNormalEnergy() const
+{
+	double e = 0.0;
+	for(FrameHessian* fh : frameHessians)
+		for(PointHessian* ph : fh->pointHessians)
+			if(ph->efPoint && ph->efPoint->dn_h > 0)
+			{
+				const double r = ph->idepth - ph->efPoint->dn_target;
+				e += ph->efPoint->dn_h * r * r;
+			}
+	return e;
+}
+
+
 float FullSystem::optimize(int mnumOptIts)
 {
 	if(frameHessians.size() < 2) {
@@ -535,6 +696,29 @@ float FullSystem::optimize(int mnumOptIts)
 	Vec3 lastEnergy = linearizeAll(false);
 	double lastEnergyL = calcLEnergy();
 	double lastEnergyM = calcMEnergy();
+
+	// Sprint 10 (E3 / B.4): refresh the depth-normal surface-consistency priors for this BA round.
+	// Placed AFTER linearizeAll so Hdd_accAF/accLF (the photometric stiffness the DN weight is tied
+	// to) reflect the current linearization, and so the [ENERGY_DN] ratio has a live photometric
+	// reference (lastEnergy[0]) to divide by.
+	if(setting_useDepthNormalBA && setting_dnWeight > 0)
+	{
+		computeDepthNormalPriors();
+		const double dnEnergy = calcDepthNormalEnergy();
+		const double photoEnergy = lastEnergy[0];
+		const double ratio = dnEnergy / (photoEnergy + 1e-10);
+		dn_total_iters_++;
+		if(ratio > 0.50) dn_collapse_iters_++;
+		// MANDATORY from day 1 (Phase-2 BA-energy-collapse history): pre-registered kill is
+		// ratio > 0.50 on > 5% of iterations. Emitted every round so the kill can be evaluated
+		// from any run log without a rebuild.
+		printf("[ENERGY_DN] photo=%.1f dn=%.1f ratio=%.4f applied=%d/%d frames_with_normals=%d "
+		       "toofew_nb=%d mean_rel_res=%.4f collapse_iters=%d/%d (%.1f%%)\n",
+		       photoEnergy, dnEnergy, ratio, dn_last_applied_, dn_last_candidates_,
+		       dn_last_frames_, dn_last_toofew_, dn_last_mean_rel_res_,
+		       dn_collapse_iters_, dn_total_iters_,
+		       100.0 * dn_collapse_iters_ / std::max(1, dn_total_iters_));
+	}
 
 
 

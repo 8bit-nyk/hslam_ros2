@@ -320,6 +320,23 @@ bool setting_useNormalPixelGate = false;   // Sprint 6 (CD-H2): default OFF unti
 float setting_normalPixelGateCos = 0.5f;   // Sprint 6 (CD-H2): cos(60deg); pixels with |n·z_hat| <= this are skipped
 float setting_normalGapfillCosThreshold = 0.866f;
 
+// Sprint 7 (C-NEW-2 / H7): indirect PoseOptimization normal-viewing-angle info weighting.
+// Default OFF until it earns default-on with data. Floor 0.2 (=78deg) keeps the most edge-on
+// observations at a non-zero weight rather than dropping them.
+bool setting_useNormalIndirectInfo = false;
+float setting_normalIndirectInfoFloor = 0.2f;
+
+// Sprint 8 (CD-H6) gauge probe: fixed world-frame rotation at init, degrees. 0 = disabled.
+float setting_gravityAlignTestRotDeg = 0.0f;
+
+// Sprint 10 (E3 / Phase B.4): depth-normal surface-consistency residual in BA. Default OFF.
+bool setting_useDepthNormalBA = false;
+float setting_dnWeight = 0.10f;         // 10% of each point's photometric stiffness
+float setting_dnNeighborRadius = 30.0f; // px at lvl 0 (~8-10 neighbours at density 2000)
+int setting_dnMinNeighbors = 4;
+float setting_dnMaxRatio = 5.0f;
+float setting_dnMinCosRay = 0.1f;
+
 bool goStepByStep = false;
 
 

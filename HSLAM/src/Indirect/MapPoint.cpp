@@ -4,6 +4,7 @@
 #include "Indirect/Matcher.h"
 #include "Indirect/Map.h"
 #include "util/FrameShell.h"
+#include "util/settings.h"
 #include "OptimizationBackend/EnergyFunctionalStructs.h"
 
 namespace HSLAM
@@ -47,6 +48,27 @@ namespace HSLAM
         }
 
         worldPose = sourceFrame->fs->getPose().cast<float>() * (Vec3f((pt[0] * calib->fxli() + calib->cxli()), (pt[1] * calib->fyli() + calib->cyli()), 1.0f) * (1.0f/idepth));
+
+        // Sprint 7 (C-NEW-2): cache the host keyframe's ML surface normal at this point's pixel,
+        // converted to WORLD frame. Done here because ph->host is alive and (for ML keyframes) holds
+        // the normal map; the FrameHessian may be marginalized long before the MapPoint dies, so we
+        // must not retain a pointer to it. Gated so the flag-off arm is a strict no-op.
+        if (setting_useNormalIndirectInfo && ph->host)
+        {
+            std::shared_ptr<cv::Mat> nmap = ph->host->getMLNormalMap();
+            if (nmap && !nmap->empty() && nmap->type() == CV_32FC3 &&
+                pt[0] >= 0 && pt[1] >= 0 && pt[0] < nmap->cols && pt[1] < nmap->rows)
+            {
+                const cv::Vec3f &nc = nmap->at<cv::Vec3f>(pt[1], pt[0]);
+                Vec3f n_cam(nc[0], nc[1], nc[2]);
+                const float nn = n_cam.norm();
+                if (std::isfinite(nn) && nn > 0.5f)
+                {
+                    ml_normal_world = sourceFrame->fs->getPose().rotationMatrix().cast<float>() * (n_cam / nn);
+                    hasMLNormal = true;
+                }
+            }
+        }
 
         // normal vector pointing towards the first frame
         Vec3f Owi = sourceFrame->fs->getCameraCenter().cast<float>();
