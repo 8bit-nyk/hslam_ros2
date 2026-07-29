@@ -637,13 +637,69 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     
     // Convert BGR to RGB (model expects RGB)
     cv::cvtColor(processed, processed, cv::COLOR_BGR2RGB);
-    
+
+    // ---- Sprint 11 / F2: isotropic (square-pixel) input --------------------------------------
+    // Metric3D has a single `pixel_values` input and no intrinsics, so it must assume square pixels.
+    // HSLAM's KITTI calib emits a rectified matrix with fx=368.88, fy=703.52 — pixels 1.9x
+    // non-square — which corrupts both depth and, worse, the surface-normal field the network infers
+    // from image gradients. Stretch the short axis back so the network sees square pixels; the
+    // outputs are resized to input_image.size() by the caller, so per-pixel indexing downstream is
+    // unaffected. Normal VECTORS need no transform: they are already camera-frame 3D directions and
+    // only their sampling grid changes.
+    const int native_w = processed.cols, native_h = processed.rows;
+    float fx_eff = config_.camera_fx;
+    if (config_.isotropic_input && config_.camera_fx > 0.0f && config_.camera_fy > 0.0f) {
+        const float fx = config_.camera_fx, fy = config_.camera_fy;
+        if (std::fabs(fx - fy) > 1e-3f * std::max(fx, fy)) {
+            cv::Mat iso;
+            if (fx < fy) {   // pixels are wide: stretch x, effective focal becomes fy
+                cv::resize(processed, iso,
+                           cv::Size(std::max(1, (int)std::lround(processed.cols * (fy / fx))),
+                                    processed.rows),
+                           0, 0, cv::INTER_LINEAR);
+                fx_eff = fy;
+            } else {         // pixels are tall: stretch y, effective focal stays fx
+                cv::resize(processed, iso,
+                           cv::Size(processed.cols,
+                                    std::max(1, (int)std::lround(processed.rows * (fx / fy)))),
+                           0, 0, cv::INTER_LINEAR);
+                fx_eff = fx;
+            }
+            processed = iso;
+        }
+    }
+
     // Calculate scale to preserve aspect ratio (keep_aspect_ratio: true)
     float scale = std::min(
         (float)config_.input_height / processed.rows,
         (float)config_.input_width / processed.cols
     );
-    
+
+    // ---- Sprint 11 / F1: canonical -> real depth factor --------------------------------------
+    // Metric3D-v2 predicts depth for a CANONICAL camera of focal 1000 px. The reference pipeline
+    // de-canonicalises with D_real = D_pred * fx_eff * letterbox_scale / 1000. postprocessMetric3D
+    // never did this, which is the bulk of what the project has recorded as "Metric3D systematic
+    // bias" (see docs/surface_normal_integration/INTEGRATION_DAMAGE_AUDIT.md D1).
+    current_canonical_factor_ = 1.0f;
+    if (config_.apply_canonical_scale && fx_eff > 0.0f) {
+        current_canonical_factor_ = fx_eff * scale / 1000.0f;
+    }
+
+    // [ML_GEOM] one-shot: everything needed to check the fixes are active and that the factor
+    // matches the offline prediction from scripts/normal_audit/.
+    {
+        static bool geom_printed = false;
+        if (!geom_printed) {
+            geom_printed = true;
+            printf("[ML_GEOM] native=%dx%d fx=%.2f fy=%.2f iso=%s iso_size=%dx%d "
+                   "model=%dx%d letterbox_s=%.4f fx_eff=%.2f canonical_c=%.4f (applied=%s)\n",
+                   native_w, native_h, config_.camera_fx, config_.camera_fy,
+                   config_.isotropic_input ? "on" : "off", processed.cols, processed.rows,
+                   config_.input_width, config_.input_height, scale, fx_eff,
+                   current_canonical_factor_, config_.apply_canonical_scale ? "yes" : "no");
+        }
+    }
+
     // DEBUG: Preprocessing - Input %dx%d, scale=%.3f for target %dx%d\n", 
     //        processed.cols, processed.rows, scale, config_.input_width, config_.input_height);
     
@@ -826,7 +882,14 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
     } else {
         final_depth = unpadded_depth;
     }
-    
+
+    // Sprint 11 / F1: canonical -> real metric depth. Factor computed in preprocessMetric3D; it is
+    // exactly 1.0 when --ml-canonical-scale is off, so the disabled path is bit-identical.
+    if (current_canonical_factor_ != 1.0f && current_canonical_factor_ > 0.0f &&
+        std::isfinite(current_canonical_factor_)) {
+        final_depth *= current_canonical_factor_;
+    }
+
     // Enhanced depth validation and statistics
     double min_depth, max_depth;
     cv::minMaxLoc(final_depth, &min_depth, &max_depth);

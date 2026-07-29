@@ -46,6 +46,15 @@ public:
         int input_width;
         int input_height;
         bool normalize_input;
+
+        // Sprint 11 (INTEGRATION_DAMAGE_AUDIT D1/D2) — Metric3D-v2 geometry correctness.
+        // The ONNX graph has a single `pixel_values` input and NO intrinsics, so its depth is in a
+        // CANONICAL camera (focal 1000 px) and the de-canonicalisation D*fx_eff*s/1000 must be applied
+        // here. Both default OFF so the flag-off path is bit-identical to pre-Sprint-11 behaviour.
+        float camera_fx;              // rectified fx of the image handed to ML (0 = unknown, disables F1)
+        float camera_fy;              // rectified fy; fx != fy means non-square pixels (KITTI: 368.88/703.52)
+        bool apply_canonical_scale;   // F1: multiply depth by fx_eff * letterbox_scale / 1000
+        bool isotropic_input;         // F2: pre-resize to square pixels when fx != fy
         
         // Output processing parameters
         float depth_scale;
@@ -65,6 +74,10 @@ public:
             , input_width(518)   // Metric3D model requirement for quality inference
             , input_height(518)  // Metric3D model requirement for quality inference
             , normalize_input(true)
+            , camera_fx(0.0f)
+            , camera_fy(0.0f)
+            , apply_canonical_scale(false)
+            , isotropic_input(false)
             , depth_scale(1.0f)
             , min_depth(0.1f)
             , max_depth(10.0f)
@@ -140,7 +153,11 @@ private:
         int top = -1, bottom = -1, left = -1, right = -1;
     };
     mutable PaddingInfo current_padding_;
-    
+
+    // Sprint 11: set by preprocessMetric3D, consumed by postprocessMetric3D. 1.0 = no rescale, which
+    // is the pre-Sprint-11 behaviour and what a disabled flag must reproduce exactly.
+    mutable float current_canonical_factor_ = 1.0f;
+
     // Helper methods
     bool validateModelSignature() const;
     void setupInputOutputNames();

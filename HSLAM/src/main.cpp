@@ -161,6 +161,9 @@ int main(int argc, char **argv)
 		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
 		("use-normal-integration", "Sprint 1 master gate: enable downstream consumers of predicted_normal (default false — normals plumbed but not yet read)", cxxopts::value<bool>()->default_value("false"))
+		("ml-input-geometry", "Sprint 11 F0: ML input geometry for METRIC3D_V2. 'legacy'=518x518 (Depth-Anything's geometry, what production shipped); 'metric3d'=616x1064 (Metric3D-v2's own ViT recipe). Must be combined with --ml-canonical-scale to be correct. (default legacy)", cxxopts::value<std::string>()->default_value("legacy"))
+		("ml-canonical-scale", "Sprint 11 F1: apply Metric3D's canonical->real depth rescale D*fx_eff*letterbox_s/1000. The ONNX graph has no intrinsics input, so this MUST be applied externally and never was — see INTEGRATION_DAMAGE_AUDIT.md D1 (default false)", cxxopts::value<bool>()->default_value("false"))
+		("ml-isotropic-input", "Sprint 11 F2: pre-resize the ML input to square pixels when rectified fx != fy (KITTI ships 368.88/703.52 = 1.9x anisotropic; degrades predicted normals 3.1deg -> 12.5deg) (default false)", cxxopts::value<bool>()->default_value("false"))
 		("ml-foreshortening", "Sprint 2 CD-H5: apply |n·z_hat| foreshortening factor to idepth uncertainty (default true after WIN verdict)", cxxopts::value<bool>()->default_value("true"))
 		("ml-angmf-confidence", "Sprint 3 A.2: use AngMF expected-angle formula 1-E_angle(kappa)/pi instead of mis-oriented sigmoid 1/(1+kappa/5) (default true after Sprint 3a WIN: unc recalibrated to 0.30)", cxxopts::value<bool>()->default_value("true"))
 		("ml-normal-gapfill-mask", "Sprint 4 CD-H3: gate CoarseTracker lvl=0 gap-fill on normal-cosine agreement (default false — KILL: cos_min=0.873 at threshold 0.866, 0% skip on TUM)", cxxopts::value<bool>()->default_value("false"))
@@ -260,6 +263,25 @@ int main(int argc, char **argv)
 	// Surface Normal Integration (Sprint 1) — master gate
 	setting_useNormalIntegration = result["use-normal-integration"].as<bool>();
 	printf("[PHASE_CONFIG] use-normal-integration=%s\n", setting_useNormalIntegration ? "on" : "off");
+
+	// Sprint 11 — D0/D1/D2 Metric3D input-geometry and depth-scale correctness
+	{
+		const std::string geom = result["ml-input-geometry"].as<std::string>();
+		if (geom != "legacy" && geom != "metric3d") {
+			printf("ERROR: --ml-input-geometry must be 'legacy' or 'metric3d' (got '%s').\n", geom.c_str());
+			return 0;
+		}
+		setting_mlMetric3dRefGeometry = (geom == "metric3d");
+	}
+	setting_mlCanonicalScale = result["ml-canonical-scale"].as<bool>();
+	setting_mlIsotropicInput = result["ml-isotropic-input"].as<bool>();
+	printf("[PHASE_CONFIG] ml-input-geometry=%s ml-canonical-scale=%s ml-isotropic-input=%s\n",
+	       setting_mlMetric3dRefGeometry ? "metric3d(616x1064)" : "legacy(518x518)",
+	       setting_mlCanonicalScale ? "on" : "off",
+	       setting_mlIsotropicInput ? "on" : "off");
+	if (setting_mlMetric3dRefGeometry != setting_mlCanonicalScale)
+		printf("[PHASE_CONFIG] WARNING: F0 and F1 are only correct TOGETHER — at 518x518 the canonical "
+		       "factor over-corrects (ICL 0.845 vs 1.016 at 616x1064). See INTEGRATION_DAMAGE_AUDIT.md.\n");
 
 	// Sprint 2 — CD-H5: foreshortening factor in idepth uncertainty
 	setting_useNormalForeshortening = result["ml-foreshortening"].as<bool>();

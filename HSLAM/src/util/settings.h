@@ -279,6 +279,24 @@ extern float setting_normalIndirectInfoFloor;
 // CLI: --ml-gravity-test-rot
 extern float setting_gravityAlignTestRotDeg;
 
+// Sprint 11 (INTEGRATION_DAMAGE_AUDIT D0/D1/D2) — Metric3D-v2 input-geometry and depth-scale
+// correctness. Three confirmed integration defects, each independently gateable, all default OFF so
+// the off path reproduces every recorded baseline exactly.
+//   F0  setting_mlMetric3dRefGeometry — production runs Metric3D at 518x518, which is
+//       Depth-Anything-V2's geometry (main.cpp's own help text says "for metric3d/dav2"). The
+//       Metric3D-v2 ViT recipe is 616x1064. Only overrides for model_type=METRIC3D_V2.
+//   F1  setting_mlCanonicalScale — Metric3D-v2 emits CANONICAL-camera depth (focal 1000 px) and the
+//       ONNX graph has no intrinsics input, so D*fx_eff*s/1000 must be applied externally. It never
+//       was. Offline against dense GT: at 616x1064 this takes ICL's depth bias 1.645x -> 1.016x.
+//       MUST be combined with F0 — at 518x518 the same factor over-corrects to 0.845x.
+//   F2  setting_mlIsotropicInput — HSLAM's KITTI calib yields a rectified fx=368.88, fy=703.52
+//       (1.9x non-square pixels). Simulating that squeeze on ICL degrades predicted-normal accuracy
+//       3.09deg -> 12.50deg and nearly doubles depth error.
+// CLI: --ml-input-geometry={legacy,metric3d} / --ml-canonical-scale / --ml-isotropic-input
+extern bool setting_mlMetric3dRefGeometry;
+extern bool setting_mlCanonicalScale;
+extern bool setting_mlIsotropicInput;
+
 extern bool setting_useDepthNormalBA;
 extern float setting_dnWeight;          // lambda: DN energy as a fraction of photometric stiffness
 extern float setting_dnNeighborRadius;  // px, lvl-0; neighbourhood for the local-plane prediction

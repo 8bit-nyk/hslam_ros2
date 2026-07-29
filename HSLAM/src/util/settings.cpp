@@ -330,6 +330,11 @@ float setting_normalIndirectInfoFloor = 0.2f;
 float setting_gravityAlignTestRotDeg = 0.0f;
 
 // Sprint 10 (E3 / Phase B.4): depth-normal surface-consistency residual in BA. Default OFF.
+// Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
+bool setting_mlMetric3dRefGeometry = false;
+bool setting_mlCanonicalScale = false;
+bool setting_mlIsotropicInput = false;
+
 bool setting_useDepthNormalBA = false;
 float setting_dnWeight = 0.10f;         // 10% of each point's photometric stiffness
 float setting_dnNeighborRadius = 30.0f; // px at lvl 0 (~8-10 neighbours at density 2000)

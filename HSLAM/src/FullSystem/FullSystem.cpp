@@ -4692,11 +4692,31 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 
 		ml_config.input_width = config.input_width;
 		ml_config.input_height = config.input_height;
+
+		// Sprint 11 / F0: Metric3D-v2's own ViT recipe is 616x1064; 518x518 is Depth-Anything's
+		// geometry and is what production shipped. Only override for METRIC3D_V2 — the flag must not
+		// touch DA-V2 or MiDaS, which legitimately want 518x518.
+		if (setting_mlMetric3dRefGeometry && ml_config.model_type == ML::MLInference::METRIC3D_V2) {
+			ml_config.input_width = 1064;
+			ml_config.input_height = 616;
+		}
+
+		// Sprint 11 / F1+F2: the rectified intrinsics of the image actually handed to ML. ML runs on
+		// the undistorted frame at pyramid level 0 (main.cpp::convertUndistortedToRGB), so these are
+		// the level-0 rectified values. fx != fy means non-square pixels (KITTI).
+		ml_config.camera_fx = Hcalib.fxl();
+		ml_config.camera_fy = Hcalib.fyl();
+		ml_config.apply_canonical_scale = setting_mlCanonicalScale;
+		ml_config.isotropic_input = setting_mlIsotropicInput;
+
 		ml_config.depth_scale = config.output_scale;  // DA V2 relative-depth multiplier
 		ml_config.benchmark_enabled = config.benchmark_enabled;
-		printf("MLConfig: model_type=%s input=%dx%d output_scale=%.3f\n",
-		       config.model_type.c_str(), config.input_width, config.input_height,
-		       config.output_scale);
+		printf("MLConfig: model_type=%s input=%dx%d output_scale=%.3f fx=%.2f fy=%.2f "
+		       "canonical_scale=%s isotropic=%s\n",
+		       config.model_type.c_str(), ml_config.input_width, ml_config.input_height,
+		       config.output_scale, ml_config.camera_fx, ml_config.camera_fy,
+		       ml_config.apply_canonical_scale ? "on" : "off",
+		       ml_config.isotropic_input ? "on" : "off");
 		
 		// Create MLDepthProcessor instance
 		ml_processor_ = std::make_unique<ML::MLDepthProcessor>(ml_config);
