@@ -3225,18 +3225,24 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
         float fp10 = foreshortening_vals[(int)(0.10f * n)];
         float fp50 = foreshortening_vals[(int)(0.50f * n)];
         float fp90 = foreshortening_vals[(int)(0.90f * n)];
-        // Phase 0: E[1/f], the quantity a matched-constant control actually needs. The mechanism is
-        // eff_unc = base/(conf*f), so the mean effective uncertainty scales with E[1/f], NOT 1/E[f].
-        // These differ badly wherever the f=0.1 floor is populated: on KITTI floor_pct ~30% alone
-        // contributes 0.30*10 = 3.0 to E[1/f], while 1/mean(f) ~ 1.6. Sizing a "matched" constant
-        // from 1/mean(f) makes that arm ~2.5x tighter than the arm it is supposed to match.
+        // Phase 0: E[1/f]. PURE MEASUREMENT — nothing here feeds back into any setting.
+        // The mechanism is eff_unc = base/(conf*f), so the mean effective uncertainty scales with
+        // E[1/f], NOT 1/E[f]. These differ badly wherever the f=0.1 floor is populated: on KITTI
+        // floor_pct ~30% alone contributes 0.30*10 = 3.0 to E[1/f], while 1/mean(f) ~ 1.6. Sizing a
+        // "matched" constant from 1/mean(f) makes that arm ~2.5x tighter than the arm it should match.
+        //
+        // ⚠ `ctrl_unc` below is E[1/f]-derived and therefore SCENE-DEPENDENT. It exists ONLY to size
+        // the A3 paired-control arm, which is a diagnostic for attributing Sprint 2's effect to
+        // per-point structure vs a mean relaxation. It is NOT a tuning recommendation and MUST NOT be
+        // shipped as a per-dataset --ml-idepth-uncertainty: that would violate the project's
+        // no-per-dataset-tuning guardrail. The shippable control is A2, a SINGLE global constant.
         double inv_sum = 0.0;
         for (float v : foreshortening_vals) inv_sum += 1.0 / std::max(v, 1e-6f);
         float f_inv_mean = (float)(inv_sum / n);
         int at_floor = 0;
         for (float v : foreshortening_vals) if (v <= 0.1001f) at_floor++;
         printf("[FORESHORTENING_HIST] n=%d min=%.3f p10=%.3f p50=%.3f p90=%.3f max=%.3f mean=%.3f "
-               "floor_pct=%.1f%% inv_mean=%.3f matched_unc=%.4f\n",
+               "floor_pct=%.1f%% inv_mean=%.3f ctrl_unc=%.4f[A3-diag-only,not-a-setting]\n",
                n, fmin, fp10, fp50, fp90, fmax, fmean, 100.0f * at_floor / n,
                f_inv_mean, setting_idepthUncertaintyForMLInit * f_inv_mean);
     }
