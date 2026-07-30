@@ -349,6 +349,15 @@ bool setting_mlNormalChannelOff = false;   // Phase 0: master off switch for the
 // commented out since DSO, and FullSystemOptPoint.cpp:84 hard-codes `bool print = false`.
 bool setting_diagTraceStats = false;       // CLI --diag-trace-stats
 
+// Sprint 12 — centre the truncated epipolar search window on the ML prediction.
+// ImmaturePoint.cpp truncates an over-long search segment to maxPixSearch ANCHORED AT uMin, so a
+// requested interval wider than the budget slides the window off rho_ML rather than shrinking around
+// it; the correspondence is never sampled -> IPS_OUTLIER -> deleted at FullSystem.cpp:859.
+// Three of four independent design reviews identified this same block. It is orthogonal to whichever
+// bound formulation is eventually chosen, and its failure mode is "no change", not "silent
+// degradation" — it only ever moves a window that was already being truncated.
+bool setting_mlPriorCentredTrace = false;  // CLI --ml-prior-centred-trace
+
 // Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
 bool setting_mlMetric3dRefGeometry = false;
 bool setting_mlCanonicalScale = false;

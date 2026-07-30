@@ -281,6 +281,31 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 
 	if(dist>maxPixSearch)
 	{
+		// Sprint 12 (default OFF, --ml-prior-centred-trace). The stock truncation below anchors the
+		// retained window at uMin, so when the requested interval exceeds the search budget the
+		// window does not shrink around the prediction — it slides OFF it. The true correspondence
+		// then lies outside everything sampled, the search returns IPS_OUTLIER, and the point is
+		// deleted at FullSystem.cpp:859. Measured consequence: point density falls monotonically
+		// with setting_idepthUncertaintyForMLInit (slope -7.87 pts/kf per unit, r=-0.922 on TUM).
+		//
+		// Spend the SAME budget where the prior says the answer is. No new energy term, no new
+		// rejection path, no extra cost — only a translation of an existing window.
+		// (dx,dy were divided by dist above and setting_trace_stepsize==1.0, so they are the unit
+		// direction uMin->uMax; the divisions below keep that true if the stepsize ever changes.)
+		if(setting_mlPriorCentredTrace && idepth_GT > 0)
+		{
+			const float ux = dx/setting_trace_stepsize, uy = dy/setting_trace_stepsize;
+			const Vec3f ptpML = pr + hostToFrame_Kt*idepth_GT;
+			if(ptpML[2] > 0)
+			{
+				const float uML = ptpML[0]/ptpML[2], vML = ptpML[1]/ptpML[2];
+				// arclength of the ML projection along the segment, measured from uMin
+				const float t = (uML-uMin)*ux + (vML-vMin)*uy;
+				float t0 = t - 0.5f*maxPixSearch;                  // put it in the middle...
+				t0 = std::max(0.0f, std::min(t0, dist - maxPixSearch));  // ...without leaving the segment
+				uMin += t0*ux; vMin += t0*uy;
+			}
+		}
 		uMax = uMin + maxPixSearch*dx;
 		vMax = vMin + maxPixSearch*dy;
 		dist = maxPixSearch;
