@@ -332,6 +332,23 @@ float setting_gravityAlignTestRotDeg = 0.0f;
 // Sprint 10 (E3 / Phase B.4): depth-normal surface-consistency residual in BA. Default OFF.
 bool setting_mlNormalChannelOff = false;   // Phase 0: master off switch for the whole normal channel
 
+// Pure instrumentation — emits [TRACE_STATS] and [ACT_STATS], changes NO behaviour.
+//
+// It exists because two questions about the ML idepth bound have never been measurable. The bound
+// (FullSystem.cpp:3166-3167) writes idepth_min/idepth_max, which in stock DSO are the epipolar
+// SEARCH SEGMENT and the ACTIVATION GATE — stock DSO initialises them to (0, NaN), i.e. no prior at
+// all. Two consequences follow that nobody has ever counted:
+//   1. A finite idepth_max from birth makes an ML point immune to the "never traced successfully"
+//      deletion at FullSystem.cpp:859, and canActivate (:870-876) whitelists IPS_SKIPPED/OOB/
+//      BADCONDITION. So a point can be activated having never completed an epipolar search, entering
+//      the map at essentially rho_ML.  -> [ACT_STATS] never_good
+//   2. When the interval is wide enough that idepth_min goes negative, the segment endpoints project
+//      across the FOE and the truncation at ImmaturePoint.cpp:281-286 is anchored at uMin rather than
+//      re-centred on rho_ML, so the window slides OFF the prediction.  -> [TRACE_STATS] first-trace oob
+// The existing diagnostics could not answer either: the trace histogram under traceNewCoarse has been
+// commented out since DSO, and FullSystemOptPoint.cpp:84 hard-codes `bool print = false`.
+bool setting_diagTraceStats = false;       // CLI --diag-trace-stats
+
 // Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
 bool setting_mlMetric3dRefGeometry = false;
 bool setting_mlCanonicalScale = false;

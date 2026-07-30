@@ -291,6 +291,7 @@ extern float setting_gravityAlignTestRotDeg;
 // control arm. Default false.
 // CLI: --ml-normal-channel  (pass =off to disable)
 extern bool setting_mlNormalChannelOff;
+extern bool setting_diagTraceStats;           // [TRACE_STATS]/[ACT_STATS] diagnostics; no behavioural effect
 
 // Sprint 11 (INTEGRATION_DAMAGE_AUDIT D0/D1/D2) — Metric3D-v2 input-geometry and depth-scale
 // correctness. Three confirmed integration defects, each independently gateable, all default OFF so

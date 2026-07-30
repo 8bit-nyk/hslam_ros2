@@ -161,6 +161,7 @@ int main(int argc, char **argv)
 		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
 		("use-normal-integration", "Sprint 1 master gate: enable downstream consumers of predicted_normal (default false — normals plumbed but not yet read)", cxxopts::value<bool>()->default_value("false"))
+		("diag-trace-stats", "Emit [TRACE_STATS] (first-epipolar-trace status histogram) and [ACT_STATS] (activated points that never completed a trace, and those with idepth_min<0). Pure instrumentation, no behavioural effect. Measures whether the ML idepth bound is narrowing DSO's search or translating it off the prediction. (default false)", cxxopts::value<bool>()->default_value("false"))
 		("ml-normal-channel", "Phase 0 control arm: 'on' (default) or 'off'. OFF removes the ENTIRE normal head from the pipeline — confidence forced to 1.0 (kappa is a normal-head output, so --ml-foreshortening=false alone never achieved this) and the normal map not extracted. Required to separate 'the normal channel adds value' from 'the depth fix adds value'.", cxxopts::value<std::string>()->default_value("on"))
 		("ml-input-geometry", "Sprint 11 F0: ML input geometry for METRIC3D_V2. 'legacy'=518x518 (Depth-Anything's geometry, what production shipped); 'metric3d'=616x1064 (Metric3D-v2's own ViT recipe). Must be combined with --ml-canonical-scale to be correct. (default legacy)", cxxopts::value<std::string>()->default_value("legacy"))
 		("ml-canonical-scale", "Sprint 11 F1: apply Metric3D's canonical->real depth rescale D*fx_eff*letterbox_s/1000. The ONNX graph has no intrinsics input, so this MUST be applied externally and never was — see INTEGRATION_DAMAGE_AUDIT.md D1 (default false)", cxxopts::value<bool>()->default_value("false"))
@@ -266,6 +267,10 @@ int main(int argc, char **argv)
 	printf("[PHASE_CONFIG] use-normal-integration=%s\n", setting_useNormalIntegration ? "on" : "off");
 
 	// Phase 0 — master normal-channel switch (the A0/A4 control arm)
+	setting_diagTraceStats = result["diag-trace-stats"].as<bool>();
+	if (setting_diagTraceStats)
+		printf("[PHASE_CONFIG] diag-trace-stats=on (instrumentation only; [TRACE_STATS] + [ACT_STATS])\n");
+
 	{
 		const std::string nc = result["ml-normal-channel"].as<std::string>();
 		if (nc != "on" && nc != "off") {

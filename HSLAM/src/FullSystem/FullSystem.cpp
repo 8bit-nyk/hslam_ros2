@@ -718,6 +718,8 @@ void FullSystem::traceNewCoarse(FrameHessian* fh)
 	boost::unique_lock<boost::mutex> lock(mapMutex);
 
 	int trace_total=0, trace_good=0, trace_oob=0, trace_out=0, trace_skip=0, trace_badcondition=0, trace_uninitialized=0;
+	// Diagnostic only (setting_diagTraceStats): first-trace breakdown, see [TRACE_STATS] below.
+	int ft_total=0, ft_good=0, ft_oob=0, ft_skip=0, ft_out=0, ft_bad=0;
 
 	Mat33f K = Mat33f::Identity();
 	K(0,0) = Hcalib.fxl();
@@ -739,7 +741,16 @@ void FullSystem::traceNewCoarse(FrameHessian* fh)
 
 		for(ImmaturePoint* ph : host->immaturePoints) // For all immature points in active host frame
 		{
+			const bool wasFirstTrace = !ph->firstTraceDone;   // diagnostic only
+
 			ph->traceOn(fh, KRKi, Kt, aff, &Hcalib, false ); // trace the immature point
+
+			// DIAGNOSTIC ONLY (setting_diagTraceStats). Recorded here rather than inside traceOn
+			// because traceOn has ~10 return paths; the caller sees the outcome of all of them.
+			// The FIRST trace is the one the ML interval governs: after any IPS_GOOD the bounds are
+			// replaced by the photometric intersection (ImmaturePoint.cpp:487-524), so first-trace
+			// status is what measures the ML box's effect on search geometry.
+			if(wasFirstTrace) { ph->firstTraceDone = true; ph->firstTraceStatus = ph->lastTraceStatus; }
 
 			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_GOOD) trace_good++;
 			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_BADCONDITION) trace_badcondition++;
@@ -747,8 +758,32 @@ void FullSystem::traceNewCoarse(FrameHessian* fh)
 			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_OUTLIER) trace_out++;
 			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_SKIPPED) trace_skip++;
 			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_UNINITIALIZED) trace_uninitialized++;
+			// First-trace histogram: the ML box only governs the first search (see above).
+			if(wasFirstTrace) {
+				ft_total++;
+				switch(ph->firstTraceStatus) {
+					case ImmaturePointStatus::IPS_GOOD:         ft_good++; break;
+					case ImmaturePointStatus::IPS_OOB:          ft_oob++;  break;
+					case ImmaturePointStatus::IPS_SKIPPED:      ft_skip++; break;
+					case ImmaturePointStatus::IPS_OUTLIER:      ft_out++;  break;
+					case ImmaturePointStatus::IPS_BADCONDITION: ft_bad++;  break;
+					default: break;
+				}
+			}
 			trace_total++;
 		}
+	}
+
+	// [TRACE_STATS] — default OFF. Answers: what fraction of ML points' FIRST epipolar search is
+	// aborted by the geometry the ML interval imposes? A high OOB share on KITTI would mean the box
+	// is not narrowing the search but translating it off the image.
+	if(setting_diagTraceStats && ft_total > 0) {
+		printf("[TRACE_STATS] first_trace n=%d good=%.1f%% oob=%.1f%% skip=%.1f%% outlier=%.1f%% badcond=%.1f%% "
+		       "| all_traces n=%d good=%.1f%% oob=%.1f%%\n",
+		       ft_total, 100.0*ft_good/ft_total, 100.0*ft_oob/ft_total, 100.0*ft_skip/ft_total,
+		       100.0*ft_out/ft_total, 100.0*ft_bad/ft_total,
+		       trace_total, trace_total ? 100.0*trace_good/trace_total : 0.0,
+		       trace_total ? 100.0*trace_oob/trace_total : 0.0);
 	}
 //	printf("ADD: TRACE: %'d points. %'d (%.0f%%) good. %'d (%.0f%%) skip. %'d (%.0f%%) badcond. %'d (%.0f%%) oob. %'d (%.0f%%) out. %'d (%.0f%%) uninit.\n",
 //			trace_total,
@@ -796,6 +831,8 @@ void FullSystem::activatePointsMT_Reductor(
  */
 void FullSystem::activatePointsMT()
 {
+	// Diagnostic only (setting_diagTraceStats): see [ACT_STATS] below.
+	int act_total=0, act_nevergood=0, act_negmin=0;
 
 	// ============== Update variables for desired point density ===================
 	// Change the currentMinActDist in order to achieve the desired point number
@@ -908,6 +945,18 @@ void FullSystem::activatePointsMT()
 				{
 					coarseDistanceMap->addIntoDistFinal(u,v);
 					toOptimize.push_back(ph); // add point to list of points to be optimized
+					// DIAGNOSTIC ONLY (setting_diagTraceStats). A point reaching activation with
+					// everGood==false has never completed an epipolar search: canActivate
+					// (FullSystem.cpp:870-876) whitelists IPS_SKIPPED/OOB/BADCONDITION, and the
+					// activation GN is seeded at idepth_GT and clamped to [idepth_min, idepth_max]
+					// (FullSystemOptPoint.cpp:92-93, 132-142), so such a point enters the map at
+					// essentially rho_ML. If this fraction is large, the direct map is ML depth with
+					// a photometric polish rather than a photometrically-estimated map.
+					if(setting_diagTraceStats) {
+						act_total++;
+						if(!ph->everGood) act_nevergood++;
+						if(ph->idepth_min < 0.0f) act_negmin++;
+					}
 				}
 			}
 			else
@@ -921,6 +970,15 @@ void FullSystem::activatePointsMT()
 
 //	printf("ACTIVATE: %d. (del %d, notReady %d, marg %d, good %d, marg-skip %d)\n",
 //			(int)toOptimize.size(), immature_deleted, immature_notReady, immature_needMarg, immature_want, immature_margskip);
+
+	// [ACT_STATS] — default OFF. never_good = activated having never once returned IPS_GOOD, i.e.
+	// entering the map at essentially the raw ML depth. neg_min = activated with idepth_min < 0,
+	// which also short-circuits the stock OOB-scale gate at ImmaturePoint.cpp:237.
+	if(setting_diagTraceStats && act_total > 0) {
+		printf("[ACT_STATS] activated n=%d never_good=%d (%.1f%%) neg_idepth_min=%d (%.1f%%)\n",
+		       act_total, act_nevergood, 100.0*act_nevergood/act_total,
+		       act_negmin, 100.0*act_negmin/act_total);
+	}
 
 	std::vector<PointHessian*> optimized; optimized.resize(toOptimize.size());
 

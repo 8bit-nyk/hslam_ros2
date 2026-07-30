@@ -96,6 +96,17 @@ public:
 	float ml_confidence;      // Per-pixel ML confidence [0,1] from normal uncertainty
 	float ml_uncertainty_m;   // Uncertainty in meters (for inverse depth transformation)
 
+	// DIAGNOSTIC ONLY (setting_diagTraceStats, default false) — no behavioural effect.
+	// The ML bound write at FullSystem.cpp:3166-3167 makes idepth_max finite from birth, so an ML
+	// point survives the "never traced successfully" deletion at FullSystem.cpp:859 and can reach
+	// activation having never once completed an epipolar search — in which case it is activated at
+	// exactly rho_ML. Nobody has ever measured how large that population is: the activation-path
+	// diagnostics are dead (`bool print = false`, FullSystemOptPoint.cpp:84) and the trace histogram
+	// below traceNewCoarse has been commented out since DSO. These three fields make it countable.
+	bool everGood;                          // has this point EVER returned IPS_GOOD?
+	bool firstTraceDone;                    // has traceOn been called at least once?
+	ImmaturePointStatus firstTraceStatus;   // status of the FIRST trace (recorded by the caller)
+
 	double linearizeResidual(
 			CalibHessian *  HCalib, const float outlierTHSlack,
 			ImmaturePointTemporaryResidual* tmpRes,

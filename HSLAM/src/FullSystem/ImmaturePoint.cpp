@@ -41,7 +41,8 @@ namespace HSLAM
  */
 ImmaturePoint::ImmaturePoint(int u_, int v_, FrameHessian* host_, float type, CalibHessian* HCalib)
 : u(u_), v(v_), host(host_), my_type(type), idepth_min(0), idepth_max(NAN), lastTraceStatus(IPS_UNINITIALIZED),
-  ml_confidence(0.0f), ml_uncertainty_m(0.0f)  // PHASE 2: Initialize ML confidence fields
+  ml_confidence(0.0f), ml_uncertainty_m(0.0f),  // PHASE 2: Initialize ML confidence fields
+  everGood(false), firstTraceDone(false), firstTraceStatus(IPS_UNINITIALIZED)  // diagnostic only
 {
 
 	gradH.setZero();
@@ -541,6 +542,7 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 
 	lastTracePixelInterval=2*errorInPixel;
 	lastTraceUV = Vec2f(bestU, bestV);
+	everGood = true;   // diagnostic only (setting_diagTraceStats); the ONLY site that sets it
 	return lastTraceStatus = ImmaturePointStatus::IPS_GOOD;
 }
 
