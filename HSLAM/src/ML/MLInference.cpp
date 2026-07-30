@@ -482,7 +482,19 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
                 depth_map = postprocessMetric3D(output_values, output_width, output_height, input_image.cols, input_image.rows);
                 
                 // PHASE 2: Process uncertainty into confidence map
-                if(has_uncertainty) {
+                // Phase 0: the master normal-channel switch cuts here, because `normal_confidence`
+                // (kappa) is an output of the NORMAL head — so a "normals off" arm that still consumes
+                // it is not normals-off. Forcing ones removes kappa from the idepth-uncertainty
+                // product entirely; the normal map itself is skipped below.
+                if(setting_mlNormalChannelOff) {
+                    confidence_map = cv::Mat::ones(input_image.rows, input_image.cols, CV_32F);
+                    static bool off_printed = false;
+                    if(!off_printed) {
+                        off_printed = true;
+                        printf("[ML_NORMAL_CHANNEL] OFF — confidence forced to 1.0 and normal map not "
+                               "extracted; kappa and |n.z| both removed from the pipeline.\n");
+                    }
+                } else if(has_uncertainty) {
                     confidence_map = processUncertaintyToConfidence(uncertainty_values, uncertainty_width, uncertainty_height,
                                                                   input_image.cols, input_image.rows);
                     // [CONFIDENCE_STATS] One-shot: confirm confidence_map is non-trivially distributed
@@ -548,7 +560,8 @@ MLInference::InferenceResult MLInference::inferDepth(const cv::Mat& input_image)
 
         // [Sprint 1] Extract normal map from predicted_normal output if available.
         // postprocessNormalMap mirrors postprocessMetric3D: strip padding, resize, renormalize.
-        if(config_.model_type == METRIC3D_V2 && normal_output_index != SIZE_MAX) {
+        if(config_.model_type == METRIC3D_V2 && normal_output_index != SIZE_MAX &&
+           !setting_mlNormalChannelOff) {
             result.normal_map = postprocessNormalMap(output_tensors[normal_output_index],
                                                      input_image.cols, input_image.rows);
         }
@@ -697,6 +710,25 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
                    config_.isotropic_input ? "on" : "off", processed.cols, processed.rows,
                    config_.input_width, config_.input_height, scale, fx_eff,
                    current_canonical_factor_, config_.apply_canonical_scale ? "yes" : "no");
+
+            // F1 WITHOUT F2 on a non-square-pixel camera is ill-posed: there is no single focal to
+            // put into the canonical factor. Worse, the two flags do not commute when the letterbox's
+            // binding axis flips under the isotropic stretch. Measured c, F1-only vs F1+F2:
+            //   TUM   fx/fy=1.002  0.6639 -> 0.6625  (-0.2%,  height binds both ways)
+            //   KITTI fx/fy=0.524  0.6133 -> 0.6131  (-0.0%,  width binds both ways; terms cancel)
+            //   EuRoC fx/fy=0.724  0.3888 -> 0.5035  (+29.5%, axis FLIPS height->width)
+            // So on EuRoC, F1 alone silently applies a ~30% wrong correction.
+            if (config_.apply_canonical_scale && !config_.isotropic_input &&
+                config_.camera_fx > 0.0f && config_.camera_fy > 0.0f &&
+                std::fabs(config_.camera_fx - config_.camera_fy) >
+                    0.02f * std::max(config_.camera_fx, config_.camera_fy))
+            {
+                printf("[ML_GEOM] *** WARNING: --ml-canonical-scale is ON but --ml-isotropic-input is "
+                       "OFF, and this camera has NON-SQUARE pixels (fx/fy=%.3f). The canonical factor "
+                       "is ill-defined for an anisotropic input and the two flags do not commute here. "
+                       "Enable --ml-isotropic-input. ***\n",
+                       config_.camera_fx / config_.camera_fy);
+            }
         }
     }
 
@@ -888,6 +920,35 @@ cv::Mat MLInference::postprocessMetric3D(const std::vector<float>& raw_output, i
     if (current_canonical_factor_ != 1.0f && current_canonical_factor_ > 0.0f &&
         std::isfinite(current_canonical_factor_)) {
         final_depth *= current_canonical_factor_;
+    }
+
+    // [ML_DEPTH_STATS] Phase-0 K1 gate. The ONLY statistic anywhere that reports the depth map AS
+    // SHIPPED TO THE SLAM PIPELINE, after the canonical rescale. It exists because the plan red-team
+    // observed that nothing proved `c` was ever multiplied in: the previously-used check reads
+    // "ML mean depth (metric scale)", which is actually computeMetricScaleFactor()'s median of
+    // D_ML*iR (a ratio, mislabelled "meters"), so it could not confirm this. Compare these numbers
+    // directly against scripts/normal_audit/audit_metric3d_scale_and_normals.py; a disagreement >5%
+    // is kill criterion K1 and stops the campaign.
+    {
+        static bool depth_stats_printed = false;
+        if (!depth_stats_printed) {
+            depth_stats_printed = true;
+            std::vector<float> v;
+            v.reserve((size_t)final_depth.rows * final_depth.cols);
+            for (int y = 0; y < final_depth.rows; y++) {
+                const float* row = final_depth.ptr<float>(y);
+                for (int x = 0; x < final_depth.cols; x++)
+                    if (std::isfinite(row[x]) && row[x] > 0.1f && row[x] < 80.0f) v.push_back(row[x]);
+            }
+            if (!v.empty()) {
+                std::sort(v.begin(), v.end());
+                double sum = 0.0; for (float d : v) sum += d;
+                printf("[ML_DEPTH_STATS] POST-RESCALE depth map as shipped: n=%zu mean=%.4f median=%.4f "
+                       "p10=%.4f p90=%.4f min=%.4f max=%.4f canonical_c=%.4f\n",
+                       v.size(), sum / v.size(), v[v.size() / 2], v[(size_t)(0.10 * v.size())],
+                       v[(size_t)(0.90 * v.size())], v.front(), v.back(), current_canonical_factor_);
+            }
+        }
     }
 
     // Enhanced depth validation and statistics

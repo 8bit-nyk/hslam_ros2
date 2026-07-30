@@ -279,6 +279,19 @@ extern float setting_normalIndirectInfoFloor;
 // CLI: --ml-gravity-test-rot
 extern float setting_gravityAlignTestRotDeg;
 
+// Phase 0 / plan red-team — MASTER OFF SWITCH for the entire normal channel.
+// Until now no configuration could turn the normal head off: `normal_confidence` (kappa) is an output
+// of the NORMAL head, and processUncertaintyToConfidence consumes it in BOTH the AngMF path and the
+// legacy-sigmoid path. So kappa was live in every arm ever run, including arms labelled "normals off"
+// (--ml-foreshortening=false only disables |n.z|). Every ablation of the normal channel to date is
+// therefore a partial ablation, and the question "does the normal channel add value, or is it the
+// depth fix?" was structurally unanswerable.
+// When true: the confidence map is forced to all-ones and the normal map is not extracted, so
+// getMLNormalMap() returns nullptr and every downstream normal consumer no-ops. This is the A0/A4
+// control arm. Default false.
+// CLI: --ml-normal-channel  (pass =off to disable)
+extern bool setting_mlNormalChannelOff;
+
 // Sprint 11 (INTEGRATION_DAMAGE_AUDIT D0/D1/D2) — Metric3D-v2 input-geometry and depth-scale
 // correctness. Three confirmed integration defects, each independently gateable, all default OFF so
 // the off path reproduces every recorded baseline exactly.

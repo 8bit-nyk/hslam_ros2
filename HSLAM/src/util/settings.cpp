@@ -330,6 +330,8 @@ float setting_normalIndirectInfoFloor = 0.2f;
 float setting_gravityAlignTestRotDeg = 0.0f;
 
 // Sprint 10 (E3 / Phase B.4): depth-normal surface-consistency residual in BA. Default OFF.
+bool setting_mlNormalChannelOff = false;   // Phase 0: master off switch for the whole normal channel
+
 // Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
 bool setting_mlMetric3dRefGeometry = false;
 bool setting_mlCanonicalScale = false;

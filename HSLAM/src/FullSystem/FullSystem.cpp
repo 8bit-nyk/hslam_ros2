@@ -3225,10 +3225,20 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
         float fp10 = foreshortening_vals[(int)(0.10f * n)];
         float fp50 = foreshortening_vals[(int)(0.50f * n)];
         float fp90 = foreshortening_vals[(int)(0.90f * n)];
+        // Phase 0: E[1/f], the quantity a matched-constant control actually needs. The mechanism is
+        // eff_unc = base/(conf*f), so the mean effective uncertainty scales with E[1/f], NOT 1/E[f].
+        // These differ badly wherever the f=0.1 floor is populated: on KITTI floor_pct ~30% alone
+        // contributes 0.30*10 = 3.0 to E[1/f], while 1/mean(f) ~ 1.6. Sizing a "matched" constant
+        // from 1/mean(f) makes that arm ~2.5x tighter than the arm it is supposed to match.
+        double inv_sum = 0.0;
+        for (float v : foreshortening_vals) inv_sum += 1.0 / std::max(v, 1e-6f);
+        float f_inv_mean = (float)(inv_sum / n);
         int at_floor = 0;
         for (float v : foreshortening_vals) if (v <= 0.1001f) at_floor++;
-        printf("[FORESHORTENING_HIST] n=%d min=%.3f p10=%.3f p50=%.3f p90=%.3f max=%.3f mean=%.3f floor_pct=%.1f%%\n",
-               n, fmin, fp10, fp50, fp90, fmax, fmean, 100.0f * at_floor / n);
+        printf("[FORESHORTENING_HIST] n=%d min=%.3f p10=%.3f p50=%.3f p90=%.3f max=%.3f mean=%.3f "
+               "floor_pct=%.1f%% inv_mean=%.3f matched_unc=%.4f\n",
+               n, fmin, fp10, fp50, fp90, fmax, fmean, 100.0f * at_floor / n,
+               f_inv_mean, setting_idepthUncertaintyForMLInit * f_inv_mean);
     }
 
     // TEMP_DEBUG_REPETITIVE: Commented out ML integration statistics for cleaner output
@@ -4945,29 +4955,39 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	const bool ml_ran   = (ml_inference_counter_ > 0);
 	const char* dsrc    = (setting_depthSource == DEPTH_SOURCE_ML) ? "ml"
 	                    : (setting_depthSource == DEPTH_SOURCE_GT) ? "gt" : "none";
-	// normal-derived features only contribute when ML depth/normals exist (irrelevant in mono)
+	// normal-derived features only contribute when ML depth/normals exist (irrelevant in mono).
+	// Phase 0: --ml-normal-channel=off dominates every per-feature flag — the normal map is never
+	// extracted and confidence is forced to 1.0, so foreshortening/AngMF are inert regardless of their
+	// (default-true) flag values. Reporting them as "on" here mislabels the control arm in exactly the
+	// way this descriptor exists to prevent.
 	const bool norm_any = (setting_depthSource == DEPTH_SOURCE_ML)
+	                   && !setting_mlNormalChannelOff
 	                   && (setting_useNormalIntegration || setting_useNormalForeshortening
 	                    || setting_useAngmfConfidence   || setting_useNormalGapfillMask
 	                    || setting_useNormalOptReg      || setting_useNormalPixelGate
 	                    || setting_useNormalIndirectInfo || setting_useDepthNormalBA);
+	const bool nc_off   = setting_mlNormalChannelOff;   // gates every per-feature report below
 	const char* arm     = (setting_depthSource == DEPTH_SOURCE_NONE) ? "mono"
 	                    : (setting_depthSource == DEPTH_SOURCE_GT)   ? "gt"
 	                    : (norm_any ? "ml-normals" : "ml-depth");
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
-	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s "
+	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s nchan=%s geom=%s canon=%s iso=%s "
 	       "norm_integ=%s foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
 	       "p0=%s p1=%s p2=%s p3=%s loop=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
-	       setting_useNormalIntegration   ? "on" : "off",
-	       setting_useNormalForeshortening? "on" : "off",
-	       setting_useAngmfConfidence     ? "on" : "off",
-	       setting_useNormalGapfillMask   ? "on" : "off",
-	       setting_useNormalOptReg        ? "on" : "off",
-	       setting_useNormalPixelGate     ? "on" : "off",
-	       setting_useNormalIndirectInfo  ? "on" : "off",
-	       setting_useDepthNormalBA       ? "on" : "off",
+	       nc_off ? "off" : "on",
+	       setting_mlMetric3dRefGeometry  ? "metric3d" : "legacy",
+	       setting_mlCanonicalScale       ? "on" : "off",
+	       setting_mlIsotropicInput       ? "on" : "off",
+	       (nc_off ? "off" : (setting_useNormalIntegration   ? "on" : "off")),
+	       (nc_off ? "off" : (setting_useNormalForeshortening? "on" : "off")),
+	       (nc_off ? "off" : (setting_useAngmfConfidence     ? "on" : "off")),
+	       (nc_off ? "off" : (setting_useNormalGapfillMask   ? "on" : "off")),
+	       (nc_off ? "off" : (setting_useNormalOptReg        ? "on" : "off")),
+	       (nc_off ? "off" : (setting_useNormalPixelGate     ? "on" : "off")),
+	       (nc_off ? "off" : (setting_useNormalIndirectInfo  ? "on" : "off")),
+	       (nc_off ? "off" : (setting_useDepthNormalBA       ? "on" : "off")),
 	       setting_useMLForInitialization ? "on" : "off",
 	       setting_enableDirectP1Bounds   ? "on" : "off",
 	       !setting_disableDirectP2BA     ? "on" : "off",
