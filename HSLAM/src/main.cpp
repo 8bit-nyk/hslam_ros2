@@ -297,6 +297,14 @@ int main(int argc, char **argv)
 	if (setting_mlMetric3dRefGeometry != setting_mlCanonicalScale)
 		printf("[PHASE_CONFIG] WARNING: F0 and F1 are only correct TOGETHER — at 518x518 the canonical "
 		       "factor over-corrects (ICL 0.845 vs 1.016 at 616x1064). See INTEGRATION_DAMAGE_AUDIT.md.\n");
+	// Sprint 11: ~14 sweep harnesses under scripts/ hardcode "--ml-input-width 518", so a caller can
+	// silently measure the pre-fix pipeline while believing otherwise. The flags default OFF (project
+	// guardrail: every new feature gated off), which makes silence the dangerous state — announce it.
+	if (ml_model_type_str == "metric3d" && !setting_mlMetric3dRefGeometry && !setting_mlCanonicalScale)
+		printf("[PHASE_CONFIG] WARNING: metric3d running in FULLY LEGACY geometry (D0+D1 present): "
+		       "518x518 Depth-Anything letterbox and no canonical->real rescale. Depth is ~1/c too "
+		       "large (TUM c=0.663, KITTI c=0.614). Intentional only for pre-fix reproduction; pass "
+		       "--ml-input-geometry=metric3d --ml-canonical-scale=true for corrected runs.\n");
 
 	// Sprint 2 — CD-H5: foreshortening factor in idepth uncertainty
 	setting_useNormalForeshortening = result["ml-foreshortening"].as<bool>();
