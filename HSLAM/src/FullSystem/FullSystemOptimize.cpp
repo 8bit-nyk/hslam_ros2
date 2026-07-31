@@ -694,6 +694,9 @@ float FullSystem::optimize(int mnumOptIts)
 	// Initial calculation
 	// Do optimization process
 	Vec3 lastEnergy = linearizeAll(false);
+	// Publish the ACTIVE photometric energy so the [ENERGY]/[DIRECT.VS] ratios have a real
+	// denominator (2026-07-31 fix; they previously divided by the prior energy).
+	ef->last_active_photometric_energy_ = lastEnergy[0];
 	double lastEnergyL = calcLEnergy();
 	double lastEnergyM = calcMEnergy();
 

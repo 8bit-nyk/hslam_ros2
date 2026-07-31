@@ -454,8 +454,26 @@ double EnergyFunctional::calcLEnergyF_MT()
 			}
 		}
 	}
-	// Store photometric energy before adding ML energy
-	float photometric_energy = E;
+	// ---- 2026-07-31 BUG FIX: the "photometric" denominator was not photometric ----
+	// Until now this read `photometric_energy = E`, but at this point E holds ONLY the frame
+	// delta_prior terms and the calibration prior accumulated at the top of this function. The actual
+	// point photometric residuals are produced by the calcLEnergyPt reduce, which used to run at the
+	// very END of the function and was folded in only via the return statement. So every
+	// [ENERGY] "Photo=" value, every ML ratio derived from it, and every [DIRECT.VS] ratio was
+	// measured against the PRIOR energy — which explains the impossible `Photo=0.0` lines and the
+	// 35526.6 -> 5.0 swings between consecutive samples in the archived logs. This invalidated the
+	// quoted ML ratios on every dataset and the "photometric collapse" story built on the >50% tail
+	// (those were simply iterations where the prior energy was near zero).
+	//
+	// The reduce is hoisted here so the ratio can be formed against the real quantity. The returned
+	// energy is UNCHANGED: previously (E_prior + ml + vs) + point, now (E_prior + point + ml) + vs.
+	// Same terms, same sum — optimiser behaviour is untouched and this is a diagnostics-only fix.
+	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,
+			this, _1, _2, _3, _4), 0, allPoints.size(), 50);
+	const double point_energy = red->stats[0];
+
+	float photometric_energy = (float)(E + point_energy);   // priors + point residuals = all non-ML energy
+	E += point_energy;
 	E += ml_energy;
 	last_photometric_energy_ = photometric_energy;
 	last_ml_energy_ = ml_energy;
@@ -463,8 +481,10 @@ double EnergyFunctional::calcLEnergyF_MT()
 	// Energy balance monitoring (reduced frequency for cleaner output)
 	static int debug_counter = 0;
 	if(debug_counter++ % 50 == 0 && ml_constraints > 0) {
-		float total_energy = E;
-		float ml_ratio = (ml_energy/total_energy)*100.0f;
+		// Denominator = the ACTIVE photometric residual energy from linearizeAll. Everything the
+		// project has recorded as an "ML ratio" used the prior energy instead and is invalid.
+		const double photo_active = last_active_photometric_energy_;
+		float ml_ratio = (photo_active > 1e-9) ? (float)(ml_energy/photo_active*100.0) : -1.0f;
 		float mean_abs_res = sum_abs_residual / ml_constraints;
 		float mean_rel_res = sum_rel_residual / ml_constraints;
 		float mean_robust = sum_robust_factor / ml_constraints;
@@ -473,8 +493,12 @@ double EnergyFunctional::calcLEnergyF_MT()
 		// (setting_disableDirectP2BA == false; activated via --p2=true CLI flag).
 		// Used by H2 (Phase 2 viability) measurement in Phase C. See
 		// HSLAM/docs/gt_depth_validation/PHASE_C_CONSOLIDATED.md §5.
-		printf("[ENERGY] Photo=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n",
-		       photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
+		// PhotoActive = active photometric residual energy (the meaningful denominator).
+		// PhotoLin = frame/calib priors + linearised-residual delta energy, i.e. what this function
+		// itself can see -- kept only so old logs remain comparable. ml_ratio = ML / PhotoActive;
+		// -1 means PhotoActive was not yet available (before the first linearizeAll).
+		printf("[ENERGY] PhotoActive=%.1f, PhotoLin=%.1f, ML=%.1f (%.1f%%), Points=%d/%d\n",
+		       photo_active, photometric_energy, ml_energy, ml_ratio, ml_constraints, total_points);
 		printf("[ML_SELFGATE] mean_abs_res=%.4f, mean_rel_res=%.2f%%, max_abs_res=%.4f, "
 		       "mean_selfgate=%.3f, mean_w_ML=%.4f\n",
 		       mean_abs_res, mean_rel_res * 100.0f, max_abs_residual,
@@ -497,15 +521,14 @@ double EnergyFunctional::calcLEnergyF_MT()
 
 	static int vs_log_counter = 0;
 	if(vs_log_counter++ % 100 == 0 && vs_active > 0) {
-		printf("[DIRECT.VS] active=%d vs_energy=%.2f photo_energy=%.2f ratio=%.3f%%\n",
-		       vs_active, vs_energy, photometric_energy,
-		       (vs_energy / (photometric_energy + 1e-10)) * 100.0);
+		printf("[DIRECT.VS] active=%d vs_energy=%.2f photo_active=%.2f ratio=%.3f%%\n",
+		       vs_active, vs_energy, last_active_photometric_energy_,
+		       (vs_energy / (last_active_photometric_energy_ + 1e-10)) * 100.0);
 	}
 
-	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,
-			this, _1, _2, _3, _4), 0, allPoints.size(), 50);
-
-	return E+red->stats[0];
+	// point_energy was already folded into E above (hoisted so the [ENERGY] ratio has a real
+	// denominator); the sum returned here is identical to what this function returned before.
+	return E;
 }
 
 

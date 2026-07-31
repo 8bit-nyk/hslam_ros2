@@ -122,6 +122,11 @@ public:
 
 	// Exposed for per-scene weight calibration (Step 3)
 	double last_photometric_energy_ = 0;
+	// The ACTIVE photometric residual energy (FullSystem::linearizeAll -> lastEnergyP), pushed in from
+	// FullSystemOptimize.cpp. calcLEnergyF_MT cannot compute this: it only sees frame/calib priors plus
+	// the LINEARIZED (marginalised) residual delta-energy, which is legitimately ~0 early in a run.
+	// That is why [ENERGY] used to print impossible "Photo=0.0" lines.
+	double last_active_photometric_energy_ = 0;
 	double last_ml_energy_ = 0;
 
 private:
