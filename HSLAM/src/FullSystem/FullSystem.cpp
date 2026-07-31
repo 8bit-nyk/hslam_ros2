@@ -3220,12 +3220,44 @@ void FullSystem::makeNewTracesWithMLDepth(FrameHessian* newFrame, const cv::Mat&
                     float depth_factor = 1.0f + (depth / 100.0f);
                     effective_idepth_uncertainty *= depth_factor;
                     
-                    // PHASE 2: Store ML bounds with proper uncertainty propagation
-                    impt->idepth_min = idepth - effective_idepth_uncertainty;
-                    impt->idepth_max = idepth + effective_idepth_uncertainty;
+                    // Sprint 13 — the bound PARAMETERISATION is now selectable. All three arms keep
+                    // idepth_GT, so the activation-GN seed (FullSystemOptPoint.cpp:92-93), the BA
+                    // linearisation anchor (:232-233) and every indirect consumer are untouched: only
+                    // the WIDTH channel changes. Value and width are separate contributions and this
+                    // is what separates them.
+                    if (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_NONE) {
+                        // A2 — the TRUE Direct.P1 ablation, which has never been run. --p1=false does
+                        // NOT do this (it gates only ImmaturePoint.cpp:513 and FullSystemOptPoint.cpp:132,
+                        // never this write), so every recorded "P1 ablation" compared bounds+clamps
+                        // against bounds-without-clamps. Leaving the ctor values (0, NaN) restores
+                        // stock DSO's uninformative prior: a full maxPixSearch epipolar sweep from
+                        // infinity, and NO immunity to the "never traced" deletion at FullSystem.cpp:859.
+                        // Expect fewer points; that is the honest cost of the mechanism.
+                        impt->ml_uncertainty_m = 0.0f;
+                    } else if (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_RELATIVE) {
+                        // A LOG-SYMMETRIC RELATIVE bracket: D in [D*e^-q, D*e^+q], q dimensionless.
+                        // Measured motivation (scripts/normal_audit/audit_scale_freedom.py): the
+                        // absolute half-width the data demands spans 21.3x across regimes
+                        // (KITTI 0.0231 1/m vs ICL 0.4927 1/m) whereas the relative one spans 2.7x --
+                        // 7.8x more transferable. It still misses a strict <=2x scale-freedom bar, so
+                        // this is an improvement in transferability, NOT a claim of scale-freedom.
+                        // Structural gain independent of that: idepth_min stays STRICTLY POSITIVE, so
+                        // the segment can never cross the FOE -- which is the origin of KITTI's 52.5%
+                        // first-trace OOB and its 91% never-searched activated points.
+                        // Deliberately does NOT divide by (conf*foreshortening): those divisors are
+                        // what inflate u_eff to ~18x rho on KITTI. q is the whole width here.
+                        const float eq = expf(setting_mlIdepthRelQ);
+                        impt->idepth_min = idepth / eq;
+                        impt->idepth_max = idepth * eq;
+                        impt->ml_uncertainty_m = idepth * setting_mlIdepthRelQ;  // rough 1-sigma equivalent
+                    } else {
+                        // BOX — the shipped absolute parameterisation, unchanged.
+                        impt->idepth_min = idepth - effective_idepth_uncertainty;
+                        impt->idepth_max = idepth + effective_idepth_uncertainty;
+                        impt->ml_uncertainty_m = effective_idepth_uncertainty;  // effective inverse depth uncertainty (not metric)
+                    }
                     impt->idepth_GT = idepth;
                     impt->ml_confidence = pixel_confidence;           // Store per-pixel confidence
-                    impt->ml_uncertainty_m = effective_idepth_uncertainty;  // Store effective inverse depth uncertainty (not metric)
                     
                     // ML depth integration complete for this point
                     

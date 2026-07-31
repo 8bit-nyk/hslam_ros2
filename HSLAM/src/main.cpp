@@ -161,6 +161,8 @@ int main(int argc, char **argv)
 		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
 		("use-normal-integration", "Sprint 1 master gate: enable downstream consumers of predicted_normal (default false — normals plumbed but not yet read)", cxxopts::value<bool>()->default_value("false"))
+		("ml-idepth-prior", "Sprint 13: ML inverse-depth prior parameterisation. 'box' (default, shipped: rho +/- absolute u_eff), 'none' (leave DSO's (0,NaN) -- the TRUE Direct.P1 ablation, which --p1 has never performed), 'relative' (log-symmetric D in [D*e^-q, D*e^+q], idepth_min strictly positive). idepth_GT is kept in all three, so only the WIDTH channel changes.", cxxopts::value<std::string>()->default_value("box"))
+		("ml-idepth-rel-q", "Sprint 13: dimensionless log-depth half-width for --ml-idepth-prior=relative. Measured q0.90|ln(Dpred/Dgt)| is 0.21-0.27 on TUM, 0.37 on KITTI, 0.56 on ICL. (default 0.30)", cxxopts::value<float>()->default_value("0.30"))
 		("ml-prior-centred-trace", "Sprint 12: when the epipolar search segment exceeds maxPixSearch, centre the retained window on the ML prediction instead of anchoring it at uMin. Only affects points whose search was already being truncated. (default false)", cxxopts::value<bool>()->default_value("false"))
 		("diag-trace-stats", "Emit [TRACE_STATS] (first-epipolar-trace status histogram) and [ACT_STATS] (activated points that never completed a trace, and those with idepth_min<0). Pure instrumentation, no behavioural effect. Measures whether the ML idepth bound is narrowing DSO's search or translating it off the prediction. (default false)", cxxopts::value<bool>()->default_value("false"))
 		("ml-normal-channel", "Phase 0 control arm: 'on' (default) or 'off'. OFF removes the ENTIRE normal head from the pipeline — confidence forced to 1.0 (kappa is a normal-head output, so --ml-foreshortening=false alone never achieved this) and the normal map not extracted. Required to separate 'the normal channel adds value' from 'the depth fix adds value'.", cxxopts::value<std::string>()->default_value("on"))
@@ -268,6 +270,16 @@ int main(int argc, char **argv)
 	printf("[PHASE_CONFIG] use-normal-integration=%s\n", setting_useNormalIntegration ? "on" : "off");
 
 	// Phase 0 — master normal-channel switch (the A0/A4 control arm)
+	{
+		const std::string mp = result["ml-idepth-prior"].as<std::string>();
+		if (mp == "box") setting_mlIdepthPrior = ML_IDEPTH_PRIOR_BOX;
+		else if (mp == "none") setting_mlIdepthPrior = ML_IDEPTH_PRIOR_NONE;
+		else if (mp == "relative") setting_mlIdepthPrior = ML_IDEPTH_PRIOR_RELATIVE;
+		else { printf("ERROR: --ml-idepth-prior must be box|none|relative (got '%s').\n", mp.c_str()); return 0; }
+		setting_mlIdepthRelQ = result["ml-idepth-rel-q"].as<float>();
+		printf("[PHASE_CONFIG] ml-idepth-prior=%s%s\n", mp.c_str(),
+		       setting_mlIdepthPrior == ML_IDEPTH_PRIOR_RELATIVE ? (" q=" + std::to_string(setting_mlIdepthRelQ)).c_str() : "");
+	}
 	setting_mlPriorCentredTrace = result["ml-prior-centred-trace"].as<bool>();
 	if (setting_mlPriorCentredTrace)
 		printf("[PHASE_CONFIG] ml-prior-centred-trace=on\n");

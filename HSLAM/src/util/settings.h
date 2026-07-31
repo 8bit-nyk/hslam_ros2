@@ -292,6 +292,9 @@ extern float setting_gravityAlignTestRotDeg;
 // CLI: --ml-normal-channel  (pass =off to disable)
 extern bool setting_mlNormalChannelOff;
 extern bool setting_diagTraceStats;
+enum MLIdepthPrior { ML_IDEPTH_PRIOR_BOX = 0, ML_IDEPTH_PRIOR_NONE = 1, ML_IDEPTH_PRIOR_RELATIVE = 2 };
+extern int   setting_mlIdepthPrior;           // Sprint 13: box (shipped) | none (true P1 ablation) | relative
+extern float setting_mlIdepthRelQ;            // Sprint 13: log-depth half-width for the relative arm
 extern bool setting_mlPriorCentredTrace;      // Sprint 12: centre the truncated epipolar window on rho_ML           // [TRACE_STATS]/[ACT_STATS] diagnostics; no behavioural effect
 
 // Sprint 11 (INTEGRATION_DAMAGE_AUDIT D0/D1/D2) — Metric3D-v2 input-geometry and depth-scale

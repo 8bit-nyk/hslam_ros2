@@ -358,6 +358,21 @@ bool setting_diagTraceStats = false;       // CLI --diag-trace-stats
 // degradation" — it only ever moves a window that was already being truncated.
 bool setting_mlPriorCentredTrace = false;  // CLI --ml-prior-centred-trace
 
+// Sprint 13 — parameterisation of the ML inverse-depth prior. CLI --ml-idepth-prior / --ml-idepth-rel-q.
+//   box       (default, shipped)  rho +/- u_eff, u_eff absolute in 1/m. Measured to be degenerate
+//                                 outdoors: on KITTI u_eff ~ 1.5 against rho ~ 0.083, so idepth_min
+//                                 is negative for 78.6% of points, 52.5% of first traces go OOB
+//                                 (sticky), and 91.1% of activated points never complete a search.
+//   none                          Leave DSO's (0, NaN). THE TRUE Direct.P1 ABLATION -- never run in
+//                                 this project, because --p1 has never gated the bounds write. This
+//                                 is the null control every reformulation must beat.
+//   relative                      D in [D*e^-q, D*e^+q]. idepth_min strictly positive by construction,
+//                                 so the segment cannot cross the FOE. Motivated by measurement: the
+//                                 required ABSOLUTE half-width spans 21.3x across regimes, the
+//                                 relative one 2.7x (audit_scale_freedom.py).
+int   setting_mlIdepthPrior = ML_IDEPTH_PRIOR_BOX;
+float setting_mlIdepthRelQ  = 0.30f;       // measured q0.90|ln(Dpred/Dgt)|: TUM 0.21-0.27, KITTI 0.37, ICL 0.56
+
 // Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
 bool setting_mlMetric3dRefGeometry = false;
 bool setting_mlCanonicalScale = false;
