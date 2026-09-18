@@ -82,7 +82,7 @@
     },
     "cmake.generator": "Unix Makefiles",
 
-    "cmake.buildDirectory": "${workspaceFolder}/build/${buildType}",
+    "cmake.buildDirectory": "${workspaceFolder}/build",
 
     "files.exclude": {
         "**/.git": true,
