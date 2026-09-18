@@ -25,9 +25,25 @@ HSLAM_ROOT = Path(__file__).resolve().parents[2]
 
 
 class SeqSpec(NamedTuple):
+    """One sequence, in both of the reader's two input modes.
+
+    HSLAM's DatasetReader resolves image paths differently depending on whether
+    --associations is given, and getting this wrong fails loudly but confusingly:
+
+      * folder mode (no --associations): --files <root>/rgb, image names read from the dir.
+      * associations mode:               --files <root>, because associations.txt already
+        holds paths like "rgb/<stamp>.png". Passing <root>/rgb here yields <root>/rgb/rgb/...
+        and every imread fails.
+
+    So `images` is the folder-mode argument and `root` the associations-mode one. Only
+    ICL-NUIM needs associations unconditionally (for frame ordering -- see
+    hslam_run_iclnuim_ml_depth.sh); TUM needs them only for a GT-depth arm. The reference
+    TUM ML-depth script passes no associations at all.
+    """
     dataset: str
     sequence: str
-    images: Path
+    images: Path            # folder mode:       --files <this>
+    root: Path              # associations mode: --files <this>
     calib: Path
     gt: Path
     gt_format: str          # "tum" | "euroc"
@@ -35,6 +51,7 @@ class SeqSpec(NamedTuple):
     gt_frame: str           # "camera" | "body"
     extrinsics: Optional[Path] = None   # cam0/sensor.yaml when gt_frame == "body"
     associations: Optional[Path] = None
+    needs_associations: bool = False    # True only where ordering demands it (ICL-NUIM)
 
 
 def _tum(seq: str) -> SeqSpec:
@@ -43,22 +60,22 @@ def _tum(seq: str) -> SeqSpec:
     if not m:
         raise ValueError(f"TUM sequence {seq!r} does not start with freiburgN")
     calib = HSLAM_ROOT / "run_scripts" / f"camera_{m.group(1)}.txt"
-    return SeqSpec("tum", seq, d / "rgb", calib, d / "groundtruth.txt",
+    return SeqSpec("tum", seq, d / "rgb", d, calib, d / "groundtruth.txt",
                    "tum", 30.0, "camera",
-                   associations=d / "associations.txt")
+                   associations=d / "associations.txt", needs_associations=False)
 
 
 def _kitti(seq: str) -> SeqSpec:
     d = DATASET_ROOT / "KITTI" / seq
     n = int(seq)
     calib = "Kitti00-02.txt" if n <= 2 else "Kitti03.txt" if n == 3 else "Kitti04-12.txt"
-    return SeqSpec("kitti", seq, d / "image_2", HSLAM_ROOT / "misc" / "Kitti" / calib,
+    return SeqSpec("kitti", seq, d / "image_2", d, HSLAM_ROOT / "misc" / "Kitti" / calib,
                    d / "groundtruth_tum.txt", "tum", 10.0, "camera")
 
 
 def _euroc(seq: str) -> SeqSpec:
     d = DATASET_ROOT / "EuRoC" / seq / "mav0"
-    return SeqSpec("euroc", seq, d / "cam0" / "data",
+    return SeqSpec("euroc", seq, d / "cam0" / "data", d,
                    HSLAM_ROOT / "misc" / "EuroC" / "camera.txt",
                    d / "state_groundtruth_estimate0" / "data.csv",
                    "euroc", 20.0, "body",
@@ -68,10 +85,10 @@ def _euroc(seq: str) -> SeqSpec:
 def _icl(seq: str) -> SeqSpec:
     d = DATASET_ROOT / "ICL_NUIM" / seq
     tag = seq.replace("living_room_traj", "livingRoom").replace("office_room_traj", "officeRoom")
-    return SeqSpec("iclnuim", seq, d / "rgb",
+    return SeqSpec("iclnuim", seq, d / "rgb", d,
                    HSLAM_ROOT / "run_scripts" / "camera_icl_nuim.txt",
                    d / f"{tag}.gt.freiburg", "tum", 30.0, "camera",
-                   associations=d / "associations.txt")
+                   associations=d / "associations.txt", needs_associations=True)
 
 
 _BUILDERS = {"tum": _tum, "kitti": _kitti, "euroc": _euroc, "iclnuim": _icl}

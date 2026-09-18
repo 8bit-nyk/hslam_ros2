@@ -204,14 +204,26 @@ def run_once(spec: ds.SeqSpec, arm_args: list[str], rep: int, outdir: Path,
     rundir = outdir / f"{spec.dataset}_{spec.sequence}_rep{rep}"
     rundir.mkdir(parents=True, exist_ok=True)
 
+    # Pick the reader's input mode. --associations changes how image paths resolve, so
+    # --files must change with it (see SeqSpec). Associations are used only where they are
+    # actually needed: ICL-NUIM for frame ordering, and any GT-depth arm for the depth
+    # column. Attaching them to a TUM ML-depth run makes every path <root>/rgb/rgb/... and
+    # the run dies with "Could not load RGB image" on every frame.
+    gt_depth_arm = any(a.startswith("--depth-source=gt") for a in arm_args)
+    use_assoc = (spec.needs_associations or gt_depth_arm) and \
+                spec.associations is not None and spec.associations.exists()
+
     cli = [str(BINARY),
-           "--files", str(spec.images),
+           "--files", str(spec.root if use_assoc else spec.images),
            "--calib", str(spec.calib),
            "--vocab", str(HSLAM_ROOT / "misc" / "orbvoc.dbow3"),
            "--colour", "--nogui=true", "--nolog", "--loopclosure",
            *arm_args]
-    if spec.associations and spec.associations.exists():
+    if use_assoc:
         cli += ["--associations", str(spec.associations)]
+    elif gt_depth_arm:
+        raise SystemExit(f"ERROR: {spec.dataset} {spec.sequence}: --depth-source=gt needs "
+                         f"associations.txt, not found at {spec.associations}")
     if endindex:
         cli += ["--endindex", str(endindex)]
 
@@ -319,7 +331,8 @@ def main() -> int:
         return 2
 
     spec = ds.resolve(a.dataset, a.sequence)
-    for label, p in (("images", spec.images), ("calib", spec.calib), ("gt", spec.gt)):
+    for label, p in (("images", spec.images), ("root", spec.root),
+                    ("calib", spec.calib), ("gt", spec.gt)):
         if not Path(p).exists():
             print(f"ERROR: {label} not found: {p}", file=sys.stderr)
             return 2
