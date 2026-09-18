@@ -43,6 +43,10 @@ HSLAM/Thirdparty/ceres-solver-*.tar.gz
 HSLAM/build/
 # HSLAM/run_scripts/
 HSLAM/results/
+# RA-L v2 eval output (summary.csv, per-rep run.log and result.txt). Data, not source --
+# and leaving it untracked would keep the eval tree dirty, stamping every subsequent row
+# dirty=1 and making it unusable in a paper table.
+HSLAM/runs/
 HSLAM/models/
 HSLAM/logs
 HSLAM/mats
