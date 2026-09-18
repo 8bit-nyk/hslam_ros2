@@ -35,6 +35,11 @@
 result.txt
 
 HSLAM/Thirdparty/CompiledLibs/
+# build.sh downloads and extracts ceres here; it is a build artifact like CompiledLibs and
+# onnxruntime below, not source. Left untracked it makes the eval-server tree permanently
+# 'dirty', which stamps every summary.csv row dirty=1 and makes it unusable in a paper table.
+HSLAM/Thirdparty/ceres-solver-*/
+HSLAM/Thirdparty/ceres-solver-*.tar.gz
 HSLAM/build/
 # HSLAM/run_scripts/
 HSLAM/results/
