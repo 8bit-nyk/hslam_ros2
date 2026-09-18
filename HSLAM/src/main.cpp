@@ -148,6 +148,18 @@ int main(int argc, char **argv)
 		("ml-inference-mode", "ML inference cadence: 0=every Nth KF (legacy), 1=init_only (lean), 2=disabled. Default 0.", cxxopts::value<int>()->default_value("0"))
 		("ml-inference-every-n", "ML inference cadence N (mode 0): run ML every Nth keyframe. 1=every keyframe (densest normals, ~2x ML cost), 2=default (Paper Table V).", cxxopts::value<int>()->default_value("2"))
 		("ml-indirect-filter", "Indirect.Step2 ML depth-ratio filter in feature matchers. true=enabled (legacy), false=disabled. Default true.", cxxopts::value<bool>()->default_value("true"))
+		("indirect-ml-semantic-fix", "Indirect.H0 s_ml semantic fix in LoopCloser: compute s_ml from current-KF ML depth images at matched pixels (true) vs legacy source-frame MapPoint ML idepth ratios (false). Default true. SML_COMPARE diagnostic prints both regardless.", cxxopts::value<bool>()->default_value("true"))
+		("p2-gate", "Indirect.H2 P2 rejection gate: reject loop-closure Sim3 candidates whose ML-derived scale disagrees with RANSAC-fit scale by more than --p2-gate-thresh. Uses new s_ml if available, falls back to old. Default true (shipped May 8, 2026 after C2 verdict).", cxxopts::value<bool>()->default_value("true"))
+		("p2-gate-thresh", "Indirect.H2 disagreement threshold for the P2 gate. Reject if |s_RANSAC - s_ML| / max(s_RANSAC, s_ML) > thresh. Default 0.5 (50%).", cxxopts::value<float>()->default_value("0.5"))
+		("h3-abs", "Indirect.H3-abs unary EdgeSim3ScalePrior in OptimizeEssentialGraph (anchors per-KF Sim3 scale to bias-corrected ML estimate). Default false. Requires --h3-bias.", cxxopts::value<bool>()->default_value("false"))
+		("h3-rel", "Indirect.H3-rel pairwise EdgeSim3RelScalePrior over covisible KF pairs (anchors relative scale ratio to ML; bias cancels by construction). Default false.", cxxopts::value<bool>()->default_value("false"))
+		("h3-weight", "Indirect.H3 information-matrix weight for both abs and rel scale priors. Sweep {1e-3, 1e-1, 1, 1e1, 1e3} per plan §6.4. Default 1.0.", cxxopts::value<float>()->default_value("1.0"))
+		("h3-bias", "Indirect.H3-abs bias correction factor multiplied into s_ml_implied before use as unary-prior target. Default 0.55 (Phase C Metric3D effective bias). Unused for h3-rel.", cxxopts::value<float>()->default_value("0.55"))
+		("sim3-seed", "Indirect.H1 seed-sensitivity diagnostic: blend RANSAC scale with ML-derived s_ml before OptimizeSim3. Default false.", cxxopts::value<bool>()->default_value("false"))
+		("sim3-seed-alpha", "Indirect.H1 blend weight on s_RANSAC. alpha=1.0 (default) is no-op (pure RANSAC). alpha=0.0 is pure ML. Sweep {0, 0.3, 0.5, 0.7, 0.9, 1.0}.", cxxopts::value<float>()->default_value("1.0"))
+		("s1-confidence-gate", "Indirect.S.1 ML-confidence wrapper: bypass H2 P2 gate when mean κ over matched-feature pixels < --s1-confidence-thresh. No effect when --p2-gate=false. Default false.", cxxopts::value<bool>()->default_value("false"))
+		("s1-confidence-thresh", "Indirect.S.1 AngMF κ threshold (raw, not sigmoid). Sweep {1, 5, 10, 25, 50}. Default 5.0.", cxxopts::value<float>()->default_value("5.0"))
+		("indirect-mp-ml-storage", "Indirect.P0 kill switch: when false, MapPoints constructed without ml_idepth/uncertainty/hasMLDepth (disables H2 + H3 old-estimator fallbacks). Default true (preserves prior behavior). Used for the mono / direct-only / full ablation.", cxxopts::value<bool>()->default_value("true"))
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
 		// Phase toggles for the Phase C config matrix (Phase B/C research). Defaults match current production.
@@ -232,6 +244,18 @@ int main(int argc, char **argv)
 	setting_mlInferenceMode = result["ml-inference-mode"].as<int>();
 	setting_mlInferenceEveryN = std::max(1, result["ml-inference-every-n"].as<int>());
 	setting_indirectMatcherUseML = result["ml-indirect-filter"].as<bool>();
+	setting_indirectMlSemanticFix = result["indirect-ml-semantic-fix"].as<bool>();
+	setting_indirectP2RejectGate = result["p2-gate"].as<bool>();
+	setting_indirectP2RejectThresh = result["p2-gate-thresh"].as<float>();
+	setting_indirectH3AbsScalePrior = result["h3-abs"].as<bool>();
+	setting_indirectH3RelScalePrior = result["h3-rel"].as<bool>();
+	setting_indirectH3InfoWeight = result["h3-weight"].as<float>();
+	setting_indirectH3BiasCorrection = result["h3-bias"].as<float>();
+	setting_indirectSim3MlSeed = result["sim3-seed"].as<bool>();
+	setting_indirectSim3MlSeedAlpha = result["sim3-seed-alpha"].as<float>();
+	setting_indirectS1ConfidenceGate = result["s1-confidence-gate"].as<bool>();
+	setting_indirectS1ConfidenceThresh = result["s1-confidence-thresh"].as<float>();
+	setting_indirectMapPointMLStorage = result["indirect-mp-ml-storage"].as<bool>();
 	
 	// Validate and normalize ML strategy parameters for ablation study
 	if (ml_strategy != "keyframe_only" && ml_strategy != "snapshot_mode") {

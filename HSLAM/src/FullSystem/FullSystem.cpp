@@ -3880,6 +3880,16 @@ void FullSystem::printEvalLine()
 
 void FullSystem::IndirectMapper(std::shared_ptr<Frame> frame)
 {
+	// Indirect.H0 (May 7 2026): copy ML depth shared_ptr from the source FrameHessian onto the
+	// indirect Frame at KF insertion. The shared_ptr keeps the cv::Mat alive after the FrameHessian
+	// is marginalized, so loop-closure candidate KFs (which fire long after their FH is gone) retain
+	// access to their ML depth map for the H0 inter-KF s_ml computation in LoopCloser::computeSim3.
+	if (frame->fh && frame->fh->hasMLDepth()) {
+		frame->mlDepthImage = frame->fh->getMLDepth();
+		// Indirect.S.1 (May 8 2026): also propagate ML confidence map (parallel plumbing) for the
+		// κ-confidence wrapper around the H2 gate. Same lifetime rationale.
+		frame->mlConfidenceImage = frame->fh->getMLConfidenceMap();
+	}
 
 	for(size_t i=0, iend = frame->tMapPoints.size(); i < iend; ++i)
     {

@@ -1,4 +1,5 @@
 #include "MapPoint.h"
+#include "util/settings.h"
 #include "Indirect/Frame.h"
 #include "FullSystem/HessianBlocks.h"
 #include "Indirect/Matcher.h"
@@ -40,8 +41,14 @@ namespace HSLAM
         idepth = ph->idepth;
         idepthH = ph->idepth_hessian;
 
-        // Indirect.P0: Copy ML depth from PointHessian
-        if (ph->hasMLDepth) {
+        // Indirect.P0: Copy ML depth from PointHessian.
+        // Gated by setting_indirectMapPointMLStorage (default true; --indirect-mp-ml-storage).
+        // Off ⇒ MapPoints are constructed without ml_idepth/ml_uncertainty/hasMLDepth, which
+        // (a) disables the legacy s_ml_old fallback in LoopCloser (H2 falls back to BYPASS_COVERAGE_LOW),
+        // (b) disables the H3-rel/abs old-estimator fallback in OptimizeEssentialGraph,
+        // (c) leaves Step2a/2b matchers unaffected (they read currentMLDepthImage, not MapPoint fields).
+        // Use for the mono / direct-only / full ablation per LOOP_CLOSURE_ML_TEST_PLAN.md §21.
+        if (ph->hasMLDepth && setting_indirectMapPointMLStorage) {
             ml_idepth = ph->ml_idepth_reference;
             ml_uncertainty = ph->ml_uncertainty;
             hasMLDepth = true;

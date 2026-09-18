@@ -237,6 +237,70 @@ float setting_vsWeight = 1e-5f;          // Direct.VS: weight multiplier (intent
 bool setting_disableIndirectMLDepth = false;     // Indirect: Global kill switch
 float setting_indirectMLDepthWeight = 0.3f;      // Indirect.P1v2: INERT — consumer is dead BundleAdjustment() in Optimizer.cpp (heap corruption from g2o port; only caller in main.cpp:915 is commented out). See feedback_bundleadjustment_dead_code memory entry.
 bool setting_disableIndirectP2LoopCloser = true; // Indirect.P2: DISABLED BY DEFAULT (May 5, 2026). Loop-closure ML/RANSAC scale-disagreement rejection (commit ea9c5e2) was implemented in LoopCloser.cpp::computeSim3 but the rejection branch was never experimentally validated — only fires when there's a loop closure with ≥30 inliers, observed ~1 event in TUM and 0 in KITTI/EuRoC across all eval runs. Kept in code for paper documentation; gated off pending real loop-closure exposure in evaluation.
+// Indirect.H0 (May 7, 2026): semantic fix for s_ml in LoopCloser::computeSim3. The legacy P2 code computed s_ml as
+// the median of (mpCandidate->getMLIdepth() / mpCurrent->getMLIdepth()) — both source-frame ML idepths from whichever
+// past frames the matched MapPoints were created in, NOT the inter-KF scale being validated by Sim3. The fix computes
+// s_ml from the current-frame ML depth images of pKF and currentKF at the matched feature pixels:
+//   s_ml = median(d_ml_currentKF[kp_currentKF] / d_ml_pKF[kp_pKF])
+// Plumbing: mlDepthImage shared_ptr is copied from FrameHessian to indirect Frame at IndirectMapper time so it
+// survives FH marginalization. INDIRECT.SML_COMPARE diagnostic always prints old + new s_ml on every loop event for
+// audit; this flag only controls which value the (off-by-default) P2 rejection gate consumes. See
+// docs/indirect_depth_integration/LOOP_CLOSURE_ML_TEST_PLAN.md §4 H0.
+bool setting_indirectMlSemanticFix = true;
+
+// Indirect.H2 (May 8, 2026): loop-closure Sim3 scale-disagreement rejection gate.
+// Replaces (and supersedes) the old setting_disableIndirectP2LoopCloser kill-switch — that flag is
+// kept declared for paper-doc traceability but is no longer consumed in LoopCloser. The new gate
+// uses a fallback estimator policy: prefer new s_ml (current-KF ML images at matched pixels) when
+// ml_ratios_new.size() >= 5, else fall back to old s_ml (source-frame MapPoint ML idepth ratios)
+// when ml_ratios_old.size() >= 5. Otherwise the gate bypasses (coverage_low).
+// **Default true (May 8 ship)** after C2 verdict (n=5 across KITTI 00/05/06/07): WIN per §6.3
+// DEFENSIBLE GATE. 65 degenerate Sim3 acceptances rejected; KITTI 05 −5.5% ATE + crash prevented
+// (C0_post rep 5 hit Sophus::ScaleNotPositive without the gate); KITTI 00/06 ATE neutral; KITTI 07
+// gate-innocent (0 events, recheck cleared the C2 ATE delta as RANSAC noise). Disable via
+// --p2-gate=false. See LOOP_CLOSURE_ML_TEST_PLAN.md §13 verdict.
+bool setting_indirectP2RejectGate = true;
+float setting_indirectP2RejectThresh = 0.5f;
+
+// Indirect.H3 (May 8, 2026): per-KF Sim3 scale priors in OptimizeEssentialGraph.
+// Two arms (parallel/independent toggles per plan §4.0 + §6.4):
+//   H3-abs: unary EdgeSim3ScalePrior pulling s_vertex toward bias-corrected s_ml_implied.
+//   H3-rel: pairwise EdgeSim3RelScalePrior over covisible KF pairs anchoring relative scale
+//           to ratio of independent ML estimates (bias-cancels by construction).
+// Both default off (opt-in). H3-abs requires the bias correction or it pulls the gauge to
+// Metric3D's ~0.55 outdoor floor (cf. Direct.P2 KILL). H3-rel does not need bias correction.
+// Information weight is a free hyperparameter per Greene & Roy ICRA 2020; sweep planned.
+// Per-KF s_ml_implied uses H2's new ?: old fallback so that production cadence (every-Nth-KF
+// ML) doesn't starve the priors of data on most KFs.
+bool setting_indirectH3AbsScalePrior = false;
+bool setting_indirectH3RelScalePrior = false;
+float setting_indirectH3InfoWeight = 1.0f;
+float setting_indirectH3BiasCorrection = 0.55f;
+
+// Indirect.H1 (May 8, 2026): OptimizeSim3 scale-seeding diagnostic. Reframed by lit audit as
+// a seed-sensitivity diagnostic (predicted null per LM convergence theory: RANSAC inliers place
+// s_RANSAC near the inlier-energy minimum; LM converges to the same minimum regardless of seed).
+// Sweep alpha ∈ {0, 0.3, 0.5, 0.7, 0.9, 1.0} per plan §6.2; verdict NULL if mean across loops of
+// |s_post_optimize - s_RANSAC| / s_RANSAC < 1% for all alpha. Default off.
+bool setting_indirectSim3MlSeed = false;
+float setting_indirectSim3MlSeedAlpha = 1.0f;
+
+// Indirect.S.1 (May 8, 2026): ML-confidence (AngMF κ) gating wrapper around the H2 P2 gate.
+// Per lit audit §3.6 LR4: when mean κ over matched feature pixels < threshold, ML is too noisy
+// to base a rejection on — bypass H2 gate (allow loop) on this event. Falls back to RANSAC-only
+// behavior. Default off; no effect when --p2-gate=false. Threshold sweep {1, 5, 10, 25, 50} per
+// LR4. Per project_kappa_depth_error_correlation.md, raw AngMF κ ∈ [0.13, 66] empirically with
+// indoor mean ~5; threshold 5 is a loose initial bar.
+bool setting_indirectS1ConfidenceGate = false;
+float setting_indirectS1ConfidenceThresh = 5.0f;
+
+// Indirect.P0 kill switch (May 9, 2026): gates MapPoint::MapPoint(PointHessian*, ...) ML-field copy.
+// Default true preserves all prior behavior. Set false to construct MapPoints without ml_idepth /
+// ml_uncertainty / hasMLDepth — disables the old-estimator fallback consumed by H2 (LoopCloser) and
+// H3 (OptimizeEssentialGraph). Used for the mono / direct-only / full ablation per
+// LOOP_CLOSURE_ML_TEST_PLAN.md §21. Note: Step2a/2b matchers are NOT affected (they read live ML
+// image at currentMLDepthImage, not the per-MP stored fields).
+bool setting_indirectMapPointMLStorage = true;
 
 // GT Depth Validation (Phase B) — research-only. Default = ML (unchanged production behavior).
 // See docs/gt_depth_validation/PLAN.md

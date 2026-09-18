@@ -8,6 +8,7 @@
 
 #include "FullSystem/FullSystem.h"
 #include <iostream>
+#include <cmath>
 
 
 namespace HSLAM {
@@ -376,39 +377,208 @@ namespace HSLAM {
                     Sim3 gScm = Sim3(SE3(R.cast<double>(), t.cast<double>()).matrix());
                     gScm.setScale(s);
 
+                    // Indirect.H1 (May 8, 2026): optionally seed OptimizeSim3 scale with ML-derived blend.
+                    // s_seed = alpha * s_RANSAC + (1 - alpha) * s_ml; alpha=1.0 (default) is no-op identity.
+                    // Per lit-audit reframing as a *seed-sensitivity diagnostic* (plan §6.2), we sweep alpha
+                    // ∈ {0, 0.3, 0.5, 0.7, 0.9, 1.0} and measure |s_post_optimize - s_RANSAC| / s_RANSAC. Predicted
+                    // null per LM convergence theory: RANSAC inlier sets typically place s_RANSAC near the inlier-
+                    // energy minimum, and LM should converge to the same minimum regardless of starting scale.
+                    // Uses new ?: old fallback identical to H2's policy. Only fires when seed has data (n>=5).
+                    float s_h1_seed_used = -1.f, s_h1_ml_used = -1.f;
+                    if (setting_indirectSim3MlSeed) {
+                        std::vector<float> h1_ratios_new, h1_ratios_old;
+                        const bool haveBothMl = pKF->mlDepthImage && !pKF->mlDepthImage->empty()
+                            && currentKF->mlDepthImage && !currentKF->mlDepthImage->empty();
+                        for (size_t j = 0; j < vpMapPointMatches.size(); j++) {
+                            auto mpCur = vpMapPointMatches[j];
+                            if (!mpCur) continue;
+                            // Old fallback: source-frame MP idepth ratios
+                            auto mpCand = pKF->getMapPoint(j);
+                            if (mpCand && mpCur->getHasMLDepth() && mpCand->getHasMLDepth()
+                                && mpCur->getMLIdepth() > 0 && mpCand->getMLIdepth() > 0)
+                                h1_ratios_old.push_back(mpCand->getMLIdepth() / mpCur->getMLIdepth());
+                            // New: per-pixel current-KF ML depth at matched features
+                            if (haveBothMl) {
+                                const int idxCur = mpCur->getIndexInKF(currentKF);
+                                if (idxCur >= 0 && idxCur < currentKF->nFeatures && j < (size_t)pKF->nFeatures) {
+                                    const cv::Point2f& ppKF = pKF->mvKeys[j].pt;
+                                    const cv::Point2f& pCur = currentKF->mvKeys[idxCur].pt;
+                                    const int yp = (int)ppKF.y, xp = (int)ppKF.x;
+                                    const int yc = (int)pCur.y, xc = (int)pCur.x;
+                                    if (yp >= 0 && yp < pKF->mlDepthImage->rows && xp >= 0 && xp < pKF->mlDepthImage->cols
+                                        && yc >= 0 && yc < currentKF->mlDepthImage->rows && xc >= 0 && xc < currentKF->mlDepthImage->cols) {
+                                        const float d_pKF = pKF->mlDepthImage->at<float>(yp, xp);
+                                        const float d_cur = currentKF->mlDepthImage->at<float>(yc, xc);
+                                        if (std::isfinite(d_pKF) && std::isfinite(d_cur) && d_pKF > 0.f && d_cur > 0.f)
+                                            h1_ratios_new.push_back(d_cur / d_pKF);
+                                    }
+                                }
+                            }
+                        }
+                        std::vector<float>* chosen = nullptr; const char* h1_src = "none";
+                        if (h1_ratios_new.size() >= 5) { chosen = &h1_ratios_new; h1_src = "new"; }
+                        else if (h1_ratios_old.size() >= 5) { chosen = &h1_ratios_old; h1_src = "old"; }
+                        if (chosen) {
+                            std::sort(chosen->begin(), chosen->end());
+                            const float s_ml_h1 = (*chosen)[chosen->size() / 2];
+                            const float alpha = setting_indirectSim3MlSeedAlpha;
+                            const float s_blend = alpha * s + (1.0f - alpha) * s_ml_h1;
+                            printf("[INDIRECT.SIM3_SEED] cur=%d cand=%d s_ransac=%.3f s_ml=%.3f source=%s alpha=%.2f s_seed=%.3f n=%zu\n",
+                                   (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                   s, s_ml_h1, h1_src, alpha, s_blend, chosen->size());
+                            gScm.setScale((double)s_blend);
+                            s_h1_seed_used = s_blend; s_h1_ml_used = s_ml_h1;
+                        }
+                    }
+
                     const int nInliers = OptimizeSim3(pKF, currentKF, vpMapPointMatches, gScm, 10, false); //def: currentKf, pKF
                     // If optimization is succesful stop ransacs and continue
                     if (nInliers >= 30) //20
                     {
-                        // Indirect.P2: ML scale validation — reject loops where RANSAC and ML scales disagree.
-                        // Gated off by default (setting_disableIndirectP2LoopCloser=true) since the rejection
-                        // branch was never experimentally validated — see settings.cpp comment + EXPERIMENT_LOG.md.
-                        if (!setting_disableIndirectP2LoopCloser) {
-                            bool mlScaleValid = true;
-                            float s_optimized = gScm.scale();
-                            {
-                                std::vector<float> ml_ratios;
+                        const float s_optimized = gScm.scale();
+
+                        // Indirect.H1 sensitivity diagnostic: how much did the seed actually move s_post?
+                        // If LM is convergent (predicted), |s_post - s_RANSAC| / s_RANSAC < 1% across all alpha.
+                        if (setting_indirectSim3MlSeed && s_h1_seed_used > 0.f) {
+                            const float sensitivity = std::abs(s_optimized - s) / std::max(s, 1e-6f);
+                            printf("[INDIRECT.SIM3_SEED] cur=%d cand=%d s_seed=%.3f s_post=%.3f s_ransac=%.3f sensitivity=%.4f (vs_ransac=%.2f%%)\n",
+                                   (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                   s_h1_seed_used, s_optimized, s, sensitivity, sensitivity * 100.0f);
+                        }
+
+                        // Indirect.H0 (May 7, 2026): compute s_ml two ways for comparison.
+                        // - s_ml_old: legacy ratio of source-frame MapPoint ML idepths (semantically conflated; see audit R2).
+                        // - s_ml_new: ratio of current-KF ML depth images at matched feature pixels (correct inter-KF scale,
+                        //   indexing convention: vpMapPointMatches indexed by pKF feature; the stored MapPoint is currentKF's
+                        //   matched MP, located in currentKF via getIndexInKF). Direction matches legacy: candidate→current,
+                        //   i.e. d_currentKF / d_pKF (in idepth: i_pKF / i_currentKF).
+                        // The SML_COMPARE diagnostic always prints both regardless of any flag so we can audit before
+                        // shipping the new estimator. The P2 rejection gate (when enabled) consumes whichever the
+                        // setting_indirectMlSemanticFix flag selects (default: new).
+                        std::vector<float> ml_ratios_old;
+                        std::vector<float> ml_ratios_new;
+
+                        const bool haveBothMlImages = pKF->mlDepthImage && !pKF->mlDepthImage->empty()
+                            && currentKF->mlDepthImage && !currentKF->mlDepthImage->empty();
+
+                        for (size_t j = 0; j < vpMapPointMatches.size(); j++) {
+                            auto mpCurrent = vpMapPointMatches[j];   // MP stored on currentKF, matched to pKF feature j
+                            auto mpCandidate = pKF->getMapPoint(j);  // MP stored on pKF at feature j
+
+                            // Legacy s_ml: source-frame idepth ratio
+                            if (mpCurrent && mpCandidate &&
+                                mpCurrent->getHasMLDepth() && mpCandidate->getHasMLDepth() &&
+                                mpCurrent->getMLIdepth() > 0 && mpCandidate->getMLIdepth() > 0) {
+                                ml_ratios_old.push_back(mpCandidate->getMLIdepth() / mpCurrent->getMLIdepth());
+                            }
+
+                            // New s_ml: per-pixel ML depth at the matched features in each KF's own ML image.
+                            if (haveBothMlImages && mpCurrent) {
+                                const int idxCur = mpCurrent->getIndexInKF(currentKF);
+                                if (idxCur >= 0 && idxCur < currentKF->nFeatures &&
+                                    j < (size_t)pKF->nFeatures) {
+                                    const cv::Point2f& ppKF = pKF->mvKeys[j].pt;
+                                    const cv::Point2f& pCur = currentKF->mvKeys[idxCur].pt;
+                                    const int yp = (int)ppKF.y, xp = (int)ppKF.x;
+                                    const int yc = (int)pCur.y, xc = (int)pCur.x;
+                                    if (yp >= 0 && yp < pKF->mlDepthImage->rows &&
+                                        xp >= 0 && xp < pKF->mlDepthImage->cols &&
+                                        yc >= 0 && yc < currentKF->mlDepthImage->rows &&
+                                        xc >= 0 && xc < currentKF->mlDepthImage->cols) {
+                                        const float d_pKF = pKF->mlDepthImage->at<float>(yp, xp);
+                                        const float d_cur = currentKF->mlDepthImage->at<float>(yc, xc);
+                                        if (std::isfinite(d_pKF) && std::isfinite(d_cur) && d_pKF > 0.f && d_cur > 0.f) {
+                                            ml_ratios_new.push_back(d_cur / d_pKF);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        auto medianOf = [](std::vector<float>& v) -> float {
+                            if (v.empty()) return -1.f;
+                            std::sort(v.begin(), v.end());
+                            return v[v.size() / 2];
+                        };
+                        const float s_ml_old = medianOf(ml_ratios_old);
+                        const float s_ml_new = medianOf(ml_ratios_new);
+
+                        // [INDIRECT.SML_COMPARE]: always print on accepted (≥30-inlier) loop events for audit.
+                        // degenerate=YES tags Sim3 RANSAC scales outside [1/3, 3] — physically implausible inter-KF
+                        // scale changes (e.g. cur=3106↔cand=17 on KITTI 00 produced s_ransac=29.85). Lets C0_post
+                        // grep "would the gate have rejected this?" per estimator without rerunning. Threshold is
+                        // intentionally loose (factor of 3) so ordinary scale drift through the trajectory is not
+                        // flagged. See docs/indirect_depth_integration/EXECUTION_LOG.md Session 2 finding.
+                        const bool degenerateRansac = (s_optimized < (1.f/3.f)) || (s_optimized > 3.f);
+                        printf("[INDIRECT.SML_COMPARE] cur=%d cand=%d s_ransac=%.3f s_ml_old=%.3f s_ml_new=%.3f n_old=%zu n_new=%zu degenerate=%s\n",
+                               (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                               s_optimized, s_ml_old, s_ml_new,
+                               ml_ratios_old.size(), ml_ratios_new.size(),
+                               degenerateRansac ? "YES" : "no");
+
+                        // Indirect.S.1 (May 8, 2026): ML-confidence (κ) gating wrapper around the H2 P2 gate.
+                        // Per lit audit §3.6 LR4: Metric3D's AngMF κ over matched-feature pixels indicates
+                        // ML reliability for this loop pair. Below κ < τ, H2 should NOT veto a loop (ML is
+                        // unreliable here; fall back to RANSAC-only behavior). Mean κ computed over matched
+                        // pixels in currentKF's confidence map. Default off (--s1-confidence-gate=false);
+                        // wraps H2 only — has no effect when --p2-gate=false.
+                        bool s1_bypass_h2 = false;
+                        if (setting_indirectS1ConfidenceGate && setting_indirectP2RejectGate) {
+                            auto confImg = currentKF->mlConfidenceImage;
+                            if (confImg && !confImg->empty()) {
+                                double sum_kappa = 0.0; int n_kappa = 0;
                                 for (size_t j = 0; j < vpMapPointMatches.size(); j++) {
-                                    auto mpCurrent = vpMapPointMatches[j];
-                                    auto mpCandidate = pKF->getMapPoint(j);
-                                    if (mpCurrent && mpCandidate &&
-                                        mpCurrent->getHasMLDepth() && mpCandidate->getHasMLDepth() &&
-                                        mpCurrent->getMLIdepth() > 0 && mpCandidate->getMLIdepth() > 0) {
-                                        float ratio = mpCandidate->getMLIdepth() / mpCurrent->getMLIdepth();
-                                        ml_ratios.push_back(ratio);
+                                    auto mpCur = vpMapPointMatches[j];
+                                    if (!mpCur) continue;
+                                    const int idxCur = mpCur->getIndexInKF(currentKF);
+                                    if (idxCur < 0 || idxCur >= currentKF->nFeatures) continue;
+                                    const cv::Point2f& pCur = currentKF->mvKeys[idxCur].pt;
+                                    const int yc = (int)pCur.y, xc = (int)pCur.x;
+                                    if (yc >= 0 && yc < confImg->rows && xc >= 0 && xc < confImg->cols) {
+                                        const float kappa = confImg->at<float>(yc, xc);
+                                        if (std::isfinite(kappa) && kappa > 0.f) { sum_kappa += kappa; n_kappa++; }
                                     }
                                 }
-                                if (ml_ratios.size() >= 5) {
-                                    std::sort(ml_ratios.begin(), ml_ratios.end());
-                                    float s_ml = ml_ratios[ml_ratios.size() / 2];
-                                    float scale_disagreement = std::abs(s_optimized - s_ml) / std::max(s_optimized, s_ml);
-                                    printf("[INDIRECT.P2] RANSAC=%.3f ML=%.3f disagreement=%.1f%% matches=%zu\n",
-                                           s_optimized, s_ml, scale_disagreement * 100.0f, ml_ratios.size());
-                                    if (scale_disagreement > 0.5f) {
-                                        printf("[INDIRECT.P2] REJECTED: scale disagreement too large\n");
-                                        mlScaleValid = false;
-                                    }
-                                }
+                                const double mean_kappa = (n_kappa > 0) ? sum_kappa / n_kappa : -1.0;
+                                s1_bypass_h2 = (n_kappa > 0 && mean_kappa < setting_indirectS1ConfidenceThresh);
+                                printf("[INDIRECT.S1] cur=%d cand=%d mean_kappa=%.3f n=%d thresh=%.3f decision=%s\n",
+                                       (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                       mean_kappa, n_kappa, setting_indirectS1ConfidenceThresh,
+                                       s1_bypass_h2 ? "BYPASS_H2" : "ALLOW_H2");
+                            } else {
+                                printf("[INDIRECT.S1] cur=%d cand=%d no_confidence_map (no S1 effect)\n",
+                                       (int)currentKF->fs->KfId, (int)pKF->fs->KfId);
+                            }
+                        }
+
+                        // Indirect.H2 (May 8, 2026): loop-closure Sim3 scale-disagreement rejection gate.
+                        // Fallback policy decided by C0_post finding (plan §12.2): prefer new s_ml (≥5 samples) for
+                        // semantic correctness, fall back to old s_ml (≥5 samples) when production ML cadence
+                        // (every-Nth-KF) leaves new with insufficient coverage on this loop pair. Bypass only when
+                        // BOTH estimators are < 5 samples — that's true coverage_low. Diagnostic always prints
+                        // the gate's decision (REJECTED / ACCEPTED / BYPASS_COVERAGE_LOW) so §6.3 measurement can
+                        // count, per estimator, would-the-gate-have-caught-this. Default off (--p2-gate=false).
+                        if (setting_indirectP2RejectGate && !s1_bypass_h2) {
+                            bool mlScaleValid = true;
+                            float s_ml_used = -1.f; size_t n_used = 0; const char* source_used = "none";
+                            if (ml_ratios_new.size() >= 5) {
+                                s_ml_used = s_ml_new; n_used = ml_ratios_new.size(); source_used = "new";
+                            } else if (ml_ratios_old.size() >= 5) {
+                                s_ml_used = s_ml_old; n_used = ml_ratios_old.size(); source_used = "old";
+                            }
+                            if (n_used >= 5) {
+                                const float scale_disagreement = std::abs(s_optimized - s_ml_used) / std::max(s_optimized, s_ml_used);
+                                const bool rejected = (scale_disagreement > setting_indirectP2RejectThresh);
+                                printf("[INDIRECT.P2_GATE] cur=%d cand=%d s_ransac=%.3f s_ml=%.3f disagreement=%.1f%% n=%zu source=%s thresh=%.2f decision=%s\n",
+                                       (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                       s_optimized, s_ml_used, scale_disagreement * 100.0f,
+                                       n_used, source_used, setting_indirectP2RejectThresh,
+                                       rejected ? "REJECTED" : "ACCEPTED");
+                                if (rejected) mlScaleValid = false;
+                            } else {
+                                printf("[INDIRECT.P2_GATE] cur=%d cand=%d s_ransac=%.3f decision=BYPASS_COVERAGE_LOW n_new=%zu n_old=%zu\n",
+                                       (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
+                                       s_optimized, ml_ratios_new.size(), ml_ratios_old.size());
                             }
                             if (!mlScaleValid) continue;
                         }

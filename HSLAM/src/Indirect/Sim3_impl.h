@@ -4,6 +4,7 @@
 
 #include "util/NumType.h"
 #include <g2o/core/base_vertex.h>
+#include "g2o/core/base_unary_edge.h"
 #include "g2o/core/base_binary_edge.h"
 #include "g2o/types/sim3/sim3.h"
 #include "util/globalFuncs.h"
@@ -263,6 +264,114 @@ namespace HSLAM
                 v1->setEstimate(measurement().inverse() * v2->estimate());
         }
         // virtual void linearizeOplus();
+    };
+
+    // ----------------------------------------------------------------------------
+    // Indirect.H3 (May 8, 2026): ML-derived scale priors on Sim3 vertices in
+    // OptimizeEssentialGraph. Two arms, both shipped as separate edges:
+    //
+    //   H3-abs (EdgeSim3ScalePrior, unary):  e = log(scale_v) - log(s_target)
+    //       — anchors a single KF's Sim3 scale toward an ML-derived target.
+    //         Requires bias-correction on s_target (Metric3D 0.55 outdoor)
+    //         to avoid pulling the gauge to the biased floor.
+    //
+    //   H3-rel (EdgeSim3RelScalePrior, binary):
+    //       e = log(scale_v_i) - log(scale_v_j) - log(s_target_ratio)
+    //       — anchors the relative scale change between two KFs to the ratio
+    //         of their independent ML estimates. Bias cancels by construction
+    //         (Metric3D bias is multiplicative and ratio-invariant), so no
+    //         per-regime bias correction is needed.
+    //
+    // Sim3Vertex parameterization: 7-DOF tangent [omega(3), upsilon(3), sigma],
+    // with sigma = log(s) and oplusImpl: _estimate = g2o::Sim3(update) * _estimate.
+    // After update, scale_new = exp(sigma_update) * scale_old, so
+    // d(log(scale))/d(update) = [0,0,0,0,0,0,1] regardless of estimate.
+    // ----------------------------------------------------------------------------
+
+    class EdgeSim3ScalePrior : public g2o::BaseUnaryEdge<1, double, Sim3Vertex>
+    {
+    public:
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+        EdgeSim3ScalePrior() {}
+
+        virtual bool read(std::istream &is) override
+        {
+            double m; is >> m; setMeasurement(m);
+            is >> information()(0, 0);
+            return true;
+        }
+        virtual bool write(std::ostream &os) const override
+        {
+            os << measurement() << " " << information()(0, 0);
+            return os.good();
+        }
+
+        // Measurement is the *target* scale s_target (NOT log). Stored as-is;
+        // we take logs in computeError so callers can pass a natural scalar.
+        void computeError() override
+        {
+            const Sim3Vertex *v = static_cast<const Sim3Vertex *>(_vertices[0]);
+            const double s_est = v->estimate().scale();
+            const double s_meas = _measurement;
+            // Guard against pathological state: if a Sim3Vertex's scale ever
+            // hits 0/negative we'd hit log(0)/log(<0). HSLAM has historically
+            // crashed on Sophus::ScaleNotPositive in this regime; emit a large
+            // but finite error rather than NaN-poisoning the optimizer.
+            if (s_est <= 0.0 || s_meas <= 0.0) {
+                _error[0] = 1e6;
+                return;
+            }
+            _error[0] = std::log(s_est) - std::log(s_meas);
+        }
+
+        void linearizeOplus() override
+        {
+            // d(log(s))/d(tangent) = [0,0,0,0,0,0,1] in the [omega, upsilon, sigma] order.
+            _jacobianOplusXi.setZero();
+            _jacobianOplusXi(0, 6) = 1.0;
+        }
+    };
+
+    class EdgeSim3RelScalePrior : public g2o::BaseBinaryEdge<1, double, Sim3Vertex, Sim3Vertex>
+    {
+    public:
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+        EdgeSim3RelScalePrior() {}
+
+        virtual bool read(std::istream &is) override
+        {
+            double m; is >> m; setMeasurement(m);
+            is >> information()(0, 0);
+            return true;
+        }
+        virtual bool write(std::ostream &os) const override
+        {
+            os << measurement() << " " << information()(0, 0);
+            return os.good();
+        }
+
+        // Measurement is the *target* ratio s_target_i / s_target_j (NOT log).
+        // Stored as-is; logs are taken in computeError. Ordering: vertex 0 = i,
+        // vertex 1 = j; error = log(s_i / s_j) - log(s_target_ratio).
+        void computeError() override
+        {
+            const Sim3Vertex *vi = static_cast<const Sim3Vertex *>(_vertices[0]);
+            const Sim3Vertex *vj = static_cast<const Sim3Vertex *>(_vertices[1]);
+            const double s_i = vi->estimate().scale();
+            const double s_j = vj->estimate().scale();
+            const double s_meas = _measurement;
+            if (s_i <= 0.0 || s_j <= 0.0 || s_meas <= 0.0) {
+                _error[0] = 1e6;
+                return;
+            }
+            _error[0] = (std::log(s_i) - std::log(s_j)) - std::log(s_meas);
+        }
+
+        void linearizeOplus() override
+        {
+            _jacobianOplusXi.setZero(); _jacobianOplusXi(0, 6) = +1.0;
+            _jacobianOplusXj.setZero(); _jacobianOplusXj(0, 6) = -1.0;
+        }
     };
 
 } // namespace HSLAM
