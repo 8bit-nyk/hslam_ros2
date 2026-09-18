@@ -39,6 +39,7 @@ public:
         
         // GPU-specific parameters
         bool enable_fp16;           // FP16 optimization for GPU
+        bool no_pad_input;          // WP1: skip the letterbox border (metric3d-nopad)
         int gpu_device_id;          // GPU device selection
         size_t gpu_memory_limit;    // GPU memory limit in bytes
         
@@ -69,6 +70,7 @@ public:
             , enable_gpu(false)
             , num_threads(4)
             , enable_fp16(false)
+            , no_pad_input(false)
             , gpu_device_id(0)
             , gpu_memory_limit(2ULL * 1024 * 1024 * 1024)  // 2GB default
             , input_width(518)   // Metric3D model requirement for quality inference

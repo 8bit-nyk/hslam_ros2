@@ -85,7 +85,10 @@ _DELTAS: dict[str, list[str]] = {
     # Throughput levers (WP1). fp16 is PARKED by decision 2026-09-18: the fp16 graph needs a
     # float16 input tensor that preprocessing does not produce. No fp16 arm is defined here
     # on purpose -- an arm that silently falls back to fp32 would be worse than none.
-    "L_nopad": ["--ml-input-geometry=metric3d-nopad"],   # requires the WP1 pre-work
+    # L_nopad -- **KILLED 2026-09-18 by its own pre-registered offline check.** Kept defined so the
+    # negative result is reproducible, but it must not enter any table as a candidate: against
+    # KITTI-07 LiDAR it moves the depth scale -23.3% (1.0060 -> 0.7717) versus a 3% kill threshold.
+    "L_nopad": ["--ml-input-geometry=metric3d-nopad"],
     # Legacy (defective) geometry, for the WP5 three-arm prior-quality experiment only.
     "legacy_geom": ["--ml-input-geometry=legacy", "--ml-canonical-scale=false",
                     "--ml-isotropic-input=false"],

@@ -783,10 +783,52 @@ cv::Mat MLInference::preprocessMetric3D(const cv::Mat& input_image) const {
     // DEBUG: Padding - top:%d, bottom:%d, left:%d, right:%d\n", 
     //        pad_top, pad_bottom, pad_left, pad_right);
     
-    // Pad with ImageNet mean values (RGB: 123.675, 116.28, 103.53)
+    // ---- WP1 / no-pad lever -------------------------------------------------------------------
+    // The letterbox to 616x1064 is mostly border on wide inputs: 23% of the tensor on TUM,
+    // 48% on KITTI, which is exactly where throughput is short. This drops the border and feeds
+    // only real pixels.
+    //
+    // The RESIZE SCALE is deliberately untouched, so c = fx_eff*s/1000 is identical to the padded
+    // arm -- the lever must cost throughput only, never change the geometry it is measured against.
+    // Dims are rounded DOWN to multiples of 14 (the ViT patch size; the ONNX output is
+    // 4*floor(3.5*floor(dim/14))) to avoid partial patches. That rounding makes the realised
+    // per-axis scale differ from the nominal by up to 14/dim, and re-introduces a small anisotropy,
+    // so BOTH realised scales are printed in [ML_GEOM] rather than assumed negligible: this project
+    // has already been burned once by an unobserved anisotropic input (defect D2).
     cv::Mat padded;
-    cv::copyMakeBorder(resized, padded, pad_top, pad_bottom, pad_left, pad_right,
-                       cv::BORDER_CONSTANT, cv::Scalar(123.675, 116.28, 103.53));
+    if (config_.no_pad_input) {
+        const int patch = 14;
+        int nw = std::max(patch, (new_width  / patch) * patch);
+        int nh = std::max(patch, (new_height / patch) * patch);
+        if (nw != resized.cols || nh != resized.rows)
+            cv::resize(resized, padded, cv::Size(nw, nh), 0, 0, cv::INTER_LINEAR);
+        else
+            padded = resized;
+
+        // No border -> postprocess must not crop. -1 is the "no padding recorded" sentinel.
+        current_padding_.top = current_padding_.bottom = -1;
+        current_padding_.left = current_padding_.right = -1;
+
+        static bool nopad_printed = false;
+        if (!nopad_printed) {
+            nopad_printed = true;
+            const float sx = (float)nw / (float)processed.cols;
+            const float sy = (float)nh / (float)processed.rows;
+            printf("[ML_GEOM] nopad=on box=%dx%d -> final=%dx%d (%.1f%% of the padded tensor) "
+                   "nominal_s=%.4f realised_sx=%.4f realised_sy=%.4f aniso=%.4f\n",
+                   config_.input_width, config_.input_height, nw, nh,
+                   100.0f * (nw * nh) / (float)(config_.input_width * config_.input_height),
+                   scale, sx, sy, sx / sy);
+            if (std::fabs(sx / sy - 1.0f) > 0.02f)
+                printf("[ML_GEOM] *** WARNING: no-pad rounding left a %.1f%% anisotropy. The canonical "
+                       "factor assumes one isotropic scale; treat this arm's depth scale as suspect. ***\n",
+                       100.0f * std::fabs(sx / sy - 1.0f));
+        }
+    } else {
+        // Pad with ImageNet mean values (RGB: 123.675, 116.28, 103.53)
+        cv::copyMakeBorder(resized, padded, pad_top, pad_bottom, pad_left, pad_right,
+                           cv::BORDER_CONSTANT, cv::Scalar(123.675, 116.28, 103.53));
+    }
     
     // DEBUG: After padding: %dx%d\n", padded.cols, padded.rows);
     

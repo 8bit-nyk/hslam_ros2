@@ -178,7 +178,7 @@ int main(int argc, char **argv)
 		("ml-prior-centred-trace", "Sprint 12: when the epipolar search segment exceeds maxPixSearch, centre the retained window on the ML prediction instead of anchoring it at uMin. Only affects points whose search was already being truncated. (default false)", cxxopts::value<bool>()->default_value("false"))
 		("diag-trace-stats", "Emit [TRACE_STATS] (first-epipolar-trace status histogram) and [ACT_STATS] (activated points that never completed a trace, and those with idepth_min<0). Pure instrumentation, no behavioural effect. Measures whether the ML idepth bound is narrowing DSO's search or translating it off the prediction. (default false)", cxxopts::value<bool>()->default_value("false"))
 		("ml-normal-channel", "Phase 0 control arm: 'on' (default) or 'off'. OFF removes the ENTIRE normal head from the pipeline — confidence forced to 1.0 (kappa is a normal-head output, so --ml-foreshortening=false alone never achieved this) and the normal map not extracted. Required to separate 'the normal channel adds value' from 'the depth fix adds value'.", cxxopts::value<std::string>()->default_value("on"))
-		("ml-input-geometry", "Sprint 11 F0: ML input geometry for METRIC3D_V2. 'legacy'=518x518 (Depth-Anything's geometry, what production shipped); 'metric3d'=616x1064 (Metric3D-v2's own ViT recipe). Must be combined with --ml-canonical-scale to be correct. (default legacy)", cxxopts::value<std::string>()->default_value("legacy"))
+		("ml-input-geometry", "Sprint 11 F0: ML input geometry for METRIC3D_V2. 'legacy'=518x518 (Depth-Anything's geometry, what production shipped); 'metric3d'=616x1064 (Metric3D-v2's own ViT recipe); 'metric3d-nopad'=same letterbox scale but no border (WP1 throughput lever -- **KILLED 2026-09-18**: it breaks the depth scale by -23.3% against KITTI LiDAR, far past the pre-registered 3% limit; retained gated-off as the evidence for that negative result, do NOT enable). Must be combined with --ml-canonical-scale to be correct. (default legacy)", cxxopts::value<std::string>()->default_value("legacy"))
 		("ml-canonical-scale", "Sprint 11 F1: apply Metric3D's canonical->real depth rescale D*fx_eff*letterbox_s/1000. The ONNX graph has no intrinsics input, so this MUST be applied externally and never was — see INTEGRATION_DAMAGE_AUDIT.md D1 (default false)", cxxopts::value<bool>()->default_value("false"))
 		("ml-isotropic-input", "Sprint 11 F2: pre-resize the ML input to square pixels when rectified fx != fy (KITTI ships 368.88/703.52 = 1.9x anisotropic; degrades predicted normals 3.1deg -> 12.5deg) (default false)", cxxopts::value<bool>()->default_value("false"))
 		("ml-foreshortening", "Sprint 2 CD-H5: apply |n·z_hat| foreshortening factor to idepth uncertainty (default true after WIN verdict)", cxxopts::value<bool>()->default_value("true"))
@@ -357,16 +357,19 @@ int main(int argc, char **argv)
 	// Sprint 11 — D0/D1/D2 Metric3D input-geometry and depth-scale correctness
 	{
 		const std::string geom = result["ml-input-geometry"].as<std::string>();
-		if (geom != "legacy" && geom != "metric3d") {
-			printf("ERROR: --ml-input-geometry must be 'legacy' or 'metric3d' (got '%s').\n", geom.c_str());
+		if (geom != "legacy" && geom != "metric3d" && geom != "metric3d-nopad") {
+			printf("ERROR: --ml-input-geometry must be 'legacy', 'metric3d' or 'metric3d-nopad' "
+			       "(got '%s').\n", geom.c_str());
 			return 0;
 		}
-		setting_mlMetric3dRefGeometry = (geom == "metric3d");
+		setting_mlMetric3dRefGeometry = (geom == "metric3d" || geom == "metric3d-nopad");
+		setting_mlNoPadInput          = (geom == "metric3d-nopad");
 	}
 	setting_mlCanonicalScale = result["ml-canonical-scale"].as<bool>();
 	setting_mlIsotropicInput = result["ml-isotropic-input"].as<bool>();
 	printf("[PHASE_CONFIG] ml-input-geometry=%s ml-canonical-scale=%s ml-isotropic-input=%s\n",
-	       setting_mlMetric3dRefGeometry ? "metric3d(616x1064)" : "legacy(518x518)",
+	       setting_mlNoPadInput ? "metric3d-nopad(616x1064 box, no border)"
+	       : setting_mlMetric3dRefGeometry ? "metric3d(616x1064)" : "legacy(518x518)",
 	       setting_mlCanonicalScale ? "on" : "off",
 	       setting_mlIsotropicInput ? "on" : "off");
 	if (setting_mlMetric3dRefGeometry != setting_mlCanonicalScale)

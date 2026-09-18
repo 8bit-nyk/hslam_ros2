@@ -337,6 +337,15 @@ extern bool setting_mlPriorCentredTrace;      // Sprint 12: centre the truncated
 //       3.09deg -> 12.50deg and nearly doubles depth error.
 // CLI: --ml-input-geometry={legacy,metric3d} / --ml-canonical-scale / --ml-isotropic-input
 extern bool setting_mlMetric3dRefGeometry;
+// WP1 throughput lever -- **KILLED 2026-09-18, kept gated off as evidence.**
+// Drops the letterbox border at the same resize scale, so the canonical factor is unchanged
+// and only throughput should move. It does not: against KITTI-07 LiDAR (25 frames, 456k
+// points) median(D_pred*c/D_lidar) falls 1.0060 -> 0.7717, **-23.3%**, versus a
+// pre-registered 3% kill threshold. Metric3D depends on the letterbox context it was
+// trained with. The effect tracks the border removed: 47.9% border -> -23.3%, while the
+// 0.6%-border squeeze arm moves only -0.5%. The earlier ICL estimate of '1.6% scale cost'
+// did not generalise -- ICL is 4:3 with a small border; KITTI's letterbox is half padding.
+extern bool setting_mlNoPadInput;
 extern bool setting_mlCanonicalScale;
 extern bool setting_mlIsotropicInput;
 

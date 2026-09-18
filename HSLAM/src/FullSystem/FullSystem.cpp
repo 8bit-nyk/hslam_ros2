@@ -4818,6 +4818,8 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 		if (setting_mlMetric3dRefGeometry && ml_config.model_type == ML::MLInference::METRIC3D_V2) {
 			ml_config.input_width = 1064;
 			ml_config.input_height = 616;
+			// WP1 lever: same 616x1064 letterbox scale, but no border (see MLInference.cpp).
+			ml_config.no_pad_input = setting_mlNoPadInput;
 		}
 
 		// Sprint 11 / F1+F2: the rectified intrinsics of the image actually handed to ML. ML runs on

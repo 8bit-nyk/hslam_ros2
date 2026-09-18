@@ -447,6 +447,7 @@ float setting_mlIdepthRelQ  = 0.30f;       // measured q0.90|ln(Dpred/Dgt)|: TUM
 
 // Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
 bool setting_mlMetric3dRefGeometry = false;
+bool setting_mlNoPadInput = false;   // WP1 lever; requires setting_mlMetric3dRefGeometry
 bool setting_mlCanonicalScale = false;
 bool setting_mlIsotropicInput = false;
 
