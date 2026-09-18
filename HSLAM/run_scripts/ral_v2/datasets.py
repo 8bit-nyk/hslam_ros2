@@ -75,8 +75,13 @@ def _kitti(seq: str) -> SeqSpec:
 
 def _euroc(seq: str) -> SeqSpec:
     d = DATASET_ROOT / "EuRoC" / seq / "mav0"
+    # The dataset-local cam0/camera.txt is what hslam_run_euroc_*.sh actually passes, and it
+    # differs materially from misc/EuroC/camera.txt: pixel intrinsics + "crop" (DSO computes
+    # the rectified intrinsics at runtime) versus normalized intrinsics with a hardcoded
+    # output of 0.6 0.9 0.5 0.5. They rectify differently, and EuRoC geometry is precisely
+    # what WP3 is auditing -- using the wrong file would silently change the thing measured.
     return SeqSpec("euroc", seq, d / "cam0" / "data", d,
-                   HSLAM_ROOT / "misc" / "EuroC" / "camera.txt",
+                   d / "cam0" / "camera.txt",
                    d / "state_groundtruth_estimate0" / "data.csv",
                    "euroc", 20.0, "body",
                    extrinsics=d / "cam0" / "sensor.yaml")
