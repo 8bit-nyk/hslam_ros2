@@ -12,11 +12,15 @@ Frame conventions that have bitten this project before:
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-DATASET_ROOT = Path("/home/aub/datasets")
+# ~/datasets on BOTH machines. Never hardcode a home directory: the laptop is /home/aub and
+# eval-server is /home/nyk, and the two-machine workflow requires run scripts to be portable
+# (docs/workstation_setup/WORKFLOW.md, "Code + data sync"). HSLAM_DATASETS overrides.
+DATASET_ROOT = Path(os.environ.get("HSLAM_DATASETS", Path.home() / "datasets"))
 HSLAM_ROOT = Path(__file__).resolve().parents[2]
 
 
