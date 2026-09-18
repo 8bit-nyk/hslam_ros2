@@ -5068,7 +5068,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	// way this descriptor exists to prevent.
 	const bool norm_any = (setting_depthSource == DEPTH_SOURCE_ML)
 	                   && !setting_mlNormalChannelOff
-	                   && (setting_useNormalIntegration || setting_useNormalForeshortening
+	                   && (setting_useNormalForeshortening
 	                    || setting_useAngmfConfidence   || setting_useNormalGapfillMask
 	                    || setting_useNormalOptReg      || setting_useNormalPixelGate
 	                    || setting_useNormalIndirectInfo || setting_useDepthNormalBA);
@@ -5076,17 +5076,23 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	const char* arm     = (setting_depthSource == DEPTH_SOURCE_NONE) ? "mono"
 	                    : (setting_depthSource == DEPTH_SOURCE_GT)   ? "gt"
 	                    : (norm_any ? "ml-normals" : "ml-depth");
+	// WP0 (RA-L v2): Indirect.H2 scale-disagreement gate activity. "fires" is the paper quantity --
+	// the count of degenerate Sim3 candidates this gate rejected (65 over 20 KITTI runs on record).
+	printf("[LC_SCALE_GATE] enabled=%s thresh=%.2f evals=%d fires=%d bypass_coverage_low=%d\n",
+	       setting_indirectP2RejectGate ? "on" : "off", setting_indirectP2RejectThresh,
+	       stat_lcScaleGateEvals, stat_lcScaleGateRejects, stat_lcScaleGateBypass);
+
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s nchan=%s geom=%s canon=%s iso=%s "
-	       "norm_integ=%s foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
-	       "p0=%s p1=%s p2=%s p3=%s loop=%s "
+	       "foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
+	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s loop=%s lc_scale_gate=%s "
+	       "ml_gpu=%s fp16=%s model=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
 	       nc_off ? "off" : "on",
 	       setting_mlMetric3dRefGeometry  ? "metric3d" : "legacy",
 	       setting_mlCanonicalScale       ? "on" : "off",
 	       setting_mlIsotropicInput       ? "on" : "off",
-	       (nc_off ? "off" : (setting_useNormalIntegration   ? "on" : "off")),
 	       (nc_off ? "off" : (setting_useNormalForeshortening? "on" : "off")),
 	       (nc_off ? "off" : (setting_useAngmfConfidence     ? "on" : "off")),
 	       (nc_off ? "off" : (setting_useNormalGapfillMask   ? "on" : "off")),
@@ -5098,7 +5104,18 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       setting_enableDirectP1Bounds   ? "on" : "off",
 	       !setting_disableDirectP2BA     ? "on" : "off",
 	       !setting_disableDirectP3Tracker? "on" : "off",
+	       // WP0: the TRUE Direct.P1 ablation. p1_clamps above gates only the clamps.
+	       (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_NONE)     ? "none"
+	       : (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_RELATIVE)? "relative" : "box",
 	       (loopCloser ? "on" : "off"),
+	       // WP0: Indirect.H2 scale-disagreement gate (--p2-gate). This is the RA-L v2 mechanism;
+	       // setting_disableIndirectP2LoopCloser is a different, never-validated gate.
+	       setting_indirectP2RejectGate   ? "on" : "off",
+	       // WP0: --ml-gpu defaults false and --ml-fp16 used to be a no-op, so provenance is recorded
+	       // here: a CPU or fp32 run can no longer be filed as a GPU or fp16 one.
+	       setting_mlGpuRequested         ? "on" : "off",
+	       setting_mlFp16Requested        ? "on" : "off",
+	       setting_mlModelPathResolved.empty() ? "-" : setting_mlModelPathResolved.c_str(),
 	       ml_inference_counter_, kf_count, perf_tracking_frame_count_, status);
 }
 

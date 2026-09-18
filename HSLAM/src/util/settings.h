@@ -188,11 +188,22 @@ extern float setting_vsWeight;           // Direct.VS: weight multiplier (defaul
 
 // ML Depth Integration Settings — Indirect Pipeline (Geometric/ORB)
 // Naming: "Indirect.P0" = MapPoint storage, "Indirect.P1" = BA depth prior, "Indirect.P2" = loop scale validation
-extern bool setting_disableIndirectMLDepth;      // Indirect: Global kill switch for all indirect ML depth
 extern float setting_indirectMLDepthWeight;      // Indirect.P1: Weight multiplier for g2o depth prior edges (INERT — consumer is dead BundleAdjustment)
 extern bool setting_disableIndirectP2LoopCloser; // Indirect.P2: DEPRECATED. Was the original P2 rejection-gate kill-switch; superseded by setting_indirectP2RejectGate below. Retained as-declared for paper-doc traceability but no longer consumed in code.
 extern bool setting_indirectMlSemanticFix;       // Indirect.H0: when true, s_ml in LoopCloser is computed from current-KF ML depth images at matched feature pixels (correct inter-KF scale) instead of source-frame MapPoint ML idepth ratios. Default true. SML_COMPARE diagnostic always prints both regardless of this flag. CLI: --indirect-ml-semantic-fix.
 extern bool setting_indirectP2RejectGate;        // Indirect.H2: when true, reject loop-closure Sim3 candidates with |s_RANSAC − s_ML|/max > setting_indirectP2RejectThresh. Uses new s_ml when available (n≥5), else falls back to old s_ml (n≥5), else bypasses (coverage_low). Default true (shipped May 8, 2026). CLI: --p2-gate.
+// WP0 (RA-L v2): [LC_SCALE_GATE] counters for the Indirect.H2 scale-disagreement gate. Written only
+// by the loop-closure thread; read once at shutdown, after that thread is joined.
+// WP0 (RA-L v2): run provenance captured at PARSE time. A failed ML warmup flips ml_depth_enabled_
+// and a subsequent init reset builds a fresh FullSystem whose ml_config_ is empty, so the live
+// instance cannot be trusted to report what the run was asked to do. These can.
+extern std::string setting_mlModelPathResolved;  // after any --ml-fp16 substitution
+extern bool setting_mlGpuRequested;
+extern bool setting_mlFp16Requested;
+
+extern int stat_lcScaleGateEvals;    // candidate Sim3 reached the gate with usable ML coverage
+extern int stat_lcScaleGateRejects;  // rejected as scale-degenerate (the mechanism firing)
+extern int stat_lcScaleGateBypass;   // skipped: ML coverage < 5 on both estimators
 extern float setting_indirectP2RejectThresh;     // Indirect.H2: disagreement threshold for the gate. Default 0.5 (i.e. reject if |s_RANSAC − s_ML| / max > 50%). CLI: --p2-gate-thresh.
 extern bool setting_indirectH3AbsScalePrior;     // Indirect.H3-abs: per-KF unary EdgeSim3ScalePrior in OptimizeEssentialGraph. Default false (opt-in). Requires bias-corrected s_target (multiplied by setting_indirectH3BiasCorrection); without correction, anchors gauge to Metric3D's biased floor. CLI: --h3-abs.
 extern bool setting_indirectH3RelScalePrior;     // Indirect.H3-rel: pairwise EdgeSim3RelScalePrior (covisible KF pairs) in OptimizeEssentialGraph. Bias cancels by construction, no correction needed. Default false (opt-in). CLI: --h3-rel.
@@ -232,11 +243,13 @@ extern std::string setting_mapPlyOut;    // default "": derive from result file 
 // multi-output IoBinding is active (Sprint 0c). This flag gates any downstream code that
 // READS the normals. Default false until Sprint 2 ships and is validated.
 // CLI: --use-normal-integration
-extern bool setting_useNormalIntegration;
 
 // Sprint 2 — CD-H5: foreshortening factor |n·z_hat| in idepth uncertainty formula.
 // Widens bounds on edge-on surfaces (geometrically ill-conditioned for depth).
 // Default true after Sprint 2 win verdict. CLI: --ml-foreshortening
+// WP0 (RA-L v2): setting_useNormalIntegration and setting_disableIndirectMLDepth were
+// deleted. The first gated no mechanism (parse + printf only); the second had zero
+// consumers anywhere in the tree. Neither was an ablation.
 extern bool setting_useNormalForeshortening;
 
 // Sprint 3 — A.2: κ → AngMF expected-angle confidence formula.

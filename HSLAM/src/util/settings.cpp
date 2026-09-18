@@ -234,7 +234,6 @@ float setting_vsBaseline = 0.1f;         // Direct.VS: virtual baseline in meter
 float setting_vsWeight = 1e-5f;          // Direct.VS: weight multiplier (intentionally inert baseline per fa6af55; Phase C found VS not load-bearing on indoor — proper sweet-spot evaluation pending)
 
 // Indirect Pipeline ML Depth Settings
-bool setting_disableIndirectMLDepth = false;     // Indirect: Global kill switch
 float setting_indirectMLDepthWeight = 0.3f;      // Indirect.P1v2: INERT — consumer is dead BundleAdjustment() in Optimizer.cpp (heap corruption from g2o port; only caller in main.cpp:915 is commented out). See feedback_bundleadjustment_dead_code memory entry.
 bool setting_disableIndirectP2LoopCloser = true; // Indirect.P2: DISABLED BY DEFAULT (May 5, 2026). Loop-closure ML/RANSAC scale-disagreement rejection (commit ea9c5e2) was implemented in LoopCloser.cpp::computeSim3 but the rejection branch was never experimentally validated — only fires when there's a loop closure with ≥30 inliers, observed ~1 event in TUM and 0 in KITTI/EuRoC across all eval runs. Kept in code for paper documentation; gated off pending real loop-closure exposure in evaluation.
 // Indirect.H0 (May 7, 2026): semantic fix for s_ml in LoopCloser::computeSim3. The legacy P2 code computed s_ml as
@@ -260,6 +259,13 @@ bool setting_indirectMlSemanticFix = true;
 // gate-innocent (0 events, recheck cleared the C2 ATE delta as RANSAC noise). Disable via
 // --p2-gate=false. See LOOP_CLOSURE_ML_TEST_PLAN.md §13 verdict.
 bool setting_indirectP2RejectGate = true;
+std::string setting_mlModelPathResolved = "";   // WP0 provenance
+bool setting_mlGpuRequested  = false;
+bool setting_mlFp16Requested = false;
+
+int stat_lcScaleGateEvals   = 0;   // WP0: [LC_SCALE_GATE]
+int stat_lcScaleGateRejects = 0;
+int stat_lcScaleGateBypass  = 0;
 float setting_indirectP2RejectThresh = 0.5f;
 
 // Indirect.H3 (May 8, 2026): per-KF Sim3 scale priors in OptimizeEssentialGraph.
@@ -359,10 +365,12 @@ std::string setting_mapPlyOut = "";  // empty = derive from result file path
 
 // Surface Normal Integration (Sprint 1) — master gate for downstream normal consumers.
 // Default false: normals are plumbed end-to-end but nothing reads them until Sprint 2.
-bool setting_useNormalIntegration = false;
 
 // Sprint 2 — CD-H5: foreshortening factor |n·z_hat| in idepth uncertainty formula.
 // Default true (WIN verdict from Sprint 2 eval on TUM+KITTI). CLI: --ml-foreshortening
+// WP0 (RA-L v2): setting_useNormalIntegration and setting_disableIndirectMLDepth were
+// deleted. The first gated no mechanism (parse + printf only); the second had zero
+// consumers anywhere in the tree. Neither was an ablation.
 bool setting_useNormalForeshortening = true;
 
 // Sprint 3 — A.2: κ → AngMF expected-angle confidence formula.

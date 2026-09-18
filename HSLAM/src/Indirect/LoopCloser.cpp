@@ -557,7 +557,7 @@ namespace HSLAM {
                         // (every-Nth-KF) leaves new with insufficient coverage on this loop pair. Bypass only when
                         // BOTH estimators are < 5 samples — that's true coverage_low. Diagnostic always prints
                         // the gate's decision (REJECTED / ACCEPTED / BYPASS_COVERAGE_LOW) so §6.3 measurement can
-                        // count, per estimator, would-the-gate-have-caught-this. Default off (--p2-gate=false).
+                        // count, per estimator, would-the-gate-have-caught-this. Default ON since cad6539 (--p2-gate=true).
                         if (setting_indirectP2RejectGate && !s1_bypass_h2) {
                             bool mlScaleValid = true;
                             float s_ml_used = -1.f; size_t n_used = 0; const char* source_used = "none";
@@ -574,8 +574,10 @@ namespace HSLAM {
                                        s_optimized, s_ml_used, scale_disagreement * 100.0f,
                                        n_used, source_used, setting_indirectP2RejectThresh,
                                        rejected ? "REJECTED" : "ACCEPTED");
-                                if (rejected) mlScaleValid = false;
+                                ++stat_lcScaleGateEvals;
+                                if (rejected) { mlScaleValid = false; ++stat_lcScaleGateRejects; }
                             } else {
+                                ++stat_lcScaleGateBypass;
                                 printf("[INDIRECT.P2_GATE] cur=%d cand=%d s_ransac=%.3f decision=BYPASS_COVERAGE_LOW n_new=%zu n_old=%zu\n",
                                        (int)currentKF->fs->KfId, (int)pKF->fs->KfId,
                                        s_optimized, ml_ratios_new.size(), ml_ratios_old.size());

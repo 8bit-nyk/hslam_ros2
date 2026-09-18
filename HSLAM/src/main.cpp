@@ -163,8 +163,9 @@ int main(int argc, char **argv)
 		("ml-init", "Enable ML depth for metric scale initialization", cxxopts::value<bool>()->default_value("true"))
 		("depth-source", "Depth source: ml|gt|none (default ml). GT requires --associations and uses the same files as ML depth would be computed from.", cxxopts::value<std::string>()->default_value("ml"))
 		// Phase toggles for the Phase C config matrix (Phase B/C research). Defaults match current production.
-		("p0", "Direct.P0: ML-based metric scale initialization (default: on)", cxxopts::value<bool>()->default_value("true"))
-		("p1", "Direct.P1: ML depth bounds in ImmaturePoint tracing (default: on)", cxxopts::value<bool>()->default_value("true"))
+		("p0", "DEPRECATED alias of --ml-init, kept so older CLI lines still parse. Warns when used.\nUntil WP0 it was a silent NO-OP: setting_useMLForInitialization was re-assigned from --ml-init\nafterwards, so every historical run labelled p0=off actually ran with P0 ON.", cxxopts::value<bool>()->default_value("true"))
+		("p1-clamps", "Direct.P1 CLAMPS ONLY: gates the trace-time bound intersection (ImmaturePoint.cpp) and the\nactivation clamp (FullSystemOptPoint.cpp). It does NOT gate the ML bound write itself, which is\nunconditional in FullSystem.cpp. The TRUE P1 ablation is --ml-idepth-prior=none. (default: on)", cxxopts::value<bool>()->default_value("true"))
+		("p1", "DEPRECATED alias of --p1-clamps, kept so older CLI lines still parse. Warns when used.", cxxopts::value<bool>()->default_value("true"))
 		("p2", "Direct.P2: ML energy term in photometric BA (default: off — memory says structurally dead)", cxxopts::value<bool>()->default_value("false"))
 		("p3", "Direct.P3: ML depth fusion in CoarseTracker (default: off — marginal benefit)", cxxopts::value<bool>()->default_value("false"))
 		("vs", "Direct.VS: virtual stereo in DSO sliding-window BA (default: OFF — futility-tested, no measurable contribution on TUM)", cxxopts::value<bool>()->default_value("false"))
@@ -172,7 +173,6 @@ int main(int argc, char **argv)
 		("depth-scale", "Divisor applied to 16-bit depth PNG values to get meters (TUM=5000; KITTI projected depth we write at 500 for max ~130m range).", cxxopts::value<float>()->default_value("5000.0"))
 		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
-		("use-normal-integration", "Sprint 1 master gate: enable downstream consumers of predicted_normal (default false — normals plumbed but not yet read)", cxxopts::value<bool>()->default_value("false"))
 		("ml-idepth-prior", "Sprint 13: ML inverse-depth prior parameterisation. 'box' (default, shipped: rho +/- absolute u_eff), 'none' (leave DSO's (0,NaN) -- the TRUE Direct.P1 ablation, which --p1 has never performed), 'relative' (log-symmetric D in [D*e^-q, D*e^+q], idepth_min strictly positive). idepth_GT is kept in all three, so only the WIDTH channel changes.", cxxopts::value<std::string>()->default_value("box"))
 		("ml-idepth-rel-q", "Sprint 13: dimensionless log-depth half-width for --ml-idepth-prior=relative. Measured q0.90|ln(Dpred/Dgt)| is 0.21-0.27 on TUM, 0.37 on KITTI, 0.56 on ICL. (default 0.30)", cxxopts::value<float>()->default_value("0.30"))
 		("ml-prior-centred-trace", "Sprint 12: when the epipolar search segment exceeds maxPixSearch, centre the retained window on the ML prediction instead of anchoring it at uMin. Only affects points whose search was already being truncated. (default false)", cxxopts::value<bool>()->default_value("false"))
@@ -271,7 +271,36 @@ int main(int argc, char **argv)
 	
 	// GPU acceleration options (Phase 3)
 	bool ml_gpu_enabled = result["ml-gpu"].as<bool>();
+	setting_mlGpuRequested = ml_gpu_enabled;
+	// WP0: --ml-gpu defaults to FALSE. Every eval script must pass it explicitly; [RUN_SUMMARY]
+	// reports the resolved value and the model actually loaded so a CPU run can never be filed as GPU.
 	bool ml_fp16_enabled = result["ml-fp16"].as<bool>();
+	// WP0: --ml-fp16 used to be a no-op -- it was stored in MLConfig and printed, but nothing ever
+	// read it (no fp16 export was selected, no CUDA provider option was set), so every fps number
+	// ever recorded "with fp16" was really fp32. It now swaps in the sibling fp16 ONNX export.
+	if (ml_fp16_enabled) {
+		const std::string suffix = ".onnx";
+		const std::string fp16_suffix = "_fp16.onnx";
+		if (ml_model_path.size() >= suffix.size() &&
+		    ml_model_path.compare(ml_model_path.size() - suffix.size(), suffix.size(), suffix) == 0 &&
+		    ml_model_path.find(fp16_suffix) == std::string::npos) {
+			const std::string cand = ml_model_path.substr(0, ml_model_path.size() - suffix.size()) + fp16_suffix;
+			std::ifstream probe(cand);
+			if (probe.good()) {
+				printf("[ML_MODEL] --ml-fp16: %s -> %s\n", ml_model_path.c_str(), cand.c_str());
+				ml_model_path = cand;
+			} else {
+				printf("[ML_MODEL] *** WARNING: --ml-fp16 requested but %s does not exist. Running FP32.\n"
+				       "    Do NOT report this run as fp16. ***\n", cand.c_str());
+				ml_fp16_enabled = false;
+			}
+		} else {
+			printf("[ML_MODEL] --ml-fp16: --ml-model already names an explicit file; leaving it alone.\n");
+		}
+	}
+	// WP0: record what actually gets loaded, after any fp16 substitution and its existence check.
+	setting_mlModelPathResolved = ml_model_path;
+	setting_mlFp16Requested     = ml_fp16_enabled;
 	int ml_gpu_device = result["ml-gpu-device"].as<int>();
 	size_t ml_gpu_memory_mb = result["ml-gpu-memory"].as<size_t>();
 	
@@ -290,8 +319,9 @@ int main(int argc, char **argv)
 	if (setting_exportMapPly) outputPC = true;
 
 	// Surface Normal Integration (Sprint 1) — master gate
-	setting_useNormalIntegration = result["use-normal-integration"].as<bool>();
-	printf("[PHASE_CONFIG] use-normal-integration=%s\n", setting_useNormalIntegration ? "on" : "off");
+	// WP0: --use-normal-integration deleted. It gated no mechanism -- its only consumers were this
+	// parse, a printf, and two reporting-only uses in [RUN_SUMMARY]. A flag that turns nothing off is
+	// not an ablation (PAPER_CONFIG_AND_GATES.md section 5).
 
 	// Phase 0 — master normal-channel switch (the A0/A4 control arm)
 	{
@@ -417,8 +447,22 @@ int main(int argc, char **argv)
 
 	// Phase toggles (Phase C matrix). Each flag overrides the settings.cpp default.
 	// Convention: p0/p1/p2/p3/vs = true means enable; settings polarity is flipped per flag.
-	setting_useMLForInitialization = result["p0"].as<bool>();
-	setting_enableDirectP1Bounds   = result["p1"].as<bool>();
+	setting_useMLForInitialization = ml_init_enabled;          // WP0: --ml-init is the P0 switch
+	if (result.count("p0")) {
+		setting_useMLForInitialization = result["p0"].as<bool>();
+		printf("[PHASE_CONFIG] *** WARNING: --p0 is DEPRECATED. Until WP0 it was a silent NO-OP --\n"
+		       "    --ml-init overwrote it afterwards, so every earlier run recorded as p0=off actually\n"
+		       "    ran with P0 ON. It now takes effect. Use --ml-init. ***\n");
+	}
+	// WP0: --p1-clamps is the honest name; --p1 is a deprecated alias. Neither gates the bound WRITE.
+	setting_enableDirectP1Bounds   = result["p1-clamps"].as<bool>();
+	if (result.count("p1")) {
+		setting_enableDirectP1Bounds = result["p1"].as<bool>();
+		printf("[PHASE_CONFIG] *** WARNING: --p1 is DEPRECATED and MISNAMED. It gates only the trace-time\n"
+		       "    intersection and the activation clamp, NOT the ML bound write (FullSystem.cpp), which is\n"
+		       "    unconditional. --p1=false is NOT a P1 ablation. Use --ml-idepth-prior=none for that,\n"
+		       "    or --p1-clamps to gate the clamps deliberately. ***\n");
+	}
 	setting_disableDirectP2BA      = !result["p2"].as<bool>();
 	setting_disableDirectP3Tracker = !result["p3"].as<bool>();
 	setting_disableDirectVS        = !result["vs"].as<bool>();
@@ -554,8 +598,8 @@ int main(int argc, char **argv)
 	fullSystem->setGammaFunction(reader->getPhotometricGamma());
 	fullSystem->linearizeOperation = (playbackSpeed == 0);
 	
-	// Apply ML initialization setting from command line
-	setting_useMLForInitialization = ml_init_enabled;
+	// WP0: setting_useMLForInitialization is assigned once, in the phase-toggle block above, so that
+	// [PHASE_CONFIG] reports the value actually used. This late re-assignment is what made --p0 a no-op.
 
 	if(LoopClosure)
 	{
