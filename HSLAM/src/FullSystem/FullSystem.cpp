@@ -359,12 +359,15 @@ void FullSystem::printResult(std::string file, bool printSim)
 		SE3 Twc = s->getPose();
 		// Twc = s->getPose();
 
-		myfile << s->timestamp <<
-			" " << Twc.translation().transpose()<<
-			" " << Twc.so3().unit_quaternion().x()<<
-			" " << Twc.so3().unit_quaternion().y()<<
-			" " << Twc.so3().unit_quaternion().z()<<
-			" " << Twc.so3().unit_quaternion().w() << "\n";
+		// WP0 (RA-L v2): write strict TUM format -- 8 single-space-separated fields, no trailing
+		// delimiter. Eigen's transpose() pads columns for alignment, which emits runs of spaces and
+		// makes the file unreadable by evo ("must have 8 entries per row"). These trajectories are a
+		// released paper artefact, so they must load in the standard tools without preprocessing.
+		const Eigen::Vector3d t_wc = Twc.translation();
+		const Eigen::Quaterniond q_wc = Twc.so3().unit_quaternion();
+		myfile << s->timestamp
+			<< " " << t_wc.x() << " " << t_wc.y() << " " << t_wc.z()
+			<< " " << q_wc.x() << " " << q_wc.y() << " " << q_wc.z() << " " << q_wc.w() << "\n";
 	}
 	myfile.close();
 }
