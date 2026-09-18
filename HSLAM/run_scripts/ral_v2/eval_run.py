@@ -42,7 +42,7 @@ HSLAM_ROOT = Path(__file__).resolve().parents[2]
 BINARY = HSLAM_ROOT / "build" / "bin" / "HSLAM"
 
 COLUMNS = [
-    "timestamp", "commit", "dirty", "arm", "dataset", "sequence", "rep",
+    "timestamp", "commit", "dirty", "host", "evo_version", "arm", "dataset", "sequence", "rep",
     "returncode", "status", "track_success", "wall_s",
     "frames", "poses", "matched_poses", "keyframes", "ml_inferences",
     "ate_sim3_rmse", "ate_se3_rmse", "scale_s", "scale_drift_pct_per_100m",
@@ -57,6 +57,22 @@ COLUMNS = [
 
 
 # ---------------------------------------------------------------- provenance
+
+def toolchain() -> tuple[str, str]:
+    """Host and evo version, recorded per row.
+
+    The laptop and the eval server carry different evo releases (1.31 vs 1.37). The metrics
+    are stable across them, but a paper number should still name the toolchain that produced
+    it, and a row that cannot say where it ran cannot be reproduced.
+    """
+    import platform
+    try:
+        import evo
+        ver = str(evo.__version__)
+    except Exception:
+        ver = "unknown"
+    return platform.node(), ver
+
 
 def git_commit() -> tuple[str, bool]:
     def g(*a):
@@ -310,6 +326,7 @@ def main() -> int:
 
     arm_args = arms_mod.build(a.arm, spec) + list(a.extra)
     commit, dirty = git_commit()
+    host, evo_ver = toolchain()
     outdir = (HSLAM_ROOT / a.out) if not Path(a.out).is_absolute() else Path(a.out)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -322,8 +339,8 @@ def main() -> int:
         print(f"[{rep}/{a.reps}] {a.arm} {a.dataset} {a.sequence} ...", flush=True)
         r = run_once(spec, arm_args, rep, outdir, a.endindex, a.timeout)
         r.update(timestamp=time.strftime("%Y-%m-%dT%H:%M:%S"), commit=commit,
-                 dirty=int(dirty), arm=a.arm, dataset=a.dataset,
-                 sequence=a.sequence, rep=rep)
+                 dirty=int(dirty), host=host, evo_version=evo_ver, arm=a.arm,
+                 dataset=a.dataset, sequence=a.sequence, rep=rep)
         rows.append(r)
         print(f"     status={r['status']} rc={r['returncode']} "
               f"ate_sim3={r['ate_sim3_rmse']:.4f} s={r['scale_s']:.4f} "
