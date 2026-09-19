@@ -5090,7 +5090,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s nchan=%s geom=%s canon=%s iso=%s "
 	       "foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
-	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s loop=%s lc_scale_gate=%s "
+	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s loop=%s lc_scale_gate=%s "
 	       "ml_gpu=%s fp16=%s model=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
@@ -5112,6 +5112,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       // WP0: the TRUE Direct.P1 ablation. p1_clamps above gates only the clamps.
 	       (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_NONE)     ? "none"
 	       : (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_RELATIVE)? "relative" : "box",
+	       setting_mlFreezeIdepthZero ? "on" : "off",   // WP3c
 	       (loopCloser ? "on" : "off"),
 	       // WP0: Indirect.H2 scale-disagreement gate (--p2-gate). This is the RA-L v2 mechanism;
 	       // setting_disableIndirectP2LoopCloser is a different, never-validated gate.

@@ -91,6 +91,10 @@ _DELTAS: dict[str, list[str]] = {
     # full_diag: the paper config plus the trace/activation statistics printf. The flag is
     #     documented DIAGNOSTIC ONLY (ImmaturePoint.h:99) -- no behavioural effect.
     "full_diag": ["--diag-trace-stats=true"],
+    # WP3c (2026-09-19): the ML linearisation freeze. Shipped behaviour keeps an ML-seeded point's
+    # BA linearisation depth (idepth_zero) at the prior for its whole life; false = stock DSO.
+    "K12": ["--ml-fej-freeze=false"],
+    "K1_K12": ["--ml-idepth-prior=none", "--ml-fej-freeze=false"],
     # Throughput levers (WP1). fp16 is PARKED by decision 2026-09-18: the fp16 graph needs a
     # float16 input tensor that preprocessing does not produce. No fp16 arm is defined here
     # on purpose -- an arm that silently falls back to fp32 would be worse than none.

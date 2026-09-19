@@ -174,6 +174,7 @@ int main(int argc, char **argv)
 		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
 		("ml-idepth-prior", "Sprint 13: ML inverse-depth prior parameterisation. 'box' (default, shipped: rho +/- absolute u_eff), 'none' (leave DSO's (0,NaN) -- the TRUE Direct.P1 ablation, which --p1 has never performed), 'relative' (log-symmetric D in [D*e^-q, D*e^+q], idepth_min strictly positive). idepth_GT is kept in all three, so only the WIDTH channel changes.", cxxopts::value<std::string>()->default_value("box"))
+		("ml-fej-freeze", "WP3c: keep each ML-seeded point's BA linearisation depth (idepth_zero) frozen at the ML prior for its whole life (FullSystemOptPoint.cpp:233, FullSystemOptimize.cpp:304/330/440). true = shipped/paper behaviour; false = stock DSO (idepth_zero follows idepth every step). Default true.", cxxopts::value<bool>()->default_value("true"))
 		("ml-idepth-rel-q", "Sprint 13: dimensionless log-depth half-width for --ml-idepth-prior=relative. Measured q0.90|ln(Dpred/Dgt)| is 0.21-0.27 on TUM, 0.37 on KITTI, 0.56 on ICL. (default 0.30)", cxxopts::value<float>()->default_value("0.30"))
 		("ml-prior-centred-trace", "Sprint 12: when the epipolar search segment exceeds maxPixSearch, centre the retained window on the ML prediction instead of anchoring it at uMin. Only affects points whose search was already being truncated. (default false)", cxxopts::value<bool>()->default_value("false"))
 		("diag-trace-stats", "Emit [TRACE_STATS] (first-epipolar-trace status histogram) and [ACT_STATS] (activated points that never completed a trace, and those with idepth_min<0). Pure instrumentation, no behavioural effect. Measures whether the ML idepth bound is narrowing DSO's search or translating it off the prediction. (default false)", cxxopts::value<bool>()->default_value("false"))
@@ -334,6 +335,8 @@ int main(int argc, char **argv)
 		printf("[PHASE_CONFIG] ml-idepth-prior=%s%s\n", mp.c_str(),
 		       setting_mlIdepthPrior == ML_IDEPTH_PRIOR_RELATIVE ? (" q=" + std::to_string(setting_mlIdepthRelQ)).c_str() : "");
 	}
+	setting_mlFreezeIdepthZero = result["ml-fej-freeze"].as<bool>();
+	printf("[PHASE_CONFIG] ml-fej-freeze=%s\n", setting_mlFreezeIdepthZero ? "on" : "off");
 	setting_mlPriorCentredTrace = result["ml-prior-centred-trace"].as<bool>();
 	if (setting_mlPriorCentredTrace)
 		printf("[PHASE_CONFIG] ml-prior-centred-trace=on\n");

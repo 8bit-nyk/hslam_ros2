@@ -303,7 +303,7 @@ bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,f
 
                 // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors
                 // This preserves both ML reference depth and indirect MapPoint priors
-                if(!ph->hasDepthPrior && !ph->hasMLDepth) {
+                if(!ph->hasDepthPrior && !(ph->hasMLDepth && setting_mlFreezeIdepthZero)) {   // WP3c gate
                     ph->setIdepthZero(ph->idepth_backup + step_ph);
                 }
 			}
@@ -329,7 +329,7 @@ bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,f
 
                 // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors
                 // This preserves both ML reference depth and indirect MapPoint priors  
-                if(!ph->hasDepthPrior && !ph->hasMLDepth) {
+                if(!ph->hasDepthPrior && !(ph->hasMLDepth && setting_mlFreezeIdepthZero)) {   // WP3c gate
                     ph->setIdepthZero(ph->idepth_backup + stepfacD*ph->step);
                 }
 			}
@@ -439,7 +439,7 @@ void FullSystem::loadSateBackup()
 
             // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors during backup restoration
             // This preserves both ML reference depth and indirect MapPoint priors during backtracking
-            if(!ph->hasDepthPrior && !ph->hasMLDepth) {
+            if(!ph->hasDepthPrior && !(ph->hasMLDepth && setting_mlFreezeIdepthZero)) {   // WP3c gate
                 ph->setIdepthZero(ph->idepth_backup);
             }
 		}

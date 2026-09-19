@@ -230,7 +230,9 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 	p->lastResiduals[1].second = ResState::OOB;
 	// For ML depth constraints: set idepth_zero to original ML depth, not optimized depth
 	if(point->idepth_GT > 0) {
-		p->setIdepthZero(point->idepth_GT);  // ML depth as reference for bundle adjustment constraints
+		// WP3c: the shipped behaviour linearises the point at the ML depth for its whole life (see
+		// setting_mlFreezeIdepthZero). --ml-fej-freeze=false restores stock DSO: idepth_zero == idepth.
+		p->setIdepthZero(setting_mlFreezeIdepthZero ? point->idepth_GT : currentIdepth);
 		p->setIdepth(currentIdepth);         // Optimized depth as current estimate
 
 		// DIAG_DIRECT_P0: Log ML reference vs optimized depth alignment at activation
