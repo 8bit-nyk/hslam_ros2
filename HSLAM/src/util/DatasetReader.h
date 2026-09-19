@@ -695,16 +695,37 @@ private:
 				if(timestamps[i] < timestamps[i-1]) { monotonic = false; break; }
 			const double span = timestamps.back() - timestamps.front();
 			const double dt   = timestamps.size() > 1 ? span / (double)(timestamps.size()-1) : 0.0;
-			printf("[TIMESTAMPS] source=%s n=%zu span=%.3fs mean_dt=%.4fs (%.2f Hz) monotonic=%s\n",
+
+			// WP3 (2026-09-18). Monotonicity is not enough: a timestamp source can be perfectly
+			// ordered and still be in the wrong UNIT, which mis-associates every pose exactly as
+			// the KITTI misparse did. EuRoC is the case that forced this -- it ships no
+			// times.txt, so the filename fallback runs stod() on a NANOSECOND filename
+			// ("1403715273262142976.png") and yields 1.4e18 as a value in seconds. Ordered,
+			// non-negative, and completely wrong: mean_dt = 5e7 s instead of 0.05 s.
+			//
+			// So bound mean_dt to what any real visual sequence can be. [1e-4, 10] s is
+			// 0.1 Hz .. 10 kHz -- loose enough that no plausible dataset trips it, tight enough
+			// that a 1e9 unit error cannot hide. Warn, never silently "correct": guessing the
+			// unit is how this family of bug gets planted in the first place.
+			const double DT_MIN = 1e-4, DT_MAX = 10.0;
+			const bool plausible = (dt >= DT_MIN && dt <= DT_MAX);
+
+			printf("[TIMESTAMPS] source=%s n=%zu span=%.3fs mean_dt=%.4fs (%.2f Hz) monotonic=%s plausible=%s\n",
 			       timestampSource.c_str(), timestamps.size(), span, dt,
-			       dt > 0 ? 1.0/dt : 0.0, monotonic ? "yes" : "NO");
+			       dt > 0 ? 1.0/dt : 0.0, monotonic ? "yes" : "NO", plausible ? "yes" : "NO");
 			if(!monotonic)
 				printf("[TIMESTAMPS] *** WARNING: non-monotonic timestamps -- ground-truth "
 				       "association will be wrong. ***\n");
+			if(!plausible)
+				printf("[TIMESTAMPS] *** WARNING: mean_dt %.6gs is outside [%g, %g]s -- the "
+				       "timestamp source is almost certainly in the wrong unit (nanoseconds read "
+				       "as seconds gives ~5e7). Ground-truth association will be wrong. ***\n",
+				       dt, DT_MIN, DT_MAX);
 		}
 		else
 		{
-			printf("[TIMESTAMPS] source=SYNTHETIC n=0 -- getTimestamp() returns id*0.04s (25 Hz).\n"
+			printf("[TIMESTAMPS] source=SYNTHETIC n=0 span=0.000s mean_dt=0.0400s (25.00 Hz) "
+			       "monotonic=yes plausible=NO\n"
 			       "[TIMESTAMPS] *** WARNING: any ATE against real-time ground truth is INVALID. ***\n");
 		}
 

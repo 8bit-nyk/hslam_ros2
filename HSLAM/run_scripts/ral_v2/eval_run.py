@@ -52,6 +52,7 @@ COLUMNS = [
     "lc_gate_enabled", "lc_gate_evals", "lc_gate_fires", "lc_gate_bypass",
     "agreement_gate_fire_rate",
     "geom", "canon", "iso", "idepth_prior", "ml_gpu", "fp16", "model",
+    "ts_source", "ts_hz", "ts_plausible",
     "traj_error", "cli",
 ]
 
@@ -156,6 +157,7 @@ def parse_log(text: str) -> dict:
     d = {k: float("nan") for k in ("pipeline_fps", "track_fps", "ml_ms")}
     d.update(status="", frames=0, keyframes=0, ml_inferences=0,
              geom="", canon="", iso="", idepth_prior="", ml_gpu="", fp16="", model="",
+             ts_source="", ts_hz=float("nan"), ts_plausible="",
              lc_gate_enabled="", lc_gate_evals=0, lc_gate_fires=0, lc_gate_bypass=0,
              agreement_gate_fire_rate=float("nan"))
 
@@ -179,6 +181,14 @@ def parse_log(text: str) -> dict:
                          ("ml_inferences", r"ml_inferences=(\d+)")):
             if (mm := re.search(pat, line)):
                 d[key] = int(mm.group(1))
+
+    # Timestamp provenance (DatasetReader.h). This is a row-level column, not a diagnostic to
+    # grep by hand, because the two worst defects this project has found were both a silently
+    # wrong timestamp source: KITTI's scientific-notation misparse (6799be6) and EuRoC's missing
+    # times.txt, where the filename fallback reads nanoseconds as seconds. Neither crashes.
+    if (m := re.search(r"\[TIMESTAMPS\] source=(\S+)[^\n]*?\(([\d.]+) Hz\)[^\n]*?plausible=(\w+)",
+                       text)):
+        d["ts_source"], d["ts_hz"], d["ts_plausible"] = m.group(1), float(m.group(2)), m.group(3)
 
     if (m := re.search(r"\[LC_SCALE_GATE\][^\n]*", text)):
         line = m.group(0)
@@ -273,6 +283,17 @@ def run_once(spec: ds.SeqSpec, arm_args: list[str], rep: int, outdir: Path,
         if not row["traj_error"]:
             row["traj_error"] = f"status={row['status'] or 'MISSING'} rc={rc}"
 
+    # Rule 1b (WP3): an implausible timestamp source invalidates the row too. The run may have
+    # succeeded and the throughput may be real, but every pose is associated with the wrong
+    # ground-truth pose, so nothing here can enter a table. Fail loudly rather than publish a
+    # number whose error bar is meaningless -- this is the check that KITTI 00 needed and did
+    # not have. `ts_source` / `ts_hz` stay in the row so the cause is visible without the log.
+    if row["ts_plausible"] == "NO":
+        row["pipeline_fps"] = float("nan")
+        row["track_fps"] = float("nan")
+        row["traj_error"] = (f"implausible timestamps: source={row['ts_source'] or 'MISSING'} "
+                             f"{row['ts_hz']:.2f} Hz").strip()
+
     row["capture_hz"] = spec.capture_hz
     fps = row["pipeline_fps"]
     row["realtime"] = "" if fps != fps else ("yes" if fps >= spec.capture_hz else "no")
@@ -289,16 +310,23 @@ def apply_track_success(rows: list[dict]) -> None:
     meaningful when reps were run together -- which is how the protocol calls for it.
     """
     from statistics import median
+
+    # Rule 1b: a row whose timestamps are implausible is not a success even if it tracked the
+    # whole sequence -- its poses are associated with the wrong ground truth. It is also kept
+    # out of the pool, so it cannot move the median that the other reps are judged against.
+    def usable(r: dict) -> bool:
+        return r["status"] == "OK" and r["ts_plausible"] != "NO"
+
     groups: dict[tuple, list[int]] = {}
     for r in rows:
-        if r["status"] == "OK" and r["poses"] > 0:
+        if usable(r) and r["poses"] > 0:
             groups.setdefault((r["dataset"], r["sequence"]), []).append(r["poses"])
     for r in rows:
         pool = groups.get((r["dataset"], r["sequence"]))
         if not pool:
             r["track_success"] = 0
         else:
-            r["track_success"] = int(r["status"] == "OK" and r["poses"] >= 0.7 * median(pool))
+            r["track_success"] = int(usable(r) and r["poses"] >= 0.7 * median(pool))
 
 
 def write_csv(rows: list[dict], path: Path) -> None:
