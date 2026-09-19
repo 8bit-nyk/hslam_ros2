@@ -82,6 +82,13 @@ _DELTAS: dict[str, list[str]] = {
     "S1_alphaw_hi": ["--ml-alpha-w", "40000"],
     "S1_unc_lo": ["--ml-idepth-uncertainty", "0.10"],
     "S1_unc_hi": ["--ml-idepth-uncertainty", "0.70"],
+    # WP3b (EuRoC mechanism investigation, 2026-09-19) -- diagnostic arms, never paper arms.
+    # M1: ML inference at the first keyframe only (metric init), then the backbone runs
+    #     monocular. Isolates "the prior keeps feeding the map" from "the prior sets the scale".
+    "M1_init_only": ["--ml-inference-mode", "1"],
+    # full_diag: the paper config plus the trace/activation statistics printf. The flag is
+    #     documented DIAGNOSTIC ONLY (ImmaturePoint.h:99) -- no behavioural effect.
+    "full_diag": ["--diag-trace-stats=true"],
     # Throughput levers (WP1). fp16 is PARKED by decision 2026-09-18: the fp16 graph needs a
     # float16 input tensor that preprocessing does not produce. No fp16 arm is defined here
     # on purpose -- an arm that silently falls back to fp32 would be worse than none.
