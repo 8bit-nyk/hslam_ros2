@@ -174,6 +174,8 @@ int main(int argc, char **argv)
 		("export-map-ply", "Export marginalized PointHessians to ASCII PLY at end of run (default false)", cxxopts::value<bool>()->default_value("false"))
 		("map-ply-out", "Output path for PLY export (default: same directory as result.txt with .ply extension)", cxxopts::value<std::string>()->default_value(""))
 		("ml-idepth-prior", "Sprint 13: ML inverse-depth prior parameterisation. 'box' (default, shipped: rho +/- absolute u_eff), 'none' (leave DSO's (0,NaN) -- the TRUE Direct.P1 ablation, which --p1 has never performed), 'relative' (log-symmetric D in [D*e^-q, D*e^+q], idepth_min strictly positive). idepth_GT is kept in all three, so only the WIDTH channel changes.", cxxopts::value<std::string>()->default_value("box"))
+		("p1-blend-grad-fix", "WP3e-2: in the Direct.P1 disjoint-bracket blend, use gradH.trace() for the gradient gate instead of the never-assigned gradH_ev (uninitialised memory in the shipped build). Default false = shipped.", cxxopts::value<bool>()->default_value("false"))
+		("ml-init-scale", "WP3e-1: Phase-0 metric factor. 'legacy' (default, shipped): ml_mean_depth / photometricScale; 'median': ml_mean_depth alone (median(D_ML*iR), the factor that puts the founding points at the prior's depth).", cxxopts::value<std::string>()->default_value("legacy"))
 		("ml-prior-source", "WP3d: which depth map seeds a keyframe's new immature points. 'stale' (default, shipped): the previous ML keyframe's map, as currentMLDepthImage is filled on the tracking path before this keyframe's inference; 'fresh': this keyframe's own map when inference ran on it, else stale; 'fresh_only': own map or no prior.", cxxopts::value<std::string>()->default_value("stale"))
 		("ml-fej-freeze", "WP3c: keep each ML-seeded point's BA linearisation depth (idepth_zero) frozen at the ML prior for its whole life (FullSystemOptPoint.cpp:233, FullSystemOptimize.cpp:304/330/440). true = shipped/paper behaviour; false = stock DSO (idepth_zero follows idepth every step). Default true.", cxxopts::value<bool>()->default_value("true"))
 		("ml-idepth-rel-q", "Sprint 13: dimensionless log-depth half-width for --ml-idepth-prior=relative. Measured q0.90|ln(Dpred/Dgt)| is 0.21-0.27 on TUM, 0.37 on KITTI, 0.56 on ICL. (default 0.30)", cxxopts::value<float>()->default_value("0.30"))
@@ -335,6 +337,15 @@ int main(int argc, char **argv)
 		setting_mlIdepthRelQ = result["ml-idepth-rel-q"].as<float>();
 		printf("[PHASE_CONFIG] ml-idepth-prior=%s%s\n", mp.c_str(),
 		       setting_mlIdepthPrior == ML_IDEPTH_PRIOR_RELATIVE ? (" q=" + std::to_string(setting_mlIdepthRelQ)).c_str() : "");
+	}
+	setting_p1BlendGradFix = result["p1-blend-grad-fix"].as<bool>();
+	if (setting_p1BlendGradFix) printf("[PHASE_CONFIG] p1-blend-grad-fix=on\n");
+	{
+		const std::string is = result["ml-init-scale"].as<std::string>();
+		if (is == "legacy") setting_mlInitScaleMedian = false;
+		else if (is == "median") setting_mlInitScaleMedian = true;
+		else { printf("ERROR: --ml-init-scale must be legacy|median (got '%s').\n", is.c_str()); return 0; }
+		printf("[PHASE_CONFIG] ml-init-scale=%s\n", is.c_str());
 	}
 	{
 		const std::string ps = result["ml-prior-source"].as<std::string>();

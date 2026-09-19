@@ -503,7 +503,8 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 	float adaptive_confidence = 1.0f;
 	if(ml_confidence > 0.0f) {
 		float sigma_grad_sq = 50.0f * 50.0f;
-		float grad_mag_sq = gradH_ev[0] + gradH_ev[1];
+		// WP3e-2: gradH_ev is never assigned (uninitialised); gradH.trace() is the intended quantity.
+		float grad_mag_sq = setting_p1BlendGradFix ? gradH.trace() : (gradH_ev[0] + gradH_ev[1]);
 		float grad_gate = std::exp(-grad_mag_sq / sigma_grad_sq);
 		adaptive_confidence = ml_confidence * grad_gate;
 		adaptive_confidence = std::max(0.01f, std::min(1.0f, adaptive_confidence));

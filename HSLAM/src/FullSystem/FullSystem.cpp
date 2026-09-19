@@ -2855,7 +2855,11 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	// DIRECT METRIC INITIALIZATION: Scale translation to metric from start
 	if (usingMetricScale) {
 		// Convert translation to metric scale during initialization
-		float metric_scale_factor = ml_mean_depth / photometricScale;
+		// WP3e-1: the shipped factor divides by photometricScale a second time (see settings.cpp).
+		float metric_scale_factor = setting_mlInitScaleMedian ? ml_mean_depth : ml_mean_depth / photometricScale;
+		printf("[INIT_SCALE_DIAG] photometricScale=%.4f mean_iR=%.4f ml_mean_depth=%.4f metric_scale_factor=%.4f mode=%s\n",
+		       photometricScale, 1.0f / photometricScale, ml_mean_depth, metric_scale_factor,
+		       setting_mlInitScaleMedian ? "median" : "legacy");
 		// printf("[INIT_DIAG] photometricScale=%.6f, metricScaleFactor(median)=%.6f\n", photometricScale, metricScaleFactor);
 		// printf("[INIT_DIAG] metric_scale_factor (ml/photo) = %.6f\n", metric_scale_factor);
 		// printf("[INIT_DIAG] Pre-metric translation norm: %.6f\n", firstToNew.translation().norm());
@@ -2922,8 +2926,8 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		float final_idepth;
 		
 		if (usingMetricScale) {
-			// DIRECT METRIC: Scale inverse depths to metric during initialization
-			float metric_scale_factor = ml_mean_depth / photometricScale;
+			// DIRECT METRIC: Scale inverse depths to metric during initialization (WP3e-1 gate, same as the translation)
+			float metric_scale_factor = setting_mlInitScaleMedian ? ml_mean_depth : ml_mean_depth / photometricScale;
 			final_idepth = original_idepth / metric_scale_factor;  // Inverse depth scales inversely
 			
 			// DEBUG_INIT: Log direct metric approach
@@ -5103,7 +5107,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s nchan=%s geom=%s canon=%s iso=%s "
 	       "foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
-	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s prior_src=%s loop=%s lc_scale_gate=%s "
+	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s prior_src=%s init_scale=%s blend_fix=%s loop=%s lc_scale_gate=%s "
 	       "ml_gpu=%s fp16=%s model=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
@@ -5127,6 +5131,8 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       : (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_RELATIVE)? "relative" : "box",
 	       setting_mlFreezeIdepthZero ? "on" : "off",   // WP3c
 	       setting_mlPriorSource == ML_PRIOR_SRC_STALE ? "stale" : setting_mlPriorSource == ML_PRIOR_SRC_FRESH ? "fresh" : "fresh_only",   // WP3d
+	       setting_mlInitScaleMedian ? "median" : "legacy",   // WP3e-1
+	       setting_p1BlendGradFix ? "on" : "off",   // WP3e-2
 	       (loopCloser ? "on" : "off"),
 	       // WP0: Indirect.H2 scale-disagreement gate (--p2-gate). This is the RA-L v2 mechanism;
 	       // setting_disableIndirectP2LoopCloser is a different, never-validated gate.

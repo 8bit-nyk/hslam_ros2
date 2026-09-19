@@ -456,7 +456,19 @@ bool  setting_mlFreezeIdepthZero = true;
 //   stale      = shipped/paper behaviour
 //   fresh      = own map when inference ran on this keyframe, else the stale one (as before)
 //   fresh_only = own map when inference ran, else NO prior for this keyframe's points
-int   setting_mlPriorSource = ML_PRIOR_SRC_STALE;       // measured q0.90|ln(Dpred/Dgt)|: TUM 0.21-0.27, KITTI 0.37, ICL 0.56
+int   setting_mlPriorSource = ML_PRIOR_SRC_STALE;
+// WP3e-1 (2026-09-19): Phase-0 metric init scales the founding pair by ml_mean_depth / photometricScale, where
+// ml_mean_depth = median(D_ML * iR) already IS the per-point factor that puts the founding points at the
+// prior's depth; dividing by photometricScale (= 1/mean(iR)) applies the mean-inverse-depth normalisation a
+// second time. Measured: the founding segment sits at exp(+0.6) x the later map on MH_01 (= AM/HM of the
+// first frame's prior) and at 0.3-0.5 x on TUM/KITTI/V1/V2, versus 1.0 x for monocular. false = shipped.
+bool  setting_mlInitScaleMedian = false;
+// WP3e-2 (2026-09-19, reviewer B F1): ImmaturePoint.cpp's hybrid-bound 'adaptive confidence' reads gradH_ev,
+// a member that is declared (ImmaturePoint.h) but never assigned anywhere -- uninitialised memory, clamped
+// into [0.01, 1] by luck. It only matters when the ML and photometric brackets are disjoint, i.e. exactly
+// when the prior is wrong. true = use gradH.trace() (the sum of the two eigenvalues, which is what the
+// expression gradH_ev[0]+gradH_ev[1] intends). false = shipped behaviour.
+bool  setting_p1BlendGradFix = false;       // measured q0.90|ln(Dpred/Dgt)|: TUM 0.21-0.27, KITTI 0.37, ICL 0.56
 
 // Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
 bool setting_mlMetric3dRefGeometry = false;

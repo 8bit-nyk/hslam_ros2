@@ -45,4 +45,12 @@ run K13_fresh tum freiburg1_room "$REPS"
 run K13_fresh kitti 07 "$REPS"
 run K12_K13 tum freiburg1_room "$REPS"
 run K12_K13 kitti 07 "$REPS"
+
+# ---------------------------------------------------------------- WP3e-1: Phase-0 init scale (same binary)
+./build/bin/HSLAM --help 2>&1 | grep -q "ml-init-scale" || { echo "ERROR: binary has no --ml-init-scale"; exit 5; }
+for arm in K14_init_median K12_K13_K14; do
+    for seq in MH_01_easy V1_01_easy V2_02_medium; do run "$arm" euroc "$seq" "$REPS"; done
+    run "$arm" tum freiburg1_room "$REPS"
+    run "$arm" kitti 07 "$REPS"
+done
 echo "=== WP3c+WP3d done: $(date) ==="

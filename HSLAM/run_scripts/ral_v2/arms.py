@@ -102,6 +102,17 @@ _DELTAS: dict[str, list[str]] = {
     "K13_fresh_only": ["--ml-prior-source=fresh_only"],
     "K12_K13": ["--ml-fej-freeze=false", "--ml-prior-source=fresh"],
     "K12_K13_n1": ["--ml-fej-freeze=false", "--ml-prior-source=fresh", "--ml-inference-every-n", "1"],
+    # WP3e-1 (2026-09-19, reviewer finding F1): Phase-0 metric factor without the second division
+    # by photometricScale, so the founding pair sits at the prior's scale like every later point.
+    "K14_init_median": ["--ml-init-scale=median"],
+    "K12_K13_K14": ["--ml-fej-freeze=false", "--ml-prior-source=fresh", "--ml-init-scale=median"],
+    "K12_K14": ["--ml-fej-freeze=false", "--ml-init-scale=median"],
+    "K1_K12_K14": ["--ml-idepth-prior=none", "--ml-fej-freeze=false", "--ml-init-scale=median"],
+    # WP3f: replace the hidden pull (freeze) by the EXPLICIT weighted prior term (Direct.P2, --p2=true)
+    "K12_P2": ["--ml-fej-freeze=false", "--p2=true"],
+    "K12_K14_P2": ["--ml-fej-freeze=false", "--ml-init-scale=median", "--p2=true"],
+    # WP3e-2 (reviewer B F1): the disjoint-bracket blend on a defined gradient instead of garbage
+    "K15_blendfix": ["--p1-blend-grad-fix=true"],
     # Throughput levers (WP1). fp16 is PARKED by decision 2026-09-18: the fp16 graph needs a
     # float16 input tensor that preprocessing does not produce. No fp16 arm is defined here
     # on purpose -- an arm that silently falls back to fp32 would be worse than none.
