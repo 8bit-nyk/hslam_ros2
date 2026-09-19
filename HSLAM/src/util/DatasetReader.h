@@ -553,6 +553,8 @@ private:
 	 * Will also load exposures if provided
 	 * 
 	 */
+	std::string timestampSource = "none";
+
 	inline void loadTimestamps()
 	{
 		std::ifstream tr;
@@ -568,18 +570,48 @@ private:
 			double stamp;
 			float exposure = 0;
 
-			if(3 == sscanf(buf, "%lld %lf %f", &id, &stamp, &exposure))
+			// WP1 FIX (2026-09-18). The old code went straight to sscanf("%lld %lf"), which
+			// SILENTLY CORRUPTS KITTI's stock single-column times.txt. On "4.705816e+02" the
+			// %lld consumes the leading "4" and the %lf then reads ".705816e+02" = 70.5816,
+			// so sscanf returns 2 and the value is accepted as a timestamp -- 470.5816 s of
+			// sequence became 70.58 s. Nothing warned, because timestamps.size() != 0 so the
+			// synthetic fallback in getTimestamp() never fired either.
+			//
+			// KITTI ships times.txt as one bare timestamp per line; only sequences whose file
+			// had been converted to "<id> <stamp>" (07, here) were ever evaluated against the
+			// right ground-truth poses.
+			//
+			// So: count whitespace-separated tokens FIRST, then parse by count.
+			int ntok = 0;
+			for (const char* c = buf; *c; )
 			{
-                ids.push_back(id);
-				timestamps.push_back(stamp);
-				exposures.push_back(exposure);
+				while (*c == ' ' || *c == '\t') ++c;
+				if (!*c) break;
+				++ntok;
+				while (*c && *c != ' ' && *c != '\t') ++c;
 			}
 
-			else if(2 == sscanf(buf, "%lld %lf", &id, &stamp))
+			if(ntok >= 3 && 3 == sscanf(buf, "%lld %lf %f", &id, &stamp, &exposure))
 			{
                 ids.push_back(id);
 				timestamps.push_back(stamp);
 				exposures.push_back(exposure);
+				timestampSource = "times.txt(3col)";
+			}
+			else if(ntok == 2 && 2 == sscanf(buf, "%lld %lf", &id, &stamp))
+			{
+                ids.push_back(id);
+				timestamps.push_back(stamp);
+				exposures.push_back(exposure);
+				timestampSource = "times.txt(2col)";
+			}
+			else if(ntok == 1 && 1 == sscanf(buf, "%lf", &stamp))
+			{
+				// Bare timestamp per line (stock KITTI). The line index IS the frame id.
+				ids.push_back((long long)timestamps.size());
+				timestamps.push_back(stamp);
+				exposures.push_back(exposure);
+				timestampSource = "times.txt(1col)";
 			}
 		}
 		tr.close();
@@ -647,6 +679,33 @@ private:
 				printf("Filename timestamp extraction failed, using default timestamps\n");
 				timestamps.clear();
 			}
+			else
+				timestampSource = "filenames";
+		}
+
+		// WP1 (2026-09-18): report the FINAL timestamp source and rate, after the filename
+		// fallback. A wrong times.txt never crashes -- it quietly mis-associates every pose with
+		// ground truth, which is exactly how the KITTI scientific-notation misparse survived
+		// unnoticed. Placed here, not in the parse loop, so TUM (which legitimately has no
+		// times.txt and reads stamps from filenames) is not reported as broken.
+		if(!timestamps.empty())
+		{
+			bool monotonic = true;
+			for(size_t i=1;i<timestamps.size();++i)
+				if(timestamps[i] < timestamps[i-1]) { monotonic = false; break; }
+			const double span = timestamps.back() - timestamps.front();
+			const double dt   = timestamps.size() > 1 ? span / (double)(timestamps.size()-1) : 0.0;
+			printf("[TIMESTAMPS] source=%s n=%zu span=%.3fs mean_dt=%.4fs (%.2f Hz) monotonic=%s\n",
+			       timestampSource.c_str(), timestamps.size(), span, dt,
+			       dt > 0 ? 1.0/dt : 0.0, monotonic ? "yes" : "NO");
+			if(!monotonic)
+				printf("[TIMESTAMPS] *** WARNING: non-monotonic timestamps -- ground-truth "
+				       "association will be wrong. ***\n");
+		}
+		else
+		{
+			printf("[TIMESTAMPS] source=SYNTHETIC n=0 -- getTimestamp() returns id*0.04s (25 Hz).\n"
+			       "[TIMESTAMPS] *** WARNING: any ATE against real-time ground truth is INVALID. ***\n");
 		}
 
 		if((int)getNumImages() != (int)exposures.size() || !exposuresGood)
