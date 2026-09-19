@@ -228,6 +228,7 @@ def run_once(spec: ds.SeqSpec, arm_args: list[str], rep: int, outdir: Path,
            "--calib", str(spec.calib),
            "--vocab", str(HSLAM_ROOT / "misc" / "orbvoc.dbow3"),
            "--colour", "--nogui=true", "--nolog", "--loopclosure",
+           *spec.extra_cli,            # dataset-level flags (photometric calibration), before the arm
            *arm_args]
     if use_assoc:
         cli += ["--associations", str(spec.associations)]

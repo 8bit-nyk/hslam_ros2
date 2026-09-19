@@ -52,6 +52,7 @@ class SeqSpec(NamedTuple):
     extrinsics: Optional[Path] = None   # cam0/sensor.yaml when gt_frame == "body"
     associations: Optional[Path] = None
     needs_associations: bool = False    # True only where ordering demands it (ICL-NUIM)
+    extra_cli: tuple = ()               # dataset-level HSLAM flags (photometric calibration files)
 
 
 def _tum(seq: str) -> SeqSpec:
@@ -96,7 +97,31 @@ def _icl(seq: str) -> SeqSpec:
                    associations=d / "associations.txt", needs_associations=True)
 
 
-_BUILDERS = {"tum": _tum, "kitti": _kitti, "euroc": _euroc, "iclnuim": _icl}
+def _tummonovo(seq: str) -> SeqSpec:
+    """TUM mono-VO (Engel et al. 2016): wide-FOV global-shutter grayscale handheld camera with
+    full photometric calibration. WP3b's camera-class test -- it shares EuRoC's camera class
+    (wide FOV, grayscale, global shutter) but not its MAV motion or Vicon-room content.
+
+    Ground truth covers only the mocap-tracked start and end segments (NaN elsewhere);
+    groundtruth_clean.txt is groundtruthSync.txt with the NaN rows dropped, so Sim(3) ATE here
+    is the classic mono-VO "alignment error" -- drift between the two segments -- not a full-
+    trajectory ATE. Both arms are judged on the same thing, so the ratio is still meaningful.
+    times.txt is the 3-column DSO form (id stamp exposure), which the reader parses natively.
+
+    Photometric calibration is NOT used, deliberately: HSLAM's PhotometricUndistorter checks the
+    vignette against the RECTIFIED size (640x480) instead of the sensor size (1280x1024) and
+    aborts ("Invalid vignette image size", observed 2026-09-19), so --mode 0 cannot run without a
+    source change. Both arms run --mode 1 (no photometric calibration), the same mode every other
+    dataset in this pipeline uses, so the mono-vs-ML ratio is unaffected; absolute numbers are
+    not comparable with DSO's published mono-VO results.
+    """
+    d = DATASET_ROOT / "TUM_monoVO" / seq
+    return SeqSpec("tummonovo", seq, d / "images", d, d / "camera.txt",
+                   d / "groundtruth_clean.txt", "tum", 21.0, "camera")
+
+
+_BUILDERS = {"tum": _tum, "kitti": _kitti, "euroc": _euroc, "iclnuim": _icl,
+             "tummonovo": _tummonovo}
 
 
 def resolve(dataset: str, sequence: str) -> SeqSpec:

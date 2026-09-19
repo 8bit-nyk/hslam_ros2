@@ -30,7 +30,9 @@ HSLAM_ROOT = Path(__file__).resolve().parents[2]
 MODEL = HSLAM_ROOT / "models" / "metric3d-vit-small" / "onnx" / "model.onnx"
 
 # Cameras whose rectified fx != fy need the isotropic pre-resize (Sprint 11 F2).
-_NON_SQUARE_PIXEL_DATASETS = {"kitti", "euroc"}
+# TUM mono-VO's FOV-model rectification also lands at fx != fy (277.34 / 291.40, ratio 0.952 --
+# observed 2026-09-19 in [ML_GEOM]); the rule is calibration-derived, so it joins the set.
+_NON_SQUARE_PIXEL_DATASETS = {"kitti", "euroc", "tummonovo"}
 
 # --- the paper configuration (provisional until G1) ---------------------------------------
 PAPER_CONFIG = [
