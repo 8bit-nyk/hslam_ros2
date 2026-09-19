@@ -2079,6 +2079,7 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	// =================== ABLATION STUDY: ML FREQUENCY CONTROL ===================
 	// Increment keyframe counter for ablation tracking
 	keyframe_counter_++;
+	bool mlRanThisKF = false;   // WP3d: did THIS keyframe get its own inference?
 	
 	// Determine if ML inference should run based on strategy
 	bool should_run_ml = false;
@@ -2193,6 +2194,15 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 					fh->setMLDepth(ml_result.depth_map, ml_result.confidence, ml_result.inference_time_ms,
 				               ml_result.confidence_map, ml_result.normal_map);  // Sprint 1: pass normal map
 					fh->setMLPending(false);  // Clear pending flag
+					mlRanThisKF = true;
+					if (setting_mlPriorSource != ML_PRIOR_SRC_STALE) {
+						// WP3d: seed THIS keyframe's points from its OWN map. The shipped path leaves
+						// currentMLDepthImage as the tracking thread filled it: the previous ML keyframe's map.
+						cv::Mat own = ml_result.depth_map;
+						if (own.cols != wG[0] || own.rows != hG[0])
+							cv::resize(own, own, cv::Size(wG[0], hG[0]), 0, 0, cv::INTER_LINEAR);
+						currentMLDepthImage = own;
+					}
 					
 					// Update ML visualization immediately
 					for (IOWrap::Output3DWrapper *ow : outputWrapper) {
@@ -2591,6 +2601,9 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	{
 		cv::Mat depthForTraces;
 		const char* modeLabel = "NONE";
+		// WP3d: fresh_only -- a keyframe without its own inference gets no prior at all.
+		if (setting_mlPriorSource == ML_PRIOR_SRC_FRESH_ONLY && !mlRanThisKF)
+			currentMLDepthImage = cv::Mat();
 		if (setting_depthSource == DEPTH_SOURCE_ML) {
 			if (!currentMLDepthImage.empty() && initialized) {
 				depthForTraces = currentMLDepthImage;
@@ -5090,7 +5103,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s nchan=%s geom=%s canon=%s iso=%s "
 	       "foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
-	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s loop=%s lc_scale_gate=%s "
+	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s prior_src=%s loop=%s lc_scale_gate=%s "
 	       "ml_gpu=%s fp16=%s model=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
@@ -5113,6 +5126,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_NONE)     ? "none"
 	       : (setting_mlIdepthPrior == ML_IDEPTH_PRIOR_RELATIVE)? "relative" : "box",
 	       setting_mlFreezeIdepthZero ? "on" : "off",   // WP3c
+	       setting_mlPriorSource == ML_PRIOR_SRC_STALE ? "stale" : setting_mlPriorSource == ML_PRIOR_SRC_FRESH ? "fresh" : "fresh_only",   // WP3d
 	       (loopCloser ? "on" : "off"),
 	       // WP0: Indirect.H2 scale-disagreement gate (--p2-gate). This is the RA-L v2 mechanism;
 	       // setting_disableIndirectP2LoopCloser is a different, never-validated gate.

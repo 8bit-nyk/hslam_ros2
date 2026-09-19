@@ -320,6 +320,8 @@ extern bool setting_diagTraceStats;
 enum MLIdepthPrior { ML_IDEPTH_PRIOR_BOX = 0, ML_IDEPTH_PRIOR_NONE = 1, ML_IDEPTH_PRIOR_RELATIVE = 2 };
 extern int   setting_mlIdepthPrior;           // Sprint 13: box (shipped) | none (true P1 ablation) | relative
 extern float setting_mlIdepthRelQ;            // Sprint 13: log-depth half-width for the relative arm
+enum MLPriorSource { ML_PRIOR_SRC_STALE = 0, ML_PRIOR_SRC_FRESH = 1, ML_PRIOR_SRC_FRESH_ONLY = 2 };
+extern int   setting_mlPriorSource;           // WP3d: which inference seeds a keyframe's new points (shipped: stale = the previous ML keyframe's map)
 extern bool  setting_mlFreezeIdepthZero;      // WP3c: keep an ML point's BA linearisation depth (idepth_zero) frozen at the prior (shipped: true)
 extern bool setting_mlPriorCentredTrace;      // Sprint 12: centre the truncated epipolar window on rho_ML           // [TRACE_STATS]/[ACT_STATS] diagnostics; no behavioural effect
 

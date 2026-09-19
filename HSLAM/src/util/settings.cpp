@@ -448,7 +448,15 @@ float setting_mlIdepthRelQ  = 0.30f;
 // updates it for hasMLDepth points (FullSystemOptimize.cpp), so the photometric Jacobian (Residuals.cpp:134)
 // is evaluated at the PRIOR's depth for the point's whole life and deltaF = idepth - idepth_ML. Stock DSO
 // re-sets idepth_zero to idepth at every step. true = shipped behaviour (paper config); false = DSO's.
-bool  setting_mlFreezeIdepthZero = true;       // measured q0.90|ln(Dpred/Dgt)|: TUM 0.21-0.27, KITTI 0.37, ICL 0.56
+bool  setting_mlFreezeIdepthZero = true;
+// WP3d (2026-09-19): makeNewTracesWithMLDepth() reads currentMLDepthImage, which TrackMonocularWithML fills
+// from ml_reference_depth_ BEFORE this keyframe's own inference runs -- so a keyframe's points are seeded
+// from the PREVIOUS ML keyframe's map, sampled at the current pixel coordinates without warping. The
+// keyframe's own map is stored in the FrameHessian and never used for its own points.
+//   stale      = shipped/paper behaviour
+//   fresh      = own map when inference ran on this keyframe, else the stale one (as before)
+//   fresh_only = own map when inference ran, else NO prior for this keyframe's points
+int   setting_mlPriorSource = ML_PRIOR_SRC_STALE;       // measured q0.90|ln(Dpred/Dgt)|: TUM 0.21-0.27, KITTI 0.37, ICL 0.56
 
 // Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
 bool setting_mlMetric3dRefGeometry = false;

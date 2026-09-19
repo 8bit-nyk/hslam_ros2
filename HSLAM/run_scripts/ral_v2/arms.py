@@ -95,6 +95,13 @@ _DELTAS: dict[str, list[str]] = {
     # BA linearisation depth (idepth_zero) at the prior for its whole life; false = stock DSO.
     "K12": ["--ml-fej-freeze=false"],
     "K1_K12": ["--ml-idepth-prior=none", "--ml-fej-freeze=false"],
+    # WP3d (2026-09-19): which inference seeds a keyframe's points. Shipped = the previous ML
+    # keyframe's map sampled at the current pixels (no warp); fresh = the keyframe's own map.
+    "K13_fresh": ["--ml-prior-source=fresh"],
+    "K13_fresh_n1": ["--ml-prior-source=fresh", "--ml-inference-every-n", "1"],   # every KF gets its own map
+    "K13_fresh_only": ["--ml-prior-source=fresh_only"],
+    "K12_K13": ["--ml-fej-freeze=false", "--ml-prior-source=fresh"],
+    "K12_K13_n1": ["--ml-fej-freeze=false", "--ml-prior-source=fresh", "--ml-inference-every-n", "1"],
     # Throughput levers (WP1). fp16 is PARKED by decision 2026-09-18: the fp16 graph needs a
     # float16 input tensor that preprocessing does not produce. No fp16 arm is defined here
     # on purpose -- an arm that silently falls back to fp32 would be worse than none.

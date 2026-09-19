@@ -35,4 +35,14 @@ for seq in MH_01_easy V1_01_easy V2_02_medium; do run K12 euroc "$seq" "$REPS"; 
 run K12 tum freiburg1_room "$REPS"
 run K12 kitti 07 "$REPS"
 for seq in MH_01_easy V1_01_easy V2_02_medium; do run K1_K12 euroc "$seq" "$REPS"; done
-echo "=== WP3c done: $(date) ==="
+
+# ---------------------------------------------------------------- WP3d: the prior's source (same binary)
+./build/bin/HSLAM --help 2>&1 | grep -q "ml-prior-source" || { echo "ERROR: binary has no --ml-prior-source"; exit 5; }
+for arm in K13_fresh K13_fresh_n1 K12_K13 K12_K13_n1; do
+    for seq in MH_01_easy V1_01_easy V2_02_medium; do run "$arm" euroc "$seq" "$REPS"; done
+done
+run K13_fresh tum freiburg1_room "$REPS"
+run K13_fresh kitti 07 "$REPS"
+run K12_K13 tum freiburg1_room "$REPS"
+run K12_K13 kitti 07 "$REPS"
+echo "=== WP3c+WP3d done: $(date) ==="
