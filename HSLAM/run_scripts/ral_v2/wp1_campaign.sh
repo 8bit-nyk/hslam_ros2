@@ -56,21 +56,25 @@ rows = [r for r in csv.DictReader(open(sys.argv[1]))
         if r["status"] == "OK" and r["track_success"] == "1"]
 key = lambda r: (r["arm"], r["dataset"], r["sequence"])
 CAP = {"tum": 30.0, "kitti": 10.0}
+# P4b throughput tolerance: a knife-edge "fps >= capture" is not meaningful when fps has ~1 fps
+# of run-to-run spread. Claim real-time at >= 95% of capture, and always print the raw numbers.
+TOL = 0.95
 groups = {}
 for r in rows:
     groups.setdefault(key(r), []).append(r)
 
 print(f"{'arm':7s} {'seq':20s} {'n':>3s} {'ATE_sim3':>9s} {'IQR':>7s} {'ATE_se3':>9s} "
-      f"{'scale':>7s} {'fps':>6s} {'rt':>4s}")
+      f"{'scale':>7s} {'fps':>6s} {'rt':>4s} {'ofcap':>7s}")
 for k in sorted(groups):
     g = groups[k]
     med = lambda f: st.median(float(r[f]) for r in g)
     s = sorted(float(r["ate_sim3_rmse"]) for r in g)
     iqr = s[3*len(s)//4] - s[len(s)//4] if len(s) > 3 else float("nan")
     fps = med("pipeline_fps")
-    rt = "yes" if fps >= CAP[k[1]] else "NO"
+    ratio = fps / CAP[k[1]]
+    rt = "yes" if ratio >= TOL else "NO"
     print(f"{k[0]:7s} {k[1]+' '+k[2]:20s} {len(g):3d} {med('ate_sim3_rmse'):9.4f} {iqr:7.4f} "
-          f"{med('ate_se3_rmse'):9.4f} {med('scale_s'):7.4f} {fps:6.2f} {rt:>4s}")
+          f"{med('ate_se3_rmse'):9.4f} {med('scale_s'):7.4f} {fps:6.2f} {rt:>4s} {100*ratio:6.1f}%")
 
 # G1 rule 2: cadence 3 ships only if scale stays in [0.85,1.15] on fr1_room and k07 and ATE
 # moves less than noise. Reported, not decided here -- the verdict goes in DECISIONS.md.
