@@ -29,9 +29,33 @@
 #include "vector"
 #include <math.h>
 #include "OptimizationBackend/RawResidualJacobian.h"
+#include "util/settings.h"
+#include <algorithm>
 
 namespace HSLAM
 {
+
+// WP2c: the explicit Direct.P2 prior weight, shared by EFPoint::takeData (Hessian/gradient) and
+// EnergyFunctional::calcLEnergyF_MT (energy) so the two sites cannot diverge.
+//   legacy (shipped; setting_mlPriorWeightMult == 1 and setting_mlPriorGateK == 0):
+//     w = conf * (1/sigma^2) * exp(-r^2 / (2 tau^2)),  tau = setting_mlSelfGateTau (0.01 1/m),
+//     conf = ml_weight / setting_mlDepthWeight (unclamped: init-path points carry ml_weight = 2500).
+//   v2 (either flag set): conf clamped to [0.1, 1], tau_i = k * sigma_i when k > 0, and the result
+//     multiplied by setting_mlPriorWeightMult. r = idepth - prior (inverse depth), sigma = the point's
+//     prior half-width in inverse depth (the P1 box), so w * r^2 is dimensionless.
+inline float mlPriorWeight(float idepth, float ml_ref, float ml_sigma, float ml_weight, float* self_gate_out = nullptr)
+{
+	const bool v2 = (setting_mlPriorWeightMult != 1.0f) || (setting_mlPriorGateK > 0.0f);
+	float ml_residual = idepth - ml_ref;
+	float tau = (v2 && setting_mlPriorGateK > 0.0f) ? setting_mlPriorGateK * ml_sigma : setting_mlSelfGateTau;
+	float self_gate = std::exp(-ml_residual * ml_residual / (2.0f * tau * tau));
+	if (self_gate_out) *self_gate_out = self_gate;
+	float uncertainty_weight = 1.0f / (ml_sigma * ml_sigma);
+	float ml_conf = (ml_weight > 0) ? (ml_weight / setting_mlDepthWeight) : 0.5f;
+	if (v2) ml_conf = std::min(1.0f, std::max(0.1f, ml_conf));
+	float w_ML = ml_conf * uncertainty_weight * self_gate;
+	return v2 ? w_ML * setting_mlPriorWeightMult : w_ML;
+}
 
 class PointFrameResidual;
 class CalibHessian;

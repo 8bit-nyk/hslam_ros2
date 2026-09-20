@@ -434,11 +434,9 @@ double EnergyFunctional::calcLEnergyF_MT()
 			if(p->data->hasMLDepth && p->data->ml_weight > 0 && !setting_disableDirectP2BA) {
 				// Paper Eq. 5: self-gating weight matching Hessian formulation
 				float ml_residual = p->data->idepth - p->ml_reference;
-				float tau = setting_mlSelfGateTau;
-				float self_gate = std::exp(-ml_residual * ml_residual / (2.0f * tau * tau));
-				float uncertainty_weight = 1.0f / (p->ml_sigma * p->ml_sigma);
-				float ml_conf = (p->data->ml_weight > 0) ? (p->data->ml_weight / setting_mlDepthWeight) : 0.5f;
-				float w_ML = ml_conf * uncertainty_weight * self_gate;
+				// WP2c: same helper as EFPoint::takeData
+				float self_gate = 0.0f;
+				float w_ML = mlPriorWeight(p->data->idepth, p->ml_reference, p->ml_sigma, p->data->ml_weight, &self_gate);
 
 				ml_energy += w_ML * ml_residual * ml_residual;
 				ml_constraints++;

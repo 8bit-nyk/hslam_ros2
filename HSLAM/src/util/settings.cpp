@@ -449,6 +449,11 @@ float setting_mlIdepthRelQ  = 0.30f;
 // is evaluated at the PRIOR's depth for the point's whole life and deltaF = idepth - idepth_ML. Stock DSO
 // re-sets idepth_zero to idepth at every step. true = shipped behaviour (paper config); false = DSO's.
 bool  setting_mlFreezeIdepthZero = true;
+// WP2c: explicit prior weight / self-gate / keyframe gate / activation seed. Defaults = shipped behaviour.
+float setting_mlPriorWeightMult = 1.0f;
+float setting_mlPriorGateK = 0.0f;
+float setting_mlAlignGateThr = 0.0f;
+int   setting_mlSeedMode = ML_SEED_PRIOR;
 // WP3d (2026-09-19): makeNewTracesWithMLDepth() reads currentMLDepthImage, which TrackMonocularWithML fills
 // from ml_reference_depth_ BEFORE this keyframe's own inference runs -- so a keyframe's points are seeded
 // from the PREVIOUS ML keyframe's map, sampled at the current pixel coordinates without warping. The

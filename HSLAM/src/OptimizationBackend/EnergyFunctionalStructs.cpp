@@ -91,12 +91,8 @@ void EFPoint::takeData()
 	if (data->hasMLDepth && !setting_disableDirectP2BA) {
 		// Paper Eq. 5: uncertainty-aware self-gating weight
 		// Recomputed each call so self-gating tracks current idepth during BA iterations
-		float ml_residual = data->idepth - data->ml_idepth_reference;
-		float tau = setting_mlSelfGateTau;
-		float self_gate = std::exp(-ml_residual * ml_residual / (2.0f * tau * tau));
-		float uncertainty_weight = 1.0f / (ml_sigma * ml_sigma);
-		float ml_conf = (data->ml_weight > 0) ? (data->ml_weight / setting_mlDepthWeight) : 0.5f;
-		float w_ML = ml_conf * uncertainty_weight * self_gate;
+		// WP2c: weight computed by the shared helper (legacy arithmetic when the WP2c flags are at default)
+		float w_ML = mlPriorWeight(data->idepth, data->ml_idepth_reference, ml_sigma, data->ml_weight);
 		ml_priorF = w_ML * SCALE_IDEPTH * SCALE_IDEPTH;
 		ml_reference = data->ml_idepth_reference;
 	} else {

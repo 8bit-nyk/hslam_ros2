@@ -131,6 +131,32 @@ _DELTAS: dict[str, list[str]] = {
     "gt_depth": ["--depth-source=gt"],
 }
 
+# --- WP2c (2026-09-19): the explicit weighted, gated prior in place of the linearisation freeze ---
+# Base of every 2c arm: freeze OFF, Direct.P2 ON, plus the integration-hygiene fixes that pass WP2a.
+# _HYGIENE is PROVISIONAL until WP2a's verdict is in DECISIONS.md (it is fixed there before the first
+# 2c run); the pre-registration text names the final list.
+_HYGIENE = ["--ml-prior-source=fresh", "--ml-init-scale=median", "--p1-blend-grad-fix=true"]
+_C_BASE = ["--ml-fej-freeze=false", "--p2=true"]
+
+
+def _c_arm(w, k, seed=None, gate=None):
+    """--ml-prior-weight w, --ml-prior-gate-k k (0 = legacy tau, >=100 = no self-gate)."""
+    d = list(_C_BASE) + list(_HYGIENE) + ["--ml-prior-weight", str(w), "--ml-prior-gate-k", str(k)]
+    if seed:
+        d += ["--ml-seed", seed]
+    if gate is not None:
+        d += ["--ml-align-gate", str(gate)]
+    return d
+
+
+for _w in (1, 10, 100, 1000):
+    for _k, _kl in ((1, "k1"), (3, "k3"), (1000, "knone")):
+        _DELTAS[f"C_w{_w}_{_kl}"] = _c_arm(_w, _k)
+_DELTAS["C_w100_k0"] = _c_arm(100, 0)                       # legacy absolute tau, strong weight
+_DELTAS["C_base"] = list(_C_BASE) + list(_HYGIENE)         # freeze off + P2 legacy + hygiene (= K12_K13_K14 + blend + P2)
+_DELTAS["C_hyg_only"] = ["--ml-fej-freeze=false"] + list(_HYGIENE)   # freeze off, no explicit prior
+# seed variants and the gated candidate are appended once the weight sweep picks (w, k) -- see DECISIONS.md.
+
 ARMS = ["A0"] + [k for k in _DELTAS if k != "A0"]
 
 

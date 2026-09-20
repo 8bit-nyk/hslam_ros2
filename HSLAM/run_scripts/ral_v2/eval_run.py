@@ -51,6 +51,7 @@ COLUMNS = [
     "peak_gpu_mb", "peak_cpu_mb",
     "lc_gate_enabled", "lc_gate_evals", "lc_gate_fires", "lc_gate_bypass",
     "agreement_gate_fire_rate",
+    "prior_align_n", "prior_align_s_med", "prior_align_s_iqr",
     "geom", "canon", "iso", "idepth_prior", "ml_gpu", "fp16", "model",
     "ts_source", "ts_hz", "ts_plausible",
     "traj_error", "cli",
@@ -159,7 +160,8 @@ def parse_log(text: str) -> dict:
              geom="", canon="", iso="", idepth_prior="", ml_gpu="", fp16="", model="",
              ts_source="", ts_hz=float("nan"), ts_plausible="",
              lc_gate_enabled="", lc_gate_evals=0, lc_gate_fires=0, lc_gate_bypass=0,
-             agreement_gate_fire_rate=float("nan"))
+             agreement_gate_fire_rate=float("nan"),
+             prior_align_n=0, prior_align_s_med=float("nan"), prior_align_s_iqr=float("nan"))
 
     if (m := re.search(r"\[PERF_SUMMARY\][^\n]*", text)):
         line = m.group(0)
@@ -204,6 +206,18 @@ def parse_log(text: str) -> dict:
     total = len(re.findall(r"\[AGREEMENT_GATE\]", text))
     if total:
         d["agreement_gate_fire_rate"] = fires / total
+
+    # WP2c: one [PRIOR_ALIGN] line per ML keyframe (s_k = median map/prior depth ratio). G2-d judges the
+    # spread of s_k over a run on healthy data: IQR < 0.3 (PLAN.md G2). Kept as columns so the gate
+    # threshold can be set from summary.csv without re-reading logs.
+    pa = [float(v) for v in re.findall(r"\[PRIOR_ALIGN\][^\n]*?\bs=(-?[\d.]+)", text)]
+    pa = [v for v in pa if v == v]
+    if pa:
+        from statistics import median
+        srt = sorted(pa)
+        d["prior_align_n"] = len(pa)
+        d["prior_align_s_med"] = median(pa)
+        d["prior_align_s_iqr"] = srt[(3 * len(srt)) // 4] - srt[len(srt) // 4]
     return d
 
 

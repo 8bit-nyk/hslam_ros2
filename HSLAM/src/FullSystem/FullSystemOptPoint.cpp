@@ -89,7 +89,13 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 	
 	// ML Depth Integration: Use ML depth as optimization starting point if available
 	float currentIdepth;
-	if(point->idepth_GT > 0) {
+	// WP2c (M6, --ml-seed): shipped = seed the activation GN at the prior whenever there is one.
+	bool seedAtPrior = point->idepth_GT > 0;
+	if (seedAtPrior && setting_mlSeedMode == ML_SEED_MIDPOINT) seedAtPrior = false;
+	if (seedAtPrior && setting_mlSeedMode == ML_SEED_PRIOR_IF_IN_BRACKET)
+		seedAtPrior = std::isfinite(point->idepth_min) && std::isfinite(point->idepth_max) &&
+		              point->idepth_GT >= point->idepth_min && point->idepth_GT <= point->idepth_max;
+	if(seedAtPrior) {
 		currentIdepth = point->idepth_GT;  // Start from accurate ML depth estimate
 		if(print) printf("USING ML DEPTH as starting point: %.3f (vs midpoint %.3f)\n", 
 						 currentIdepth, (point->idepth_max+point->idepth_min)*0.5f);

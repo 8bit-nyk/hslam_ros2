@@ -2247,7 +2247,10 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 						// Per-scene ML weight calibration (after warmup, sample CALIBRATION_WINDOW keyframes)
 						// Skip calibration when Direct.P2 BA is disabled (which it permanently is)
-						if (!setting_disableDirectP2BA && !ml_weight_calib_.is_calibrated && ef) {
+						// WP2c: the runtime weight calibration overwrites the global base weight; the v2 formula
+						// (--ml-prior-weight != 1 or --ml-prior-gate-k > 0) replaces it and turns it off.
+						if (!setting_disableDirectP2BA && !ml_weight_calib_.is_calibrated && ef &&
+						    setting_mlPriorWeightMult == 1.0f && setting_mlPriorGateK <= 0.0f) {
 							ml_weight_calib_.kf_count++;
 							if (ml_weight_calib_.kf_count <= MLWeightCalibration::WARMUP_KEYFRAMES) {
 								printf("[WEIGHT_CALIB] Warmup KF%d (skipping)\n", ml_weight_calib_.kf_count);
@@ -2608,6 +2611,13 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 			if (!currentMLDepthImage.empty() && initialized) {
 				depthForTraces = currentMLDepthImage;
 				modeLabel = "ML";
+				// WP2c: [PRIOR_ALIGN] at every ML keyframe; with --ml-align-gate > 0 a disagreeing keyframe
+				// gets its new points without the prior (P1 bound, seed and P2 reference all withheld).
+				if (frameHessians.size() >= 2 && priorAlignmentGate(fh, currentMLDepthImage)) {
+					depthForTraces = cv::Mat();
+					modeLabel = "ML_GATED";
+					currentMLDepthImage = cv::Mat();
+				}
 			}
 		} else if (setting_depthSource == DEPTH_SOURCE_GT) {
 			boost::unique_lock<boost::mutex> lock(rgbd_depth_mutex_);
@@ -4930,6 +4940,51 @@ bool FullSystem::initializeMLDepthProcessor(const MLConfig& config)
 	}
 }
 
+// WP2c: keyframe-level prior/map alignment and the disagreement gate (pre-registered WP2c).
+// s_k = median over the active ML points of all other keyframes, projected into newKF, of
+// (the point's depth IN newKF's frame / newKF's prior depth at the projected pixel); iqr = IQR of the
+// log ratios. Unlike monitorScaleDrift's Signal 1, the SLAM depth is taken in the new keyframe's frame,
+// not the host's. Printed at every ML keyframe (diagnostic; G2-d). Returns true iff --ml-align-gate > 0,
+// n >= 50 and |log s_k| > thr -- the caller then creates this keyframe's points without a prior.
+bool FullSystem::priorAlignmentGate(FrameHessian* newKF, const cv::Mat& mlDepth)
+{
+	if (mlDepth.empty() || !newKF) return false;
+	Mat33f K = Mat33f::Identity();
+	K(0,0) = Hcalib.fxl(); K(1,1) = Hcalib.fyl(); K(0,2) = Hcalib.cxl(); K(1,2) = Hcalib.cyl();
+	Mat33f Ki = K.inverse();
+	std::vector<float> lr;
+	for (FrameHessian* host : frameHessians) {
+		if (host == newKF) continue;
+		SE3 hostToNew = newKF->PRE_worldToCam * host->PRE_camToWorld;
+		Mat33f KRKi = K * hostToNew.rotationMatrix().cast<float>() * Ki;
+		Vec3f Kt = K * hostToNew.translation().cast<float>();
+		for (PointHessian* ph : host->pointHessians) {
+			if (!ph->hasMLDepth || ph->idepth_scaled <= 0) continue;
+			Vec3f ptp = KRKi * Vec3f(ph->u, ph->v, 1.0f) + Kt * ph->idepth_scaled;
+			if (ptp[2] <= 1e-6f) continue;
+			int ui = (int)(ptp[0] / ptp[2] + 0.5f), vi = (int)(ptp[1] / ptp[2] + 0.5f);
+			if (ui < 1 || vi < 1 || ui >= mlDepth.cols - 1 || vi >= mlDepth.rows - 1) continue;
+			float d_ml = mlDepth.at<float>(vi, ui);
+			float d_slam = ptp[2] / ph->idepth_scaled;
+			if (d_ml > 0 && std::isfinite(d_ml) && d_slam > 0 && std::isfinite(d_slam))
+				lr.push_back(logf(d_slam / d_ml));
+		}
+	}
+	const int n = (int)lr.size();
+	float s = NAN, iqr = NAN;
+	if (n >= 5) {
+		std::sort(lr.begin(), lr.end());
+		s = expf(lr[n / 2]);
+		iqr = lr[(3 * n) / 4] - lr[n / 4];
+	}
+	printf("[PRIOR_ALIGN] kf=%d s=%.4f n=%d iqr=%.4f\n", newKF->frameID, s, n, iqr);
+	if (setting_mlAlignGateThr <= 0.0f) return false;
+	const bool fire = (n >= 50) && std::isfinite(s) && fabsf(logf(s)) > setting_mlAlignGateThr;
+	printf("[AGREEMENT_GATE] %s kf=%d logs=%.4f thr=%.3f n=%d\n", fire ? "fire" : "pass", newKF->frameID,
+	       std::isfinite(s) ? logf(s) : NAN, setting_mlAlignGateThr, n);
+	return fire;
+}
+
 bool FullSystem::performMLWarmup(const cv::Mat& warmup_image)
 {
 	if (!ml_processor_ || !ml_depth_enabled_) {
@@ -5151,7 +5206,8 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s nchan=%s geom=%s canon=%s iso=%s "
 	       "foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
-	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s prior_src=%s init_scale=%s blend_fix=%s loop=%s lc_scale_gate=%s "
+	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s prior_src=%s init_scale=%s blend_fix=%s "
+	       "p2w=%g p2k=%g align_gate=%g ml_seed=%s loop=%s lc_scale_gate=%s "
 	       "ml_gpu=%s fp16=%s model=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
@@ -5177,6 +5233,8 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       setting_mlPriorSource == ML_PRIOR_SRC_STALE ? "stale" : setting_mlPriorSource == ML_PRIOR_SRC_FRESH ? "fresh" : "fresh_only",   // WP3d
 	       setting_mlInitScaleMedian ? "median" : "legacy",   // WP3e-1
 	       setting_p1BlendGradFix ? "on" : "off",   // WP3e-2
+	       setting_mlPriorWeightMult, setting_mlPriorGateK, setting_mlAlignGateThr,   // WP2c
+	       setting_mlSeedMode == ML_SEED_PRIOR ? "prior" : setting_mlSeedMode == ML_SEED_MIDPOINT ? "midpoint" : "prior_if_in_bracket",
 	       (loopCloser ? "on" : "off"),
 	       // WP0: Indirect.H2 scale-disagreement gate (--p2-gate). This is the RA-L v2 mechanism;
 	       // setting_disableIndirectP2LoopCloser is a different, never-validated gate.

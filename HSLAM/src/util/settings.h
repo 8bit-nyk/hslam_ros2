@@ -325,6 +325,14 @@ extern bool  setting_p1BlendGradFix;         // WP3e-2: hybrid-bound blend uses 
 extern bool  setting_mlInitScaleMedian;       // WP3e-1: init metric factor = median(D_ML*iR) alone (true) or divided by photometricScale (shipped, false)
 extern int   setting_mlPriorSource;           // WP3d: which inference seeds a keyframe's new points (shipped: stale = the previous ML keyframe's map)
 extern bool  setting_mlFreezeIdepthZero;      // WP3c: keep an ML point's BA linearisation depth (idepth_zero) frozen at the prior (shipped: true)
+// WP2c (2026-09-19): the explicit weighted, gated prior that is to replace the freeze. All defaults = shipped.
+extern float setting_mlPriorWeightMult;       // multiplier on the Direct.P2 prior weight; 1.0 = legacy formula untouched
+extern float setting_mlPriorGateK;            // P2 self-gate width tau_i = k * sigma_i; 0 = legacy absolute tau (setting_mlSelfGateTau)
+extern float setting_mlAlignGateThr;          // keyframe-level gate on |log s_k| (s_k = median map/prior depth); 0 = off
+extern int   setting_mlSeedMode;              // activation seed: ML_SEED_PRIOR (shipped) | ML_SEED_MIDPOINT | ML_SEED_PRIOR_IF_IN_BRACKET
+#define ML_SEED_PRIOR 0
+#define ML_SEED_MIDPOINT 1
+#define ML_SEED_PRIOR_IF_IN_BRACKET 2
 extern bool setting_mlPriorCentredTrace;      // Sprint 12: centre the truncated epipolar window on rho_ML           // [TRACE_STATS]/[ACT_STATS] diagnostics; no behavioural effect
 
 // Sprint 11 (INTEGRATION_DAMAGE_AUDIT D0/D1/D2) — Metric3D-v2 input-geometry and depth-scale

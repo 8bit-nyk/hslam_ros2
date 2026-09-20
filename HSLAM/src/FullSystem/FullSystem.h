@@ -370,6 +370,7 @@ public:
 	
 	// Scale drift diagnostics: pure instrumentation, no trajectory impact
 	void monitorScaleDrift(FrameHessian* newKF, const cv::Mat& mlDepth);
+	bool priorAlignmentGate(FrameHessian* newKF, const cv::Mat& mlDepth);   // WP2c: [PRIOR_ALIGN] + --ml-align-gate
 	float scale_ema_ = 1.0f;
 	int scale_monitor_count_ = 0;
 	// ML probation (GATED — see monitorScaleDrift). Kept for potential indirect pipeline reuse.
