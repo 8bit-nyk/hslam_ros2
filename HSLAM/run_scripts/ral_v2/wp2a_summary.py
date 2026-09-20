@@ -69,7 +69,7 @@ def main():
     rows = []
     for f in sorted(glob.glob(os.path.join(a.root, "*", "summary.csv"))):
         arm = os.path.basename(os.path.dirname(f))
-        rows += load(f, arm=arm.replace("_r0ext", ""))     # R0 extension rows pool with `full`
+        rows += load(f, arm=arm.replace("_r0ext", "").replace("_esc", ""))   # R0-extension and R1-esc rows pool with their arm
     mono = []
     for f in a.mono:
         if os.path.exists(f):
