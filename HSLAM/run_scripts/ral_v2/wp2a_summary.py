@@ -2,7 +2,7 @@
 """WP2a summary: each arm against a reference arm, per sequence, with the pre-registered
 no-regression rule (DECISIONS.md, WP2a R1):
 
-  a fix passes on a sequence iff  median ATE_fix <= median ATE_ref + IQR_ref  and  track_fix >= track_ref
+  a fix passes on a sequence iff  median ATE_fix <= median ATE_ref + IQR_ref  and  usable-fraction_fix >= usable-fraction_ref
 
 IQR at n=5 is s[3]-s[1] of the sorted usable ATEs (the same estimator wp3b_summary.py uses; for
 n<=3 it is max-min). Also prints the per-arm sign count across sequences, the [INIT_FOUNDING_DIAG]
@@ -119,7 +119,8 @@ def main():
             if arm == a.ref or ref_ate != ref_ate:
                 rule = "(ref)" if arm == a.ref else "no ref"
             else:
-                within = ate <= ref_ate + ref_iqr and len(g) >= ref_n
+                # track rule on usable FRACTIONS (an escalated reference has n=10, an un-escalated arm n=5)
+                within = ate <= ref_ate + ref_iqr and (len(g) / n) >= (ref_n / max(1, attempts[(a.ref, ds_, sq)]))
                 rule = "pass" if within else "REGRESSION"
                 if ate < ref_ate:
                     tally[arm][0] += 1
