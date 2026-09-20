@@ -2902,6 +2902,13 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		newFrame->setEvalPT_scaled(newFrame->shell->getPose().inverse(),newFrame->shell->aff_g2l);
 	}
 
+	// WP2a [INIT_FOUNDING_DIAG]: the Phase-0 factor is meant to put every founding point at its own
+	// prior depth (depth_i == D_ML_i of the first frame's map). This measures whether it does, over the
+	// points actually created, so the claim is verified in-run instead of inferred from the trajectory
+	// (WP3e-1 / WP2a). Diagnostic only: one printf, always on, no behavioural effect.
+	std::vector<float> founding_lr, founding_lr_good;
+	founding_lr.reserve(coarseInitializer->numPoints[0]);
+
 	for (int i = 0; i < coarseInitializer->numPoints[0]; i++)
 	{
 
@@ -2952,6 +2959,23 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		ph->setIdepthScaled(final_idepth);
 		ph->setIdepthZero(ph->idepth);
 		ph->setPointStatus(PointHessian::ACTIVE);
+
+		// WP2a [INIT_FOUNDING_DIAG] accumulation (see above)
+		if (usingMetricScale && coarseInitializer->hasMLDepth && final_idepth > 0) {
+			int fu = (int)(point->u + 0.5f), fv = (int)(point->v + 0.5f);
+			if (fu >= 0 && fv >= 0 && fu < coarseInitializer->firstFrameMLDepth.cols &&
+			    fv < coarseInitializer->firstFrameMLDepth.rows) {
+				float mlD = coarseInitializer->firstFrameMLDepth.at<float>(fv, fu);
+				if (mlD > 0 && std::isfinite(mlD)) {
+					float lr = logf((1.0f / final_idepth) / mlD);
+					if (std::isfinite(lr)) {
+						founding_lr.push_back(lr);
+						if (point->isGood && point->lastHessian >= 0.1f && fabsf(point->iR - 1.0f) >= 0.01f)
+							founding_lr_good.push_back(lr);
+					}
+				}
+			}
+		}
 
 		// INIT_DIAG: Log first 5 points to verify scale math
 		static int init_diag_count = 0;
@@ -3014,6 +3038,26 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	
 	// Store points count for logging
 	init_points_count_ = firstFrame->pointHessians.size();
+
+	// WP2a [INIT_FOUNDING_DIAG] report: ratio = founding depth / first-frame D_ML, in log; 0 = at the prior.
+	if (usingMetricScale) {
+		auto pct = [](std::vector<float>& v, float q) {
+			size_t k = (size_t)(q * (float)(v.size() - 1));
+			std::nth_element(v.begin(), v.begin() + k, v.end());
+			return v[k];
+		};
+		if (founding_lr.size() >= 5) {
+			float p10 = pct(founding_lr, 0.10f), p25 = pct(founding_lr, 0.25f), p50 = pct(founding_lr, 0.50f);
+			float p75 = pct(founding_lr, 0.75f), p90 = pct(founding_lr, 0.90f);
+			float p50g = founding_lr_good.size() >= 5 ? pct(founding_lr_good, 0.5f) : NAN;
+			printf("[INIT_FOUNDING_DIAG] n=%zu n_good=%zu med_log_ratio=%.4f iqr=%.4f p10=%.4f p90=%.4f "
+			       "med_log_ratio_good=%.4f mode=%s\n",
+			       founding_lr.size(), founding_lr_good.size(), p50, p75 - p25, p10, p90, p50g,
+			       setting_mlInitScaleMedian ? "median" : "legacy");
+		} else {
+			printf("[INIT_FOUNDING_DIAG] n=%zu (too few founding points with a prior)\n", founding_lr.size());
+		}
+	}
 
 
 	// indirect!: Add indirect point to global map

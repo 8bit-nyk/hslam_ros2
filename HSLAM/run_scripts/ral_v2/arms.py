@@ -113,6 +113,11 @@ _DELTAS: dict[str, list[str]] = {
     "K12_K14_P2": ["--ml-fej-freeze=false", "--ml-init-scale=median", "--p2=true"],
     # WP3e-2 (reviewer B F1): the disjoint-bracket blend on a defined gradient instead of garbage
     "K15_blendfix": ["--p1-blend-grad-fix=true"],
+    # WP2a (2026-09-19): the three integration-hygiene fixes together -- the candidate hygiene
+    # configuration (own-view prior, Phase-0 factor without the double division, defined blend).
+    # Each single is a K13/K14/K15 arm above; this is their interaction check. Not a paper arm
+    # until G2 passes.
+    "K13_K14_K15": ["--ml-prior-source=fresh", "--ml-init-scale=median", "--p1-blend-grad-fix=true"],
     # Throughput levers (WP1). fp16 is PARKED by decision 2026-09-18: the fp16 graph needs a
     # float16 input tensor that preprocessing does not produce. No fp16 arm is defined here
     # on purpose -- an arm that silently falls back to fp32 would be worse than none.
