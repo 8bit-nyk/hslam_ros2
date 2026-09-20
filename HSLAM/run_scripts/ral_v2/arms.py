@@ -132,10 +132,11 @@ _DELTAS: dict[str, list[str]] = {
 }
 
 # --- WP2c (2026-09-19): the explicit weighted, gated prior in place of the linearisation freeze ---
-# Base of every 2c arm: freeze OFF, Direct.P2 ON, plus the integration-hygiene fixes that pass WP2a.
-# _HYGIENE is PROVISIONAL until WP2a's verdict is in DECISIONS.md (it is fixed there before the first
-# 2c run); the pre-registration text names the final list.
-_HYGIENE = ["--ml-prior-source=fresh", "--ml-init-scale=median", "--p1-blend-grad-fix=true"]
+# Base of every 2c arm: freeze OFF, Direct.P2 ON, plus the integration-hygiene fixes that passed WP2a
+# (DECISIONS.md "WP2a OUTCOME" / "WP2a-R2 OUTCOME", 2026-09-20): K14 init scale + K15 blend fix.
+# K13 (--ml-prior-source=fresh) is NOT in it: it regresses fr2_large_no_loop 2x at n=10.
+_HYGIENE = ["--ml-init-scale=median", "--p1-blend-grad-fix=true"]
+_DELTAS["K14_K15"] = list(_HYGIENE)          # the candidate hygiene configuration (freeze ON, P2 off)
 _C_BASE = ["--ml-fej-freeze=false", "--p2=true"]
 
 
