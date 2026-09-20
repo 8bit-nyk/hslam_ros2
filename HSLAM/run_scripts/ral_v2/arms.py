@@ -156,7 +156,11 @@ for _w in (1, 10, 100, 1000):
 _DELTAS["C_w100_k0"] = _c_arm(100, 0)                       # legacy absolute tau, strong weight
 _DELTAS["C_base"] = list(_C_BASE) + list(_HYGIENE)         # freeze off + P2 legacy + hygiene (= K12_K13_K14 + blend + P2)
 _DELTAS["C_hyg_only"] = ["--ml-fej-freeze=false"] + list(_HYGIENE)   # freeze off, no explicit prior
-# seed variants and the gated candidate are appended once the weight sweep picks (w, k) -- see DECISIONS.md.
+# --ml-seed variants (phase "seed") of every sweep arm, so the pick needs no new arm definition;
+# the gated candidate C_final is appended once phase ii has set thr -- see DECISIONS.md.
+for _name in [k for k in _DELTAS if k.startswith("C_w")]:
+    _DELTAS[f"{_name}_seedmid"] = _DELTAS[_name] + ["--ml-seed", "midpoint"]
+    _DELTAS[f"{_name}_seedbr"] = _DELTAS[_name] + ["--ml-seed", "prior_if_in_bracket"]
 
 ARMS = ["A0"] + [k for k in _DELTAS if k != "A0"]
 
