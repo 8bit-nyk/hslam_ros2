@@ -41,6 +41,10 @@ HSLAM/Thirdparty/CompiledLibs/
 HSLAM/Thirdparty/ceres-solver-*/
 HSLAM/Thirdparty/ceres-solver-*.tar.gz
 HSLAM/build/
+# Any secondary local build tree (e.g. HSLAM/build_wp3c/, created 2026-09-19 because the primary
+# build cache pointed at compiler wrappers that no longer exist) and its logs are per-machine artefacts.
+HSLAM/build_*/
+HSLAM/build_*.log
 # HSLAM/run_scripts/
 HSLAM/results/
 # RA-L v2 eval output (summary.csv, per-rep run.log and result.txt). Data, not source --
