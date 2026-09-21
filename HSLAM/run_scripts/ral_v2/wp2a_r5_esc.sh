@@ -21,10 +21,18 @@ PY=python3
 if [ -n "$(git status --porcelain)" ]; then echo "ERROR: dirty tree"; git status --short | head; exit 3; fi
 while tmux has-session -t "=wp2a_r5" 2>/dev/null; do echo "$(date) waiting for the main campaign to end"; sleep 120; done
 echo "host $(hostname)  commit $(git rev-parse --short HEAD)  binary $(sha256sum build/bin/HSLAM | cut -c1-16)  reps $REPS  out $ROOT/<arm>_esc/  start $(date)"
+# SEQS: the sequences the pre-registered escalation nominates. KITTI 07 comes from the condition-4
+# amendment (shared truck hazard, 14:40). TUM freiburg1_desk comes from the boundary clause: TUM landed at
+# exactly 3/5 and fr1_desk is the sequence that decides that threshold, inside the reference IQR
+# (DECISIONS.md, "WP2a-R5 -- the n=5 reading", 16:00). Two sequences = the pre-registered cap.
+SEQS="${SEQS:-kitti:07 tum:freiburg1_desk}"
 for arm in K14_K15 K13_K14_K15; do
-  echo "=== esc arm=$arm kitti 07 (n=$REPS)  $(date +%H:%M) ==="
-  "$PY" run_scripts/ral_v2/eval_run.py --dataset kitti --sequence 07 --arm "$arm" --reps "$REPS" --out "$ROOT/${arm}_esc" \
-    || echo "!!! run failed: $arm (continuing)"
+  for spec in $SEQS; do
+    ds="${spec%%:*}"; sq="${spec##*:}"
+    echo "=== esc arm=$arm $ds $sq (n=$REPS)  $(date +%H:%M) ==="
+    "$PY" run_scripts/ral_v2/eval_run.py --dataset "$ds" --sequence "$sq" --arm "$arm" --reps "$REPS" --out "$ROOT/${arm}_esc" \
+      || echo "!!! run failed: $arm $ds $sq (continuing)"
+  done
 done
 echo "=== WP2a-R5 escalation done: $(date) ==="
 "$PY" run_scripts/ral_v2/wp2a_r5_rule.py --root "$ROOT" --ref K14_K15 --cand K13_K14_K15 || true
