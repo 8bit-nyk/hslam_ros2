@@ -454,6 +454,8 @@ float setting_mlPriorWeightMult = 1.0f;
 float setting_mlPriorGateK = 0.0f;
 float setting_mlAlignGateThr = 0.0f;
 int   setting_mlSeedMode = ML_SEED_PRIOR;
+int   setting_mlPriorParam = ML_PRIOR_PARAM_IDEPTH;   // WP2b-log: shipped = inverse-depth residual
+float setting_mlPriorSigmaLog = 0.30f;                // relative 1-sigma of the prior in log depth
 // WP3d (2026-09-19): makeNewTracesWithMLDepth() reads currentMLDepthImage, which TrackMonocularWithML fills
 // from ml_reference_depth_ BEFORE this keyframe's own inference runs -- so a keyframe's points are seeded
 // from the PREVIOUS ML keyframe's map, sampled at the current pixel coordinates without warping. The

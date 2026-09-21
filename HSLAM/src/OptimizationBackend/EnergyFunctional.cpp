@@ -433,7 +433,9 @@ double EnergyFunctional::calcLEnergyF_MT()
 			if(p->data->hasMLDepth) points_with_depth_prior++;
 			if(p->data->hasMLDepth && p->data->ml_weight > 0 && !setting_disableDirectP2BA) {
 				// Paper Eq. 5: self-gating weight matching Hessian formulation
-				float ml_residual = p->data->idepth - p->ml_reference;
+				// WP2b-log: mlPriorDelta() is the residual in inverse-depth units in BOTH
+				// parameterisations, and E = w * delta^2 holds in both (see EnergyFunctionalStructs.h).
+				float ml_residual = mlPriorDelta(p->data->idepth, p->ml_reference);
 				// WP2c: same helper as EFPoint::takeData
 				float self_gate = 0.0f;
 				float w_ML = mlPriorWeight(p->data->idepth, p->ml_reference, p->ml_sigma, p->data->ml_weight, &self_gate);

@@ -60,9 +60,11 @@ void AccumulatedSCHessianSSE::addPoint(EFPoint* p, bool shiftPriorToZero, int ti
 			p->bdSumF += p->priorF * p->deltaF;
 		}
 		
-		// ML depth prior (relative to ML reference, not idepth_zero)
+		// ML depth prior (relative to ML reference, not idepth_zero). WP2b-log: the residual is
+		// mlPriorDelta(), which is (idepth - prior) in the shipped parameterisation and
+		// idepth*log(idepth/prior) in log mode; ml_priorF carries the matching Jacobian either way.
 		if(p->ml_priorF > 0) {
-			float ml_deltaF = p->data->idepth - p->ml_reference;
+			float ml_deltaF = mlPriorDelta(p->data->idepth, p->ml_reference);
 			p->bdSumF += p->ml_priorF * ml_deltaF;
 		}
 

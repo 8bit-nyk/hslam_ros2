@@ -181,6 +181,8 @@ int main(int argc, char **argv)
 		("ml-prior-weight", "WP2c: multiplier on the explicit Direct.P2 prior weight (needs --p2=true). 1.0 = the shipped formula untouched; any other value selects the v2 formula (confidence clamped to [0.1,1], runtime weight calibration off). Default 1.0.", cxxopts::value<float>()->default_value("1.0"))
 		("ml-prior-gate-k", "WP2c: Direct.P2 self-gate width as k x the point's own prior sigma (tau_i = k*sigma_i); 0 = the shipped absolute tau (setting_mlSelfGateTau = 0.01 1/m). k >= 100 effectively removes the self-gate. Selects the v2 formula. Default 0.", cxxopts::value<float>()->default_value("0"))
 		("ml-align-gate", "WP2c: keyframe-level prior/map disagreement gate. At each ML keyframe s_k = median(map depth / prior depth) over mature ML points projected into it (>= 50 pts); if |log s_k| > thr the keyframe's new points get no ML prior (DSO defaults). [PRIOR_ALIGN] is printed always; 0 = off (default).", cxxopts::value<float>()->default_value("0"))
+		("ml-prior-param", "WP2b-log: the Direct.P2 prior residual parameterisation. 'idepth' (default, shipped) = r = idepth - prior, weighted by the point's P1 half-width; 'log' = r = log(d/d_ML), weighted by --ml-prior-sigma-log, which gives the prior uniform leverage over range (the shipped form has almost none beyond ~10 m). 'log' selects the v2 weight formula.", cxxopts::value<std::string>()->default_value("idepth"))
+		("ml-prior-sigma-log", "WP2b-log: the prior's 1-sigma RELATIVE depth uncertainty (dimensionless) used by --ml-prior-param=log. 0.30 = +-35 %. One cross-dataset constant; it is not read in idepth mode.", cxxopts::value<float>()->default_value("0.30"))
 		("ml-seed", "WP2c (M6): where an ML point's activation Gauss-Newton starts. 'prior' (default, shipped), 'midpoint' (the traced bracket's midpoint, stock DSO), 'prior_if_in_bracket' (the prior only if it lies inside the traced bracket).", cxxopts::value<std::string>()->default_value("prior"))
 		("ml-idepth-rel-q", "Sprint 13: dimensionless log-depth half-width for --ml-idepth-prior=relative. Measured q0.90|ln(Dpred/Dgt)| is 0.21-0.27 on TUM, 0.37 on KITTI, 0.56 on ICL. (default 0.30)", cxxopts::value<float>()->default_value("0.30"))
 		("ml-prior-centred-trace", "Sprint 12: when the epipolar search segment exceeds maxPixSearch, centre the retained window on the ML prediction instead of anchoring it at uMin. Only affects points whose search was already being truncated. (default false)", cxxopts::value<bool>()->default_value("false"))
@@ -371,9 +373,19 @@ int main(int argc, char **argv)
 		else if (sm == "midpoint") setting_mlSeedMode = ML_SEED_MIDPOINT;
 		else if (sm == "prior_if_in_bracket") setting_mlSeedMode = ML_SEED_PRIOR_IF_IN_BRACKET;
 		else { printf("ERROR: --ml-seed must be prior|midpoint|prior_if_in_bracket (got '%s').\n", sm.c_str()); return 0; }
-		if (setting_mlPriorWeightMult != 1.0f || setting_mlPriorGateK > 0 || setting_mlAlignGateThr > 0 || setting_mlSeedMode != ML_SEED_PRIOR)
-			printf("[PHASE_CONFIG] ml-prior-weight=%g ml-prior-gate-k=%g ml-align-gate=%g ml-seed=%s\n",
-			       setting_mlPriorWeightMult, setting_mlPriorGateK, setting_mlAlignGateThr, sm.c_str());
+		// WP2b-log: the residual parameterisation
+		const std::string pp = result["ml-prior-param"].as<std::string>();
+		if (pp == "idepth") setting_mlPriorParam = ML_PRIOR_PARAM_IDEPTH;
+		else if (pp == "log") setting_mlPriorParam = ML_PRIOR_PARAM_LOG;
+		else { printf("ERROR: --ml-prior-param must be idepth|log (got '%s').\n", pp.c_str()); return 0; }
+		setting_mlPriorSigmaLog = result["ml-prior-sigma-log"].as<float>();
+		if (setting_mlPriorParam == ML_PRIOR_PARAM_LOG && setting_disableDirectP2BA)
+			printf("WARNING: --ml-prior-param=log has no effect without --p2=true (Direct.P2 is off).\n");
+		if (setting_mlPriorWeightMult != 1.0f || setting_mlPriorGateK > 0 || setting_mlAlignGateThr > 0 ||
+		    setting_mlSeedMode != ML_SEED_PRIOR || setting_mlPriorParam != ML_PRIOR_PARAM_IDEPTH)
+			printf("[PHASE_CONFIG] ml-prior-weight=%g ml-prior-gate-k=%g ml-align-gate=%g ml-seed=%s ml-prior-param=%s ml-prior-sigma-log=%g\n",
+			       setting_mlPriorWeightMult, setting_mlPriorGateK, setting_mlAlignGateThr, sm.c_str(),
+			       pp.c_str(), setting_mlPriorSigmaLog);
 	}
 	setting_mlPriorCentredTrace = result["ml-prior-centred-trace"].as<bool>();
 	if (setting_mlPriorCentredTrace)

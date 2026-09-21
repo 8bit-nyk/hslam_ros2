@@ -330,6 +330,11 @@ extern float setting_mlPriorWeightMult;       // multiplier on the Direct.P2 pri
 extern float setting_mlPriorGateK;            // P2 self-gate width tau_i = k * sigma_i; 0 = legacy absolute tau (setting_mlSelfGateTau)
 extern float setting_mlAlignGateThr;          // keyframe-level gate on |log s_k| (s_k = median map/prior depth); 0 = off
 extern int   setting_mlSeedMode;              // activation seed: ML_SEED_PRIOR (shipped) | ML_SEED_MIDPOINT | ML_SEED_PRIOR_IF_IN_BRACKET
+// WP2b-log (2026-09-21): the prior residual PARAMETERISATION. Defaults = shipped (inverse depth).
+extern int   setting_mlPriorParam;            // ML_PRIOR_PARAM_IDEPTH (shipped) | ML_PRIOR_PARAM_LOG (relative, r = log(d/d_ML))
+extern float setting_mlPriorSigmaLog;         // log-mode 1-sigma RELATIVE depth uncertainty (dimensionless); only read when param=log
+#define ML_PRIOR_PARAM_IDEPTH 0
+#define ML_PRIOR_PARAM_LOG 1
 #define ML_SEED_PRIOR 0
 #define ML_SEED_MIDPOINT 1
 #define ML_SEED_PRIOR_IF_IN_BRACKET 2

@@ -162,6 +162,29 @@ for _name in [k for k in _DELTAS if k.startswith("C_w")]:
     _DELTAS[f"{_name}_seedmid"] = _DELTAS[_name] + ["--ml-seed", "midpoint"]
     _DELTAS[f"{_name}_seedbr"] = _DELTAS[_name] + ["--ml-seed", "prior_if_in_bracket"]
 
+# WP2b-log (card b2, DECISIONS.md "WP2b-log -- PRE-REGISTERED"): the same explicit prior with a
+# RELATIVE (log-depth) residual, r = log(d/d_ML), weighted by one dimensionless sigma instead of the
+# point's absolute P1 half-width. Same base as the C arms (freeze OFF + P2 on + the hygiene base), so
+# an L arm differs from its C twin in the parameterisation alone.
+def _l_arm(w, k, slog=0.30, seed=None, gate=None):
+    d = list(_C_BASE) + list(_HYGIENE) + ["--ml-prior-param=log", "--ml-prior-weight", str(w),
+                                          "--ml-prior-gate-k", str(k), "--ml-prior-sigma-log", str(slog)]
+    if seed:
+        d += ["--ml-seed", seed]
+    if gate is not None:
+        d += ["--ml-align-gate", str(gate)]
+    return d
+
+
+for _w in (1, 10, 100, 1000):
+    for _k, _kl in ((1, "k1"), (3, "k3"), (0, "knone")):     # log mode: k = 0 means NO self-gate
+        _DELTAS[f"L_w{_w}_{_kl}"] = _l_arm(_w, _k)
+# sigma_log sensitivity at the reference weight (one cross-dataset constant; this checks it is not a
+# knife edge, it is not a per-dataset choice)
+for _sl in (0.15, 0.60):
+    _DELTAS[f"L_w10_k3_s{str(_sl).replace('.', '')}"] = _l_arm(10, 3, _sl)
+_DELTAS["L_base"] = _l_arm(1, 0)                             # log residual at the shipped multiplier, no gate
+
 ARMS = ["A0"] + [k for k in _DELTAS if k != "A0"]
 
 

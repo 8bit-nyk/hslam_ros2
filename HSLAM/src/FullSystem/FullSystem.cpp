@@ -2250,7 +2250,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 						// WP2c: the runtime weight calibration overwrites the global base weight; the v2 formula
 						// (--ml-prior-weight != 1 or --ml-prior-gate-k > 0) replaces it and turns it off.
 						if (!setting_disableDirectP2BA && !ml_weight_calib_.is_calibrated && ef &&
-						    setting_mlPriorWeightMult == 1.0f && setting_mlPriorGateK <= 0.0f) {
+						    setting_mlPriorWeightMult == 1.0f && setting_mlPriorGateK <= 0.0f &&
+						    setting_mlPriorParam == ML_PRIOR_PARAM_IDEPTH) {
 							ml_weight_calib_.kf_count++;
 							if (ml_weight_calib_.kf_count <= MLWeightCalibration::WARMUP_KEYFRAMES) {
 								printf("[WEIGHT_CALIB] Warmup KF%d (skipping)\n", ml_weight_calib_.kf_count);
@@ -5207,7 +5208,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s nchan=%s geom=%s canon=%s iso=%s "
 	       "foreshort=%s angmf=%s gapfill=%s optreg=%s pixgate=%s indinfo=%s dnba=%s "
 	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s prior_src=%s init_scale=%s blend_fix=%s "
-	       "p2w=%g p2k=%g align_gate=%g ml_seed=%s loop=%s lc_scale_gate=%s "
+	       "p2w=%g p2k=%g align_gate=%g ml_seed=%s p2param=%s p2slog=%g loop=%s lc_scale_gate=%s "
 	       "ml_gpu=%s fp16=%s model=%s "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
@@ -5235,6 +5236,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       setting_p1BlendGradFix ? "on" : "off",   // WP3e-2
 	       setting_mlPriorWeightMult, setting_mlPriorGateK, setting_mlAlignGateThr,   // WP2c
 	       setting_mlSeedMode == ML_SEED_PRIOR ? "prior" : setting_mlSeedMode == ML_SEED_MIDPOINT ? "midpoint" : "prior_if_in_bracket",
+	       setting_mlPriorParam == ML_PRIOR_PARAM_LOG ? "log" : "idepth", setting_mlPriorSigmaLog,
 	       (loopCloser ? "on" : "off"),
 	       // WP0: Indirect.H2 scale-disagreement gate (--p2-gate). This is the RA-L v2 mechanism;
 	       // setting_disableIndirectP2LoopCloser is a different, never-validated gate.
