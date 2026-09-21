@@ -42,7 +42,13 @@ def load(root, arm):
                     rows.setdefault(r.get("sequence", ""), []).append(r)
     out = {}
     for sq, rs in rows.items():
-        ok = [r for r in rs if r.get("status") == "OK"]
+        # PLAN.md §5 / CLAUDE.md, LOCKED: medians are over FULL-TRACK runs only, and track success is
+        # reported separately. A run that loses tracking still exits with status=OK and a SHORT trajectory,
+        # whose ATE is small because it covers less of the sequence -- folding those in biases an arm that
+        # loses tracking to look better. (Bug found and fixed 21 Sep 16:20, before the R5 verdict: the
+        # first version filtered on status alone and reported KITTI 07 as 10/10 with a median that included
+        # two partial runs. r0_check.py and wp2a_summary.py always filtered on track_success.)
+        ok = [r for r in rs if r.get("status") == "OK" and r.get("track_success") == "1"]
         if not ok:
             out[sq] = (float("nan"), float("nan"), 0, len(rs), float("nan"))
             continue
