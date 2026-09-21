@@ -42,7 +42,11 @@ def load(root):
     for arm, per in out.items():
         res[arm] = {}
         for sq, rs in per.items():
-            ok = [r for r in rs if r.get("status") == "OK"]
+            # Full-track runs ONLY (PLAN.md section 5 / HSLAM/CLAUDE.md). A run that loses tracking
+            # still exits status=OK with a SHORT trajectory, whose ATE is flatteringly small because it
+            # covers less of the sequence; pooling those biases whichever arm loses tracking. This is
+            # the 21 Sep 16:20 bug, which misread KITTI 07 as 10/10 at 3.698 instead of 8/10 at 3.970.
+            ok = [r for r in rs if r.get("status") == "OK" and r.get("track_success") == "1"]
             if not ok:
                 res[arm][sq] = (float("nan"), float("nan"), float("nan"), 0, len(rs))
                 continue

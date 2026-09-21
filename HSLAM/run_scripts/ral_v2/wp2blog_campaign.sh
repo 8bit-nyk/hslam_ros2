@@ -31,6 +31,12 @@ EUROC3() { for s in MH_01_easy V1_01_easy V2_02_medium; do run "$1" euroc "$s" "
 
 case "$PHASE" in
   i)
+    # SKIP_R0=1 when R0 has already been judged for this binary epoch -- which is the case for the
+    # epoch carrying --ml-prior-param: R0 passed 21 Sep 12:31 (DECISIONS.md, "Next action -- b2").
+    # Re-running it spends 10 runs to re-answer a settled question. Harmless if run anyway.
+    if [ "${SKIP_R0:-0}" = "1" ]; then
+      echo "SKIP_R0=1: R0 already judged for this epoch (DECISIONS.md, b2 next-action entry)"
+    else
     run full tum freiburg1_room 5
     run full kitti 07 5
     if ! "$PY" run_scripts/ral_v2/r0_check.py --csv "$ROOT/full/summary.csv" --require freiburg1_room 07; then
@@ -40,14 +46,23 @@ case "$PHASE" in
       "$PY" run_scripts/ral_v2/r0_check.py --csv "$ROOT/full/summary.csv" "$ROOT/full_r0ext/summary.csv" --require freiburg1_room 07 \
         || { echo "R0 FAILED at n=10 -- stop (DECISIONS.md WP2b-log)"; exit 6; }
     fi
+    fi
     TWO L_base "$REPS"
     for w in 1 10 100 1000; do for k in k1 k3 knone; do TWO "L_w${w}_${k}" "$REPS"; done; done
     TWO L_w10_k3_s015 "$REPS"; TWO L_w10_k3_s06 "$REPS"
     "$PY" run_scripts/ral_v2/wp2blog_rule.py --root "$ROOT" || true
     ;;
   ii)
+    # Judged by the dataset-level adoption rule v2 (DECISIONS.md, "RULE AMENDMENT -- 2026-09-21
+    # (evening)"). That rule REQUIRES n=10 on KITTI: at n=5 it adopts a true -15 % effect only 40.8 %
+    # of the time, at n=10 84.2 % (wp/RULE_CALIBRATION.md section 5). TUM is adequately powered at n=5.
+    # Verdict comes from adoption_rule.py -- do NOT re-derive the rule in a new script.
     [ -n "$ARM" ] || { echo "ERROR: PHASE=ii needs ARM=<pick>"; exit 4; }
-    ABL10 "$ARM" "$REPS"
+    KREPS="${KREPS:-10}"
+    run "$ARM" tum freiburg1_room "$REPS"; run "$ARM" kitti 07 "$KREPS"
+    for s in freiburg1_desk freiburg2_desk freiburg2_large_no_loop freiburg3_long_office_household; do
+      run "$ARM" tum "$s" "$REPS"; done
+    for s in 00 05 06 10; do run "$ARM" kitti "$s" "$KREPS"; done
     "$PY" run_scripts/ral_v2/wp2c_gate_thr.py --root "$ROOT" --arm "$ARM" || true
     ;;
   iii)
