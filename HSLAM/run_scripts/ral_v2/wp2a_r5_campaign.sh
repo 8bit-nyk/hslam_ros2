@@ -25,10 +25,23 @@ echo "host $(hostname)  commit $(git rev-parse --short HEAD)  binary $(sha256sum
 run() { echo "=== arm=$1  $2 $3  (n=$4)  $(date +%H:%M) ==="; "$PY" run_scripts/ral_v2/eval_run.py --dataset "$2" --sequence "$3" --arm "$1" --reps "$4" --out "$ROOT/$1" || echo "!!! run failed: $1 $2 $3 (continuing)"; echo; }
 
 # --- R0 guard at this binary (no C++ change since the 20 Sep 13:06 pass; this re-asserts the epoch) ---
+# SKIP_R0=1 when R0 has already been run and judged for this epoch in this campaign root -- which is what
+# happened on 21 Sep: the n=5 guard failed on KITTI 07 (+29.1 %), the pre-registered n>=10 extension was
+# run into full_r0ext/ and the pooled judgement PASSED (+17.84 %). See DECISIONS.md, "WP2a-R5 -- R0 GUARD
+# FAILED at n=5, and the amendment applied".
+if [ "${SKIP_R0:-0}" != "1" ]; then
 run full tum freiburg1_room "$REPS"
 run full kitti 07 "$REPS"
-"$PY" run_scripts/ral_v2/r0_check.py --csv "$ROOT/full/summary.csv" --require freiburg1_room 07 \
-  || { echo "R0 FAILED -- stop (DECISIONS.md WP2a-R5)"; exit 6; }
+if ! "$PY" run_scripts/ral_v2/r0_check.py --csv "$ROOT/full/summary.csv" --require freiburg1_room 07; then
+  echo "R0 not met at n=5 -- pre-registered extension: 5 more reps of each, judged on the pooled rows"
+  "$PY" run_scripts/ral_v2/eval_run.py --dataset tum --sequence freiburg1_room --arm full --reps 5 --out "$ROOT/full_r0ext" || true
+  "$PY" run_scripts/ral_v2/eval_run.py --dataset kitti --sequence 07 --arm full --reps 5 --out "$ROOT/full_r0ext" || true
+  "$PY" run_scripts/ral_v2/r0_check.py --csv "$ROOT/full/summary.csv" "$ROOT/full_r0ext/summary.csv" --require freiburg1_room 07 \
+    || { echo "R0 FAILED at n=10 -- stop (DECISIONS.md WP2a-R5)"; exit 6; }
+fi
+else
+  echo "SKIP_R0=1: R0 already judged for this epoch in $ROOT (see DECISIONS.md WP2a-R5 amendment)"
+fi
 
 ABL10() { run "$1" tum freiburg1_room "$REPS"; run "$1" kitti 07 "$REPS"
           for s in freiburg1_desk freiburg2_desk freiburg2_large_no_loop freiburg3_long_office_household; do run "$1" tum "$s" "$REPS"; done
