@@ -93,11 +93,19 @@ def main():
             if name in ("TUM", "KITTI"):
                 if rate < THRESH:
                     verdict_ok = False
-                # boundary: one sequence away from the threshold, decided inside the IQR
+                # Boundary: the dataset sits one sequence either side of the bar. The pre-registration
+                # (DECISIONS.md, WP2a-R5) escalates "the sequence THAT DECIDES the threshold", singular --
+                # not every sequence that happens to be inside the IQR. Corrected 21 Sep 16:00 before the
+                # escalation ran; the earlier code nominated all within-IQR sequences, which is not the text.
+                # The deciding sequence is the non-improved one closest to flipping (smallest relative gap),
+                # and it only qualifies if it is inside the reference IQR.
                 need = int(-(-THRESH * counted // 1))
                 if better in (need - 1, need):
-                    for sq in seqs:
-                        if sq in ref and sq in cand and abs(cand[sq][0] - ref[sq][0]) < ref[sq][1]:
+                    losers = [sq for sq in seqs if sq in ref and sq in cand and cand[sq][0] >= ref[sq][0]]
+                    losers.sort(key=lambda sq: (cand[sq][0] - ref[sq][0]) / max(ref[sq][0], 1e-9))
+                    if losers:
+                        sq = losers[0]
+                        if abs(cand[sq][0] - ref[sq][0]) < ref[sq][1]:
                             escalate.append(sq)
                 print(f"  --> {name}: improved {better}/{counted} = {100*rate:.0f}%  {verdict} "
                       f"(rule: >= {100*THRESH:.0f}%)")
