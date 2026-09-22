@@ -6,6 +6,8 @@
 #                    only: phase i cleared bar 1 solely at the top of its grid. The pick rule
 #                    takes the smallest passing w, so these cannot displace L_w1000_k1.
 #   PHASE=ii   the pick (ARM=<pick>) on ABL-10, n=3 -> dataset-level rule + gate threshold
+#   PHASE=ii2  THREE arms (full + two candidates) on ABL-10, SEQUENCE-MAJOR and hazard-first,
+#              TUM n=5 / KITTI n=10 as the adoption rule requires. 225 runs ~6.3 h.
 #   PHASE=iii  the pick on EuRoC-3 + mono-VO, n=3 (screen)
 # New binary => R0 first (r0_check.py), embedded in PHASE=i, with the pre-registered n>=10 clause
 # for KITTI 07 (CV ~ 30 %: a +-20 % band at n=5 is a coin flip -- see the WP2a-R5 R0 amendment).
@@ -71,6 +73,65 @@ case "$PHASE" in
   iii)
     [ -n "$ARM" ] || { echo "ERROR: PHASE=iii needs ARM=<pick>"; exit 4; }
     EUROC3 "$ARM" "$REPS"; run "$ARM" tummonovo sequence_31 "$REPS"
+    ;;
+  ii2)
+    # DECISIONS.md "WP2b-log phase ii -- TWO CANDIDATES -- PRE-REGISTERED 2026-09-22".
+    #
+    # SEQUENCE-MAJOR on purpose. Arm-major (all sequences for arm A, then arm B) leaves you with a
+    # complete arm and nothing to compare it against if the campaign is stopped or dies; sequence-major
+    # means a complete, comparable three-arm slice exists after every sequence.
+    #
+    # HAZARD-FIRST on purpose. fr2_large_no_loop (the prior sits at 0.23x Kinect on frame 0; the
+    # sequence that failed K13) and KITTI 07 (the named truck hazard at frames 000634-000644) are the
+    # two places a too-strong prior should break. They run first, so that failure mode is visible in
+    # ~45 min rather than at hour 6. fr3_long_office_household is third: it is the long TUM sequence
+    # that tests whether the inherited prior drift costs anything over 40-90 m.
+    #
+    # TUM n=5, KITTI n=10 -- NOT the runner's n=3 default. The adoption rule classes a sequence with
+    # fewer than 5 usable reps on either arm as "unresolved" and drops it from B's denominator, and
+    # KITTI needs n=10 for 84 % power (wp/RULE_CALIBRATION.md section 5).
+    #
+    # The reference `full` is re-run at THIS binary epoch rather than reused from wp2a_eval-server
+    # (commit 4fce1b66): the three recorded epochs agree on fr1_room (0.301/0.295/0.306) but the
+    # standing rule is that arms from different binaries are not poolable, and the adoption rule
+    # compares rep SETS. These rows also seed the re-freeze chain.
+    ARMS="${ARMS:-full L_w1000_k1 L_w10000_k3}"
+    CANDS="${CANDS:-L_w1000_k1 L_w10000_k3}"
+    TREPS="${TREPS:-5}"; KREPS="${KREPS:-10}"
+    STATUS="$PY run_scripts/ral_v2/wp2blog_phase2_status.py --root $ROOT --ref full"
+    # sequence, dataset, reps -- in the order described above
+    SEQS="tum:freiburg2_large_no_loop:$TREPS kitti:07:$KREPS tum:freiburg3_long_office_household:$TREPS
+          tum:freiburg1_room:$TREPS tum:freiburg1_desk:$TREPS tum:freiburg2_desk:$TREPS
+          kitti:10:$KREPS kitti:06:$KREPS kitti:05:$KREPS kitti:00:$KREPS"
+    for entry in $SEQS; do
+      ds="${entry%%:*}"; rest="${entry#*:}"; sq="${rest%%:*}"; nr="${rest##*:}"
+      for arm in $ARMS; do run "$arm" "$ds" "$sq" "$nr"; done
+      # futility applies ONLY to the two hazard sequences, and ONLY on C2 breakage (track), never ATE
+      FUT=""
+      case "$sq" in freiburg2_large_no_loop|07) FUT="--futility-seq $sq";; esac
+      set +e
+      $STATUS --cand $CANDS $FUT
+      rc=$?
+      set -e
+      if [ "$rc" = "3" ]; then
+        KEEP=""
+        for c in $CANDS; do
+          if $STATUS --cand "$c" --futility-seq "$sq" >/dev/null 2>&1; then KEEP="$KEEP $c"; fi
+        done
+        echo "=== futility: candidate set was '$CANDS', continuing with '${KEEP:-NONE}' ==="
+        CANDS="$(echo $KEEP)"
+        ARMS="full $CANDS"
+        [ -n "$CANDS" ] || { echo "both candidates broke -- stopping"; break; }
+      fi
+    done
+    echo "=== phase ii complete: verdict below comes from adoption_rule.py, the single implementation ==="
+    for c in $CANDS; do
+      for ds in tum kitti; do
+        echo "--- adoption rule: $c vs full, $ds ---"
+        "$PY" run_scripts/ral_v2/adoption_rule.py --ref "$ROOT/full" --cand "$ROOT/$c" --dataset "$ds" || true
+      done
+    done
+    "$PY" run_scripts/ral_v2/wp2c_gate_thr.py --root "$ROOT" --arm "${CANDS%% *}" || true
     ;;
   iboundary)
     # DECISIONS.md "WP2b-log -- boundary probe -- PRE-REGISTERED 2026-09-22". Same binary epoch as
