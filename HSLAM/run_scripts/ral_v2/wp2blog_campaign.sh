@@ -2,6 +2,9 @@
 # WP2b-log (card b2) -- the prior as a RELATIVE (log-depth) residual.
 # Pre-registered in DECISIONS.md ("WP2b-log (card b2) -- PRE-REGISTERED 2026-09-21"). Phases:
 #   PHASE=i    15 L arms on fr1_room + KITTI 07, n=3 (90 runs)                      [default]
+#   PHASE=iboundary  w=3000/10000 x {k1,k3} on fr1_room + KITTI 07, n=3 (24 runs) -- DIAGNOSTIC
+#                    only: phase i cleared bar 1 solely at the top of its grid. The pick rule
+#                    takes the smallest passing w, so these cannot displace L_w1000_k1.
 #   PHASE=ii   the pick (ARM=<pick>) on ABL-10, n=3 -> dataset-level rule + gate threshold
 #   PHASE=iii  the pick on EuRoC-3 + mono-VO, n=3 (screen)
 # New binary => R0 first (r0_check.py), embedded in PHASE=i, with the pre-registered n>=10 clause
@@ -68,6 +71,19 @@ case "$PHASE" in
   iii)
     [ -n "$ARM" ] || { echo "ERROR: PHASE=iii needs ARM=<pick>"; exit 4; }
     EUROC3 "$ARM" "$REPS"; run "$ARM" tummonovo sequence_31 "$REPS"
+    ;;
+  iboundary)
+    # DECISIONS.md "WP2b-log -- boundary probe -- PRE-REGISTERED 2026-09-22". Same binary epoch as
+    # phase i (692adec6...), arms.py change only, so no rebuild and no new R0 epoch.
+    # wp2blog_rule.py needs a 'full' arm under $ROOT for its parity bar; phase i ran with SKIP_R0=1,
+    # so the epoch's R0 rows live under runs/wp2a_r5b_eval-server/full (commit a50855f8, the R0 that
+    # passed 21 Sep 12:31). Link them in rather than re-running 10 reps of a settled question.
+    if [ ! -e "$ROOT/full" ]; then
+      ln -s "$PWD/runs/wp2a_r5b_eval-server/full" "$ROOT/full"
+      echo "linked parity reference: $ROOT/full -> runs/wp2a_r5b_eval-server/full"
+    fi
+    for w in 3000 10000; do for k in k1 k3; do TWO "L_w${w}_${k}" "$REPS"; done; done
+    "$PY" run_scripts/ral_v2/wp2blog_rule.py --root "$ROOT" || true
     ;;
   *) echo "unknown PHASE=$PHASE"; exit 4;;
 esac

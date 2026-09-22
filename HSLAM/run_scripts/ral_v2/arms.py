@@ -185,6 +185,16 @@ for _sl in (0.15, 0.60):
     _DELTAS[f"L_w10_k3_s{str(_sl).replace('.', '')}"] = _l_arm(10, 3, _sl)
 _DELTAS["L_base"] = _l_arm(1, 0)                             # log residual at the shipped multiplier, no gate
 
+# WP2b-log BOUNDARY PROBE (DECISIONS.md "WP2b-log -- boundary probe -- PRE-REGISTERED 2026-09-22").
+# Phase i cleared bar 1 (KITTI 07 scale) ONLY at w=1000, the top of its grid: w=1/10/100 sat at
+# 0.67-0.82 and w=1000 jumped to 0.94-0.97. These arms ask whether w=1000 is the low edge of a
+# plateau or a peak. They are DIAGNOSTIC: the pre-registered pick rule takes the SMALLEST w clearing
+# all four bars, so no probe arm can displace L_w1000_k1. Kept out of the PHASE=i grid on purpose --
+# re-running phase i must reproduce phase i.
+for _w in (3000, 10000):
+    for _k, _kl in ((1, "k1"), (3, "k3")):
+        _DELTAS[f"L_w{_w}_{_kl}"] = _l_arm(_w, _k)
+
 ARMS = ["A0"] + [k for k in _DELTAS if k != "A0"]
 
 
