@@ -1,6 +1,11 @@
 SET(PROJECT_NAME HSLAM)
 CMAKE_MINIMUM_REQUIRED(VERSION 3.10)
 
+# Emit compile_commands.json for clangd/IDE indexing. Build-only: it changes no compiler flag,
+# no target and no output binary, so it cannot affect a measured result. Added to clear the
+# spurious PixelSelector2.cpp undefined-reference artifact the IDE reported without it.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(OpenCV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/share/OpenCV)
 set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake)
 #set(G2O_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Thirdparty/CompiledLibs/lib/cmake/g2o)
