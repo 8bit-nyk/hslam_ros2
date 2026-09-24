@@ -120,6 +120,38 @@ def _tummonovo(seq: str) -> SeqSpec:
                    d / "groundtruth_clean.txt", "tum", 21.0, "camera")
 
 
+# --- sequence image counts (P5a, 2026-09-24) ----------------------------------------------
+# The denominator of the coverage floor. Measured once by counting each sequence's image
+# directory; these are immutable dataset properties, so they are constants rather than a
+# filesystem call at table time (make_tables.py must run where the datasets are not staged).
+#
+# Why not the ground truth's path length: TUM's mocap record runs 7-13 % LONGER than the image
+# sequence on the freiburg1 set (fr1_desk2 86.8 %, fr1_360 89.1 %), so a GT-derived denominator
+# penalises every arm by that much. And summary.csv's gt_distance_m is a path length over the
+# ASSOCIATED GT subset, which is additionally shortened by GT dropouts and by chord-vs-arc on a
+# subsampled path -- on fr1_floor it reads 60 % for an arm that tracked the sequence as far as
+# any arm does. Frames processed against images on disk is the one measure free of all three.
+SEQUENCE_IMAGE_COUNTS = {
+    ("tum", "freiburg1_360"): 756,                   ("tum", "freiburg1_desk"): 613,
+    ("tum", "freiburg1_desk2"): 640,                 ("tum", "freiburg1_floor"): 1242,
+    ("tum", "freiburg1_room"): 1362,                 ("tum", "freiburg2_360_hemisphere"): 2729,
+    ("tum", "freiburg2_desk"): 2965,                 ("tum", "freiburg2_large_no_loop"): 3359,
+    ("tum", "freiburg2_large_with_loop"): 5182,
+    ("tum", "freiburg3_long_office_household"): 2585,
+    ("kitti", "00"): 4541, ("kitti", "01"): 1101, ("kitti", "02"): 4661, ("kitti", "03"): 801,
+    ("kitti", "04"):  271, ("kitti", "05"): 2761, ("kitti", "06"): 1101, ("kitti", "07"): 1101,
+    ("kitti", "08"): 4071, ("kitti", "09"): 1591, ("kitti", "10"): 1201,
+}
+
+
+def image_count(dataset: str, sequence: str) -> Optional[int]:
+    """Images on disk for a sequence, or None when it has not been measured.
+
+    Callers must treat None as "cannot judge coverage" and say so, never as "coverage is fine".
+    """
+    return SEQUENCE_IMAGE_COUNTS.get((dataset.lower(), sequence))
+
+
 _BUILDERS = {"tum": _tum, "kitti": _kitti, "euroc": _euroc, "iclnuim": _icl,
              "tummonovo": _tummonovo}
 

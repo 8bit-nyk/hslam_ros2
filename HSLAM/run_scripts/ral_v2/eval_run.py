@@ -341,7 +341,35 @@ def apply_track_success(rows: list[dict]) -> None:
         if not pool:
             r["track_success"] = 0
         else:
-            r["track_success"] = int(usable(r) and r["poses"] >= 0.7 * median(pool))
+            r["track_success"] = int(usable(r) and r["poses"] >= 0.7 * median(pool)
+                                     and _covers_enough(r))
+
+
+# P5a (2026-09-24, DECISIONS.md "WP6 BLOCKER 2"). The pooled-median test above is RELATIVE to the
+# arm's own reps, so it has no absolute floor: when every rep of an arm dies at the same point the
+# median moves with them and all of them score successful. That is how WP6's monocular arm came to
+# report a 0.196 m ATE on KITTI 04 from runs of 12-19 frames out of 271. This is the absolute
+# sanity floor that the relative test cannot supply.
+#
+# It is deliberately NOT a completeness requirement. TUM fr1_floor stops at ~68 % of its images for
+# EVERY arm, so a bar near 1.0 would mark a sequence that both arms handle identically as
+# universally failed. Comparability BETWEEN arms is a separate test and lives in make_tables.py.
+COVERAGE_SANITY = 0.5   # a rep that processed under half the sequence is not a trajectory for it
+
+
+def _covers_enough(r: dict) -> bool:
+    """False only when we can measure coverage AND it is below the floor.
+
+    An unmeasured sequence (image count not in ds.SEQUENCE_IMAGE_COUNTS) passes, because
+    the honest default for "cannot judge" is not to veto -- but it is reported, never silent.
+    """
+    n = ds.image_count(r["dataset"], r["sequence"])
+    if not n or not r.get("frames"):
+        if not n:
+            print(f"[COVERAGE] {r['dataset']}/{r['sequence']}: no image count on record, "
+                  f"coverage floor not applied", file=sys.stderr)
+        return True
+    return r["frames"] >= COVERAGE_SANITY * n
 
 
 def write_csv(rows: list[dict], path: Path) -> None:
