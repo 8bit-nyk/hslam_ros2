@@ -977,6 +977,25 @@ void OptimizeEssentialGraph(std::vector<FrameShell*> & vpKFs, std::vector<std::s
                 }
             }
 
+            // Pre-WP4 D4: validate every optimised vertex before writing ANY back. A vertex outside the
+            // representable range (sim3ScaleUsable, Optimizer.h) would throw in the MapPoint update below or
+            // in any later updateGlobalPose. Skipping the write-back leaves the loop's own neighbourhood
+            // corrected (CorrectLoop) and the rest of the graph untouched.
+            for (size_t i = 0; i < vpKFs.size(); i++)
+            {
+                const int nIDi = vpKFs[i]->KfId;
+                if(nIDi > maxKfIdatCand)
+                    continue;
+                const g2o::Sim3 est = static_cast<Sim3Vertex *>(optimizer.vertex(nIDi))->estimate();
+                const double s = est.scale();
+                if (!sim3ScaleUsable(s) || !est.translation().allFinite())
+                {
+                    ++stat_lcSim3GuardRejects;
+                    printf("[LC_SIM3_GUARD] reject where=essential_graph kf=%d s=%.6g (write-back skipped)\n", nIDi, s);
+                    return;
+                }
+            }
+
             for (size_t i = 0; i < vpKFs.size(); i++)
             {
                 const int nIDi = vpKFs[i]->KfId;

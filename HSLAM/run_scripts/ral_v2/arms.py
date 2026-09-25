@@ -34,8 +34,10 @@ MODEL = HSLAM_ROOT / "models" / "metric3d-vit-small" / "onnx" / "model.onnx"
 # observed 2026-09-19 in [ML_GEOM]); the rule is calibration-derived, so it joins the set.
 _NON_SQUARE_PIXEL_DATASETS = {"kitti", "euroc", "tummonovo"}
 
-# --- the paper configuration (provisional until G1) ---------------------------------------
-PAPER_CONFIG = [
+# --- the paper configuration as FROZEN BY G1 at 6799be6 (18 Sep 2026) -----------------------
+# Kept verbatim: it is the R0 reference CLI at the re-freeze epoch (arm `full_6799be6`) and the CLI
+# every row before the re-freeze was produced with. Do not edit it.
+PAPER_CONFIG_6799BE6 = [
     "--ml-depth", "--ml-gpu",
     "--ml-model", str(MODEL),
     "--ml-model-type", "metric3d",
@@ -51,6 +53,17 @@ PAPER_CONFIG = [
     "--ml-normal-channel=off",               # normals are out of v2 unless WP1 says otherwise
 ]
 
+# --- the RE-FROZEN paper configuration (pre-WP4, DECISIONS.md "Re-freeze epoch", 2026-09-25) ---------
+# = 6799be6 + the two WP2a hygiene bug fixes adopted 20 Sep (D1: K14 Phase-0 factor without the second
+# division, K15 defined blend gradient) - the unconsumed --indirect-ml-semantic-fix (D8). The binary-side
+# bug fixes (D4 loop-Sim(3) guard, D7 associations path, D8 use-after-free) are default-on and need no
+# flag. Stage 1 appends --init-founding-fix=<mode> here if and only if the R3b screen passes as
+# pre-registered.
+PAPER_CONFIG = [t for t in PAPER_CONFIG_6799BE6 if t != "--indirect-ml-semantic-fix=true"] + [
+    "--ml-init-scale=median",                # K14 (WP3e-1 / WP2a)
+    "--p1-blend-grad-fix=true",              # K15 (WP3e-2 / WP2a)
+]
+
 # Monocular backbone: same build, same commit, no --ml-depth. Arm A0 everywhere.
 #
 # --depth-source=none is REQUIRED, not decoration. setting_depthSource defaults to ML, so a run
@@ -61,9 +74,17 @@ PAPER_CONFIG = [
 MONO = ["--depth-source=none", "--ml-init=false"]
 
 # Cumulative build-up (A0..A5) and knock-outs / knock-ins (K*, S*), as deltas.
+# ⚠ Since the re-freeze (2026-09-25) every delta below applies to the RE-FROZEN PAPER_CONFIG. Rows
+# written before it carry their full CLI in the `cli` column; the arm NAME alone is not provenance.
 _DELTAS: dict[str, list[str]] = {
     "full": [],
     "A0": None,                                          # sentinel: monocular, see build()
+    # --- pre-WP4 re-freeze epoch (DECISIONS.md "Re-freeze epoch", 2026-09-25) ---
+    "full_6799be6": None,                                # sentinel: the G1 CLI verbatim (R0), see build()
+    "A0_tol": None,                                      # sentinel: monocular + the ML arms' init bar (D6)
+    "full_K13": ["--ml-prior-source=fresh"],             # D3: own-view prior on the re-frozen config
+    "full_R3b_relin": ["--init-founding-fix=relin"],     # D2 / WP2a-R3b screen arms
+    "full_R3b_anchor": ["--init-founding-fix=anchor"],
     "A1": ["--ml-inference-mode", "1", "--ml-idepth-prior=none",
            "--ml-indirect-filter=false", "--p2-gate=false"],
     "A2": ["--ml-indirect-filter=false", "--p2-gate=false"],
@@ -228,8 +249,12 @@ def build(arm: str, spec) -> list[str]:
 
     if arm == "A0":
         return list(MONO)
+    if arm == "A0_tol":
+        # D6 fairness arm: monocular held to the same initialisation-failure bar as every ML arm.
+        return list(MONO) + ["--init-fail-thresholds=tolerant"]
 
-    args = _apply(list(PAPER_CONFIG), _DELTAS[arm])
+    base = PAPER_CONFIG_6799BE6 if arm == "full_6799be6" else PAPER_CONFIG
+    args = _apply(list(base), _DELTAS[arm] or [])
 
     # Calibration-derived, not tuned: square-pixel pre-resize where fx != fy.
     if spec.dataset in _NON_SQUARE_PIXEL_DATASETS and "--ml-input-geometry=legacy" not in args:

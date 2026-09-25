@@ -308,7 +308,17 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	if(!snapped) snappedAt=0;
 
 	if(snapped && snappedAt==0)
+	{
 		snappedAt = frameID;
+		// Pre-WP4 D2 [INIT_CONSISTENCY]: the gauge the initialiser had when it snapped, to compare
+		// with the gauge it hands over at initializeFromInitializer. Diagnostic only.
+		double sumIR = 0; int nIR = 0;
+		for(int i=0;i<numPoints[0];i++)
+			if(points[0][i].isGood && points[0][i].iR > 0 && std::isfinite(points[0][i].iR)) { sumIR += points[0][i].iR; nIR++; }
+		snapFrame = frameID;
+		snapMeanIR = nIR ? (float)(sumIR / nIR) : -1.0f;
+		snapTNorm = (float)thisToNext.translation().norm();
+	}
 
 	debugPlot(0,wraps);
 
@@ -631,6 +641,21 @@ Vec3f CoarseInitializer::calcResAndGS(
 		alphaOpt = alphaW;
 	}
 
+	// Pre-WP4 D2 (WP2a-R3b) --init-founding-fix=anchor. Once snapped, alphaOpt is 0 and only the coupling to
+	// the smoothed iR remains, so the depth gauge floats until initializeFromInitializer (audit §0b, B10).
+	// Keep the DEPTH part of the alpha anchor, toward the FIXED ML seed and at the same weight alphaW; the
+	// translation part stays released. ML-seeded inits only; default off leaves this function unchanged.
+	const bool anchorSeed = (setting_initFoundingFix == INIT_FOUNDING_FIX_ANCHOR) && mlSeededInit && snapped;
+	if(anchorSeed)
+	{
+		for(int i=0;i<npts;i++)
+		{
+			const Pnt* point = ptsl+i;
+			if(point->isGood_new && point->iR_seed > 0)
+				alphaEnergy += alphaW*(point->idepth_new - point->iR_seed)*(point->idepth_new - point->iR_seed);
+		}
+	}
+
 
 	// Calculate the HessianSC
 	acc9SC.initialize();
@@ -649,6 +674,12 @@ Vec3f CoarseInitializer::calcResAndGS(
 		{
 			JbBuffer_new[i][8] += couplingWeight*(point->idepth_new - point->iR);
 			JbBuffer_new[i][9] += couplingWeight;
+		}
+
+		if(anchorSeed && point->iR_seed > 0)   // pre-WP4 D2 anchor, see above
+		{
+			JbBuffer_new[i][8] += alphaW*(point->idepth_new - point->iR_seed);
+			JbBuffer_new[i][9] += alphaW;
 		}
 
 		JbBuffer_new[i][9] = 1/(1+JbBuffer_new[i][9]);
@@ -1351,6 +1382,7 @@ void CoarseInitializer::seedPointsWithMLDepth()
             // without committing to absolute ML scale (Option A).
             float mlIdepth = (mlMeanDepth > 0.0f) ? (mlMeanDepth / mlDepth) : (1.0f / mlDepth);
             pt.iR = mlIdepth;
+            pt.iR_seed = mlIdepth;   // pre-WP4 D2: kept fixed for --init-founding-fix=anchor
             pt.idepth = mlIdepth;
             pt.idepth_new = mlIdepth;
             lvlSeeded++;
@@ -1400,6 +1432,7 @@ float CoarseInitializer::computeMetricScaleFactor()
 
     if (firstFrameMLDepth.empty()) {
         printf("CoarseInitializer: ML depth map missing, falling back to mean depth: %.3f\n", mlMeanDepth);
+        lastScaleSource = SCALE_SRC_MEAN_NOMAP;
         return mlMeanDepth;
     }
 
@@ -1443,8 +1476,10 @@ float CoarseInitializer::computeMetricScaleFactor()
     if ((int)scale_ratios.size() < setting_mlInitMinPoints) {
         printf("CoarseInitializer: Too few correspondences (%zu < %d), falling back to mean depth: %.3f\n",
                scale_ratios.size(), setting_mlInitMinPoints, mlMeanDepth);
+        lastScaleSource = SCALE_SRC_MEAN_FEWPTS;
         return mlMeanDepth;
     }
+    lastScaleSource = SCALE_SRC_MEDIAN;
 
     // Median: 50% outlier breakdown point (Godard 2017, Tateno 2017)
     size_t mid = scale_ratios.size() / 2;

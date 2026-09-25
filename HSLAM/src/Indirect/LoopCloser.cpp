@@ -13,6 +13,15 @@
 
 namespace HSLAM {
 
+    // Pre-WP4 D4: loop candidates and corrections are checked with sim3Usable (Optimizer.h) -- numerical
+    // representability only, the same in every arm. The print-only degenerate=[1/3,3] tag below is NOT
+    // made to reject: that would be a tuned plausibility band overlapping the H2 gate.
+    static void lcSim3GuardReject(const char *where, int cur, int cand, double s)
+    {
+        ++stat_lcSim3GuardRejects;
+        printf("[LC_SIM3_GUARD] reject where=%s cur=%d cand=%d s=%.6g\n", where, cur, cand, s);
+    }
+
     LoopCloser::LoopCloser(FullSystem *fullsystem) : fullSystem(fullsystem)
     {
         globalMap = fullSystem->globalMap;
@@ -74,6 +83,10 @@ namespace HSLAM {
 
             }
 
+            // Pre-WP4 D4: a Sophus exception on this path rejects the loop instead of terminating the
+            // process. Scoped to Sophus exceptions on purpose; anything else still propagates.
+            try
+            {
             bool loopDetected = DetectLoop();
             if (loopDetected)
             {
@@ -91,6 +104,17 @@ namespace HSLAM {
                     }
                     loopCorrTime.endTime(true);
                 }
+            }
+            }
+            catch (const Sophus::SophusException &e)
+            {
+                ++stat_lcSim3GuardRejects;
+                printf("[LC_SIM3_GUARD] reject where=exception cur=%d what=%s\n",
+                       currentKF ? (int)currentKF->fs->KfId : -1, e.what());
+                fflush(stdout);
+                auto gMap = globalMap.lock();
+                if (gMap)
+                    gMap->setBusy(false);
             }
 
             usleep(5000);
@@ -348,6 +372,14 @@ namespace HSLAM {
                         nCandidates--;
                         continue;
                     }
+                    // Pre-WP4 D4: s == 0 and NaN passed the test above; setScale(0) makes a Sim(3) whose
+                    // inverse throws. Positive scales take exactly the path they always took.
+                    if (!(s > 0) || !std::isfinite(s))
+                    {
+                        lcSim3GuardReject("ransac", (int)currentKF->fs->KfId, (int)pKF->fs->KfId, s);
+                        if (!vbDiscarded[i]) { vbDiscarded[i] = true; nCandidates--; }
+                        continue;
+                    }
 
                     int numatches = matcher->SearchBySim3(pKF, currentKF, vpMapPointMatches, s, R, t, 7.5); //def: currentKf, pKF
                     // cv::Mat Output;
@@ -436,6 +468,13 @@ namespace HSLAM {
                     if (nInliers >= 30) //20
                     {
                         const float s_optimized = gScm.scale();
+                        // Pre-WP4 D4: the optimised loop Sim(3) must itself be usable (never re-checked before).
+                        if (!sim3Usable(gScm))
+                        {
+                            lcSim3GuardReject("optimize_sim3", (int)currentKF->fs->KfId, (int)pKF->fs->KfId, gScm.scale());
+                            if (!vbDiscarded[i]) { vbDiscarded[i] = true; nCandidates--; }
+                            continue;
+                        }
 
                         // Indirect.H1 sensitivity diagnostic: how much did the seed actually move s_post?
                         // If LM is convergent (predicted), |s_post - s_RANSAC| / s_RANSAC < 1% across all alpha.
@@ -453,8 +492,9 @@ namespace HSLAM {
                         //   matched MP, located in currentKF via getIndexInKF). Direction matches legacy: candidate→current,
                         //   i.e. d_currentKF / d_pKF (in idepth: i_pKF / i_currentKF).
                         // The SML_COMPARE diagnostic always prints both regardless of any flag so we can audit before
-                        // shipping the new estimator. The P2 rejection gate (when enabled) consumes whichever the
-                        // setting_indirectMlSemanticFix flag selects (default: new).
+                        // shipping the new estimator. The H2 gate below takes new when it has >= 5 samples, else old.
+                        // (Pre-WP4 D8: a flag, setting_indirectMlSemanticFix, claimed to select this but was never
+                        // read; it is deleted and --indirect-ml-semantic-fix is a no-op.)
                         std::vector<float> ml_ratios_old;
                         std::vector<float> ml_ratios_new;
 
@@ -585,11 +625,19 @@ namespace HSLAM {
                             if (!mlScaleValid) continue;
                         }
 
+                        Sim3 gSmw = currentKF->fs->getPoseOpti(); //Sim3(currentKF->fs->getPoseInverse().matrix()); //pKF
+                        const Sim3 Scw_loop = gScm * gSmw;
+                        // Pre-WP4 D4: the loop pose every correction is propagated from.
+                        if (!sim3Usable(Scw_loop))
+                        {
+                            lcSim3GuardReject("loop_pose", (int)currentKF->fs->KfId, (int)pKF->fs->KfId, Scw_loop.scale());
+                            if (!vbDiscarded[i]) { vbDiscarded[i] = true; nCandidates--; }
+                            continue;
+                        }
                         bMatch = true;
                         candidateKF = pKF;
-                        Sim3 gSmw = currentKF->fs->getPoseOpti(); //Sim3(currentKF->fs->getPoseInverse().matrix()); //pKF
-                        mScw = gScm * gSmw;
-                       
+                        mScw = Scw_loop;
+
                         mvpCurrentMatchedPoints = vpMapPointMatches;
                         break;
                     }
@@ -731,6 +779,19 @@ namespace HSLAM {
             }
             //Pose without correction
             NonCorrectedSim3[pKFi] = TiwTemp;
+        }
+
+        // Pre-WP4 D4: validate every corrected pose BEFORE the map is touched, so a degenerate one aborts
+        // the correction cleanly rather than throwing half-way through setPoseOpti.
+        for (KeyFrameAndPose::iterator mit = CorrectedSim3.begin(), mend = CorrectedSim3.end(); mit != mend; mit++)
+        {
+            if (!sim3Usable(mit->second))
+            {
+                lcSim3GuardReject("correct_pose", (int)currentKF->fs->KfId, (int)mit->first->fs->KfId, mit->second.scale());
+                candidateKF->SetErase();   // released as computeSim3 releases a rejected loop
+                currentKF->SetErase();
+                return;
+            }
         }
 
         // Correct all MapPoints obsrved by candidate keyframe and neighbors, so that they align with the other side of the loop

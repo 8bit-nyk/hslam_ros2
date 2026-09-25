@@ -39,7 +39,13 @@ import datasets as ds            # noqa: E402
 import traj_eval                 # noqa: E402
 
 HSLAM_ROOT = Path(__file__).resolve().parents[2]
-BINARY = HSLAM_ROOT / "build" / "bin" / "HSLAM"
+# HSLAM_BINARY overrides the default for laptop smokes (the laptop builds in build_wp3c/). Campaigns
+# run the default, and every row records the binary's hash, so an override can never pass unseen.
+BINARY = Path(os.environ.get("HSLAM_BINARY", HSLAM_ROOT / "build" / "bin" / "HSLAM"))
+
+# Per-distance RPE pair spacing (pre-WP4, pre-registered in DECISIONS.md "Re-freeze epoch"): 1 m on the
+# room- and building-scale datasets, 100 m on KITTI (the shortest KITTI benchmark segment).
+RPE_DELTA_M = {"tum": 1.0, "iclnuim": 1.0, "euroc": 1.0, "tummonovo": 1.0, "kitti": 100.0}
 
 COLUMNS = [
     "timestamp", "commit", "dirty", "host", "evo_version", "arm", "dataset", "sequence", "rep",
@@ -55,6 +61,14 @@ COLUMNS = [
     "geom", "canon", "iso", "idepth_prior", "ml_gpu", "fp16", "model",
     "ts_source", "ts_hz", "ts_plausible",
     "traj_error", "cli",
+    # pre-WP4 (2026-09-25), appended so every earlier column keeps its position
+    "binary",                                       # sha256 of the binary, 16 hex (the epoch string)
+    "drift_local_pct_per_100m", "drift_local_pct_path", "drift_postfound_pct_path",
+    "founding_offset_log",                          # windowed drift; scale_drift_pct_per_100m is provenance
+    "rpe_dist_m", "rpe_trans_dist", "rpe_rot_dist",  # RPE per fixed distance; rpe_trans/rot are per-KF
+    "postinit_frames", "postinit_fps",              # cost DV: frames and wall time over the same span
+    "init_thresh", "init_thresh_mode", "init_mode", "init_resets",   # D6, V9
+    "founding_fix", "lc_sim3_guard",                # D2, D4
 ]
 
 
@@ -81,6 +95,20 @@ def git_commit() -> tuple[str, bool]:
         return subprocess.run(["git", *a], cwd=HSLAM_ROOT, capture_output=True,
                               text=True).stdout.strip()
     return g("rev-parse", "--short", "HEAD"), bool(g("status", "--porcelain"))
+
+
+def binary_hash(path: Path) -> str:
+    """First 16 hex of the binary's sha256 -- the epoch string campaign scripts check (audit D10).
+
+    The commit alone cannot detect a stale build: make_tables.py pools by commit, and a binary built
+    before the last pull carries the new commit's name.
+    """
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:16]
 
 
 # ---------------------------------------------------------------- GPU sampling
@@ -155,32 +183,41 @@ def _f(m, i=1, default=float("nan")):
 
 
 def parse_log(text: str) -> dict:
-    d = {k: float("nan") for k in ("pipeline_fps", "track_fps", "ml_ms")}
+    d = {k: float("nan") for k in ("pipeline_fps", "track_fps", "ml_ms", "postinit_fps")}
     d.update(status="", frames=0, keyframes=0, ml_inferences=0,
              geom="", canon="", iso="", idepth_prior="", ml_gpu="", fp16="", model="",
              ts_source="", ts_hz=float("nan"), ts_plausible="",
              lc_gate_enabled="", lc_gate_evals=0, lc_gate_fires=0, lc_gate_bypass=0,
              agreement_gate_fire_rate=float("nan"),
-             prior_align_n=0, prior_align_s_med=float("nan"), prior_align_s_iqr=float("nan"))
+             prior_align_n=0, prior_align_s_med=float("nan"), prior_align_s_iqr=float("nan"),
+             postinit_frames=0, init_thresh="", init_thresh_mode="", init_mode="",
+             init_resets=0, founding_fix="", lc_sim3_guard=0)
 
     if (m := re.search(r"\[PERF_SUMMARY\][^\n]*", text)):
         line = m.group(0)
         for key, pat in (("track_fps", r"track_fps=([\d.]+)"),
                          ("pipeline_fps", r"pipeline_fps=([\d.]+)"),
-                         ("ml_ms", r"ml_ms=([\d.]+)")):
+                         ("ml_ms", r"ml_ms=([\d.]+)"),
+                         ("postinit_fps", r"postinit_fps=([\d.]+)")):
             if (mm := re.search(pat, line)):
                 d[key] = float(mm.group(1))
+        if (mm := re.search(r"postinit_frames=(\d+)", line)):
+            d["postinit_frames"] = int(mm.group(1))
 
     if (m := re.search(r"\[RUN_SUMMARY\][^\n]*", text)):
         line = m.group(0)
         for key, pat in (("status", r"status=(\w+)"), ("geom", r"geom=(\w+)"),
                          ("canon", r"canon=(\w+)"), ("iso", r"iso=(\w+)"),
                          ("idepth_prior", r"idepth_prior=(\w+)"), ("ml_gpu", r"ml_gpu=(\w+)"),
-                         ("fp16", r"fp16=(\w+)"), ("model", r"model=(\S+)")):
+                         ("fp16", r"fp16=(\w+)"), ("model", r"model=(\S+)"),
+                         ("init_thresh", r"\binit_thresh=(\w+)"),
+                         ("init_thresh_mode", r"init_thresh_mode=(\w+)"),
+                         ("init_mode", r"\binit_mode=(\w+)"), ("founding_fix", r"founding_fix=(\w+)")):
             if (mm := re.search(pat, line)):
                 d[key] = mm.group(1)
-        for key, pat in (("frames", r"frames=(\d+)"), ("keyframes", r"kfs=(\d+)"),
-                         ("ml_inferences", r"ml_inferences=(\d+)")):
+        for key, pat in (("frames", r"\bframes=(\d+)"), ("keyframes", r"kfs=(\d+)"),
+                         ("ml_inferences", r"ml_inferences=(\d+)"),
+                         ("init_resets", r"init_resets=(\d+)"), ("lc_sim3_guard", r"lc_sim3_guard=(\d+)")):
             if (mm := re.search(pat, line)):
                 d[key] = int(mm.group(1))
 
@@ -188,9 +225,11 @@ def parse_log(text: str) -> dict:
     # grep by hand, because the two worst defects this project has found were both a silently
     # wrong timestamp source: KITTI's scientific-notation misparse (6799be6) and EuRoC's missing
     # times.txt, where the filename fallback reads nanoseconds as seconds. Neither crashes.
-    if (m := re.search(r"\[TIMESTAMPS\] source=(\S+)[^\n]*?\(([\d.]+) Hz\)[^\n]*?plausible=(\w+)",
-                       text)):
-        d["ts_source"], d["ts_hz"], d["ts_plausible"] = m.group(1), float(m.group(2)), m.group(3)
+    # The LAST line wins (pre-WP4 D7): on the associations path the folder reader prints one for a
+    # directory it never reads, and main.cpp then prints the timestamps actually fed.
+    if (ms := re.findall(r"\[TIMESTAMPS\] source=(\S+)[^\n]*?\(([\d.]+) Hz\)[^\n]*?plausible=(\w+)",
+                         text)):
+        d["ts_source"], d["ts_hz"], d["ts_plausible"] = ms[-1][0], float(ms[-1][1]), ms[-1][2]
 
     if (m := re.search(r"\[LC_SCALE_GATE\][^\n]*", text)):
         line = m.group(0)
@@ -284,17 +323,22 @@ def run_once(spec: ds.SeqSpec, arm_args: list[str], rep: int, outdir: Path,
 
     est = rundir / "result.txt"
     if est.exists() and est.stat().st_size > 0:
-        row.update(traj_eval.evaluate(est, spec.gt, spec.gt_format, spec.extrinsics))
+        row.update(traj_eval.evaluate(est, spec.gt, spec.gt_format, spec.extrinsics,
+                                      rpe_delta_m=RPE_DELTA_M.get(spec.dataset)))
     else:
         row.update({k: float("nan") for k in (
             "ate_sim3_rmse", "ate_se3_rmse", "scale_s", "scale_drift_pct_per_100m",
-            "rpe_trans", "rpe_rot", "gt_distance_m")})
+            "rpe_trans", "rpe_rot", "gt_distance_m",
+            "rpe_dist_m", "rpe_trans_dist", "rpe_rot_dist",
+            "drift_local_pct_per_100m", "drift_local_pct_path",
+            "drift_postfound_pct_path", "founding_offset_log")})
         row.update(poses=0, matched_poses=0, traj_error="no result.txt written")
 
     # Rule 1: a non-OK status invalidates the whole row, fps included.
     if row["status"] != "OK" or rc != 0:
         row["pipeline_fps"] = float("nan")
         row["track_fps"] = float("nan")
+        row["postinit_fps"] = float("nan")
         if not row["traj_error"]:
             row["traj_error"] = f"status={row['status'] or 'MISSING'} rc={rc}"
 
@@ -306,6 +350,7 @@ def run_once(spec: ds.SeqSpec, arm_args: list[str], rep: int, outdir: Path,
     if row["ts_plausible"] == "NO":
         row["pipeline_fps"] = float("nan")
         row["track_fps"] = float("nan")
+        row["postinit_fps"] = float("nan")
         row["traj_error"] = (f"implausible timestamps: source={row['ts_source'] or 'MISSING'} "
                              f"{row['ts_hz']:.2f} Hz").strip()
 
@@ -375,6 +420,14 @@ def _covers_enough(r: dict) -> bool:
 def write_csv(rows: list[dict], path: Path) -> None:
     new = not path.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Appending to a summary.csv written by an earlier COLUMNS list would put every value under the
+    # wrong header, silently. Refuse instead: a new column set means a new output directory.
+    if not new:
+        with open(path, newline="") as f:
+            header = next(csv.reader(f), [])
+        if header != COLUMNS:
+            raise SystemExit(f"ERROR: {path} was written with a different column set "
+                             f"({len(header)} vs {len(COLUMNS)} columns); write to a new --out")
     with open(path, "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
         if new:
@@ -390,6 +443,9 @@ def main() -> int:
     ap.add_argument("--sequence", required=True)
     ap.add_argument("--arm", default="full", help=f"one of: {', '.join(arms_mod.ARMS)}")
     ap.add_argument("--reps", type=int, default=1)
+    ap.add_argument("--rep-start", type=int, default=1,
+                    help="number of the first rep (a resume top-up continues the numbering instead of "
+                         "overwriting earlier rep directories)")
     ap.add_argument("--out", default="runs/adhoc", help="output dir, relative to HSLAM/")
     ap.add_argument("--endindex", type=int, default=None)
     ap.add_argument("--timeout", type=int, default=3600)
@@ -411,6 +467,9 @@ def main() -> int:
     arm_args = arms_mod.build(a.arm, spec) + list(a.extra)
     commit, dirty = git_commit()
     host, evo_ver = toolchain()
+    bin_hash = binary_hash(BINARY)
+    if BINARY != HSLAM_ROOT / "build" / "bin" / "HSLAM":
+        print(f"NOTE: HSLAM_BINARY override in use: {BINARY} (binary {bin_hash})", file=sys.stderr)
     outdir = (HSLAM_ROOT / a.out) if not Path(a.out).is_absolute() else Path(a.out)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -419,12 +478,12 @@ def main() -> int:
               file=sys.stderr)
 
     rows = []
-    for rep in range(1, a.reps + 1):
-        print(f"[{rep}/{a.reps}] {a.arm} {a.dataset} {a.sequence} ...", flush=True)
+    for rep in range(a.rep_start, a.rep_start + a.reps):
+        print(f"[{rep - a.rep_start + 1}/{a.reps}] {a.arm} {a.dataset} {a.sequence} rep{rep} ...", flush=True)
         r = run_once(spec, arm_args, rep, outdir, a.endindex, a.timeout)
         r.update(timestamp=time.strftime("%Y-%m-%dT%H:%M:%S"), commit=commit,
                  dirty=int(dirty), host=host, evo_version=evo_ver, arm=a.arm,
-                 dataset=a.dataset, sequence=a.sequence, rep=rep)
+                 dataset=a.dataset, sequence=a.sequence, rep=rep, binary=bin_hash)
         rows.append(r)
         print(f"     status={r['status']} rc={r['returncode']} "
               f"ate_sim3={r['ate_sim3_rmse']:.4f} s={r['scale_s']:.4f} "
@@ -438,7 +497,7 @@ def main() -> int:
     print(f"\n{len(ok)}/{len(rows)} usable -> {csv_path}")
     if ok:
         from statistics import median
-        for k in ("ate_sim3_rmse", "ate_se3_rmse", "scale_s", "pipeline_fps"):
+        for k in ("ate_sim3_rmse", "ate_se3_rmse", "scale_s", "founding_offset_log", "postinit_fps"):
             vals = [r[k] for r in ok if r[k] == r[k]]
             if vals:
                 print(f"  median {k:26s} {median(vals):.4f}")

@@ -190,7 +190,9 @@ extern float setting_vsWeight;           // Direct.VS: weight multiplier (defaul
 // Naming: "Indirect.P0" = MapPoint storage, "Indirect.P1" = BA depth prior, "Indirect.P2" = loop scale validation
 extern float setting_indirectMLDepthWeight;      // Indirect.P1: Weight multiplier for g2o depth prior edges (INERT — consumer is dead BundleAdjustment)
 extern bool setting_disableIndirectP2LoopCloser; // Indirect.P2: DEPRECATED. Was the original P2 rejection-gate kill-switch; superseded by setting_indirectP2RejectGate below. Retained as-declared for paper-doc traceability but no longer consumed in code.
-extern bool setting_indirectMlSemanticFix;       // Indirect.H0: when true, s_ml in LoopCloser is computed from current-KF ML depth images at matched feature pixels (correct inter-KF scale) instead of source-frame MapPoint ML idepth ratios. Default true. SML_COMPARE diagnostic always prints both regardless of this flag. CLI: --indirect-ml-semantic-fix.
+// Pre-WP4 D8 (2026-09-25): setting_indirectMlSemanticFix deleted. It had no consumer: the H2 gate always
+// uses the per-pixel (new) s_ml when >= 5 samples, else the MapPoint (old) one (LoopCloser.cpp). The CLI
+// option --indirect-ml-semantic-fix survives as a deprecated no-op so older CLI lines still parse.
 extern bool setting_indirectP2RejectGate;        // Indirect.H2: when true, reject loop-closure Sim3 candidates with |s_RANSAC − s_ML|/max > setting_indirectP2RejectThresh. Uses new s_ml when available (n≥5), else falls back to old s_ml (n≥5), else bypasses (coverage_low). Default true (shipped May 8, 2026). CLI: --p2-gate.
 // WP0 (RA-L v2): [LC_SCALE_GATE] counters for the Indirect.H2 scale-disagreement gate. Written only
 // by the loop-closure thread; read once at shutdown, after that thread is joined.
@@ -339,6 +341,22 @@ extern float setting_mlPriorSigmaLog;         // log-mode 1-sigma RELATIVE depth
 #define ML_SEED_MIDPOINT 1
 #define ML_SEED_PRIOR_IF_IN_BRACKET 2
 extern bool setting_mlPriorCentredTrace;      // Sprint 12: centre the truncated epipolar window on rho_ML           // [TRACE_STATS]/[ACT_STATS] diagnostics; no behavioural effect
+
+// Pre-WP4 D6 (2026-09-25): initialisation-failure (reset) thresholds, decoupled from --ml-depth.
+// auto (default, shipped) = tolerant iff ML depth is live or GT depth is the source, else strict.
+// tolerant = RMSE bars 42/30/22/18/15 over up to 6 keyframes; strict = 20/13/9 over up to 4.
+// CLI: --init-fail-thresholds. The fairness arm A0_tol is monocular + tolerant.
+enum InitFailThresholds { INIT_THRESH_AUTO = 0, INIT_THRESH_TOLERANT = 1, INIT_THRESH_STRICT = 2 };
+extern int setting_initFailThresholds;
+// Pre-WP4 D2 / WP2a-R3b (2026-09-25): founding-segment fix. off (default, shipped) | relin: founding
+// points are exempt from the ML linearisation freeze (their idepth_zero is the initialiser's depth,
+// not an ML prior) | anchor: after the snap the initialiser keeps its depth anchor to the fixed ML
+// seed (alphaW, depth part only). CLI: --init-founding-fix.
+enum InitFoundingFix { INIT_FOUNDING_FIX_OFF = 0, INIT_FOUNDING_FIX_RELIN = 1, INIT_FOUNDING_FIX_ANCHOR = 2 };
+extern int setting_initFoundingFix;
+// Run-level counters that must survive an initialisation reset (which rebuilds FullSystem).
+extern int stat_initResets;          // D6: "INITIALIZATION FAILED! Resetting" events
+extern int stat_lcSim3GuardRejects;  // D4: loop candidates/corrections rejected as degenerate Sim(3)
 
 // Sprint 11 (INTEGRATION_DAMAGE_AUDIT D0/D1/D2) — Metric3D-v2 input-geometry and depth-scale
 // correctness. Three confirmed integration defects, each independently gateable, all default OFF so

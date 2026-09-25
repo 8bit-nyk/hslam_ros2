@@ -245,7 +245,8 @@ bool setting_disableIndirectP2LoopCloser = true; // Indirect.P2: DISABLED BY DEF
 // survives FH marginalization. INDIRECT.SML_COMPARE diagnostic always prints old + new s_ml on every loop event for
 // audit; this flag only controls which value the (off-by-default) P2 rejection gate consumes. See
 // docs/indirect_depth_integration/LOOP_CLOSURE_ML_TEST_PLAN.md §4 H0.
-bool setting_indirectMlSemanticFix = true;
+// Pre-WP4 D8 (2026-09-25): the flag that was meant to select between the two estimators had no consumer
+// and is deleted; the gate's fixed policy (new if n >= 5, else old) is what every run has executed.
 
 // Indirect.H2 (May 8, 2026): loop-closure Sim3 scale-disagreement rejection gate.
 // Replaces (and supersedes) the old setting_disableIndirectP2LoopCloser kill-switch — that flag is
@@ -266,6 +267,8 @@ bool setting_mlFp16Requested = false;
 int stat_lcScaleGateEvals   = 0;   // WP0: [LC_SCALE_GATE]
 int stat_lcScaleGateRejects = 0;
 int stat_lcScaleGateBypass  = 0;
+int stat_lcSim3GuardRejects = 0;   // pre-WP4 D4: [LC_SIM3_GUARD]
+int stat_initResets         = 0;   // pre-WP4 D6: [RUN_SUMMARY] init_resets
 float setting_indirectP2RejectThresh = 0.5f;
 
 // Indirect.H3 (May 8, 2026): per-KF Sim3 scale priors in OptimizeEssentialGraph.
@@ -476,6 +479,12 @@ bool  setting_mlInitScaleMedian = false;
 // when the prior is wrong. true = use gradH.trace() (the sum of the two eigenvalues, which is what the
 // expression gradH_ev[0]+gradH_ev[1] intends). false = shipped behaviour.
 bool  setting_p1BlendGradFix = false;       // measured q0.90|ln(Dpred/Dgt)|: TUM 0.21-0.27, KITTI 0.37, ICL 0.56
+// Pre-WP4 D6 (2026-09-25): until now the reset thresholds switched on whether ML depth was live, with no
+// flag, so every ML arm was held to a ~2x more tolerant initialisation bar than monocular (audit V3).
+// auto = that shipped behaviour; tolerant/strict force one bar for any arm.
+int   setting_initFailThresholds = INIT_THRESH_AUTO;
+// Pre-WP4 D2 (2026-09-25), WP2a-R3b: founding-segment fix; off = shipped. See settings.h.
+int   setting_initFoundingFix = INIT_FOUNDING_FIX_OFF;
 
 // Sprint 11 (D0/D1/D2 integration fixes) — default OFF until they earn default-on with data.
 bool setting_mlMetric3dRefGeometry = false;

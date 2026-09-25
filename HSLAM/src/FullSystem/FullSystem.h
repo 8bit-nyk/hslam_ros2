@@ -173,8 +173,14 @@ public:
 	// avg_ml_inference_ms: mean ML forward-pass time. pipeline_wall_ms / pipeline_frames: end-to-end
 	// wall clock and frame count for the WHOLE pipeline (tracking + mapping/BA + ML + loop closure),
 	// measured in main.cpp after the mapping backlog drains. Pass <=0 to omit the pipeline figures.
+	// post_init_frames: frames fed from the frame on which the last initialisation started -- the span the
+	// wall clock covers (pre-WP4 cost DV). Pass <=0 to omit.
 	void printPerfSummary(double avg_ml_inference_ms = -1.0,
-	                      double pipeline_wall_ms = -1.0, int pipeline_frames = -1);
+	                      double pipeline_wall_ms = -1.0, int pipeline_frames = -1,
+	                      int post_init_frames = -1);
+
+	// Pre-WP4 D6: which initialisation-failure bar applies (see --init-fail-thresholds).
+	bool useTolerantInitThresholds() const;
 
 	// Perf accumulators (updated per-frame in TrackMonocularWithML)
 	struct timeval perf_last_frame_time_;
@@ -291,6 +297,10 @@ public:
 	bool using_metric_scale_ = false;
 	float init_scale_factor_ = 1.0f;
 	int init_points_count_ = 0;
+	// Pre-WP4 V9: how Phase 0 actually initialised this map -- metric | metric_meanfb (the factor fell back
+	// to the prior's mean depth) | gt_aggregate | photometric_fallback (a metric init was requested but
+	// rejected) | photometric (none requested) | none (never initialised). Reported in [RUN_SUMMARY].
+	const char* init_mode_label_ = "none";
 	
 	// Scale alignment system for ML depth integration
 	float ml_to_slam_scale_factor_ = 1.0f;  // Conversion factor from ML (metric) to SLAM scale

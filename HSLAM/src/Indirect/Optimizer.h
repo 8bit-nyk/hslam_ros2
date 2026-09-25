@@ -339,6 +339,24 @@ namespace HSLAM
     HSLAM::Sim3 g2oSim3_to_sophusSim3(HSLAM::Sim3Vertex &g2o_sim3);
     g2o::Sim3 sophusSim3_to_g2oSim3(HSLAM::Sim3 sophus_sim3);
 
+    // Pre-WP4 D4: whether a keyframe Sim(3) pose with scale s (and translation t) can be written back and
+    // used. MapPoint::updateGlobalPose casts a keyframe's INVERSE Sim(3) pose to float, and Sophus's float
+    // RxSO3 throws ScaleNotPositive when s^2 <= 1e-5, which aborted the run from the loop-closure thread
+    // (gdb on eval-server, A0 on KITTI 00, binary 692adec6141bda91: CorrectLoop -> updateGlobalPose ->
+    // Sim3::cast<float>). So both s and 1/s must satisfy it: s within about (0.0032, 316). This is the
+    // representable range of the code, not a plausibility band, and it is the same in every arm.
+    inline bool sim3ScaleUsable(double s)
+    {
+        if (!std::isfinite(s)) return false;
+        const double s2 = s * s;
+        const double eps = Sophus::SophusConstants<float>::epsilon();
+        return s2 > eps && 1.0 / s2 > eps;
+    }
+    inline bool sim3Usable(const HSLAM::Sim3 &S)
+    {
+        return sim3ScaleUsable(S.scale()) && S.translation().allFinite();
+    }
+
     bool PoseOptimization(std::shared_ptr<Frame> pFrame, CalibHessian *calib, bool updatePose = true);
     int checkOutliers(std::shared_ptr<Frame> pFrame, CalibHessian* calib);
     

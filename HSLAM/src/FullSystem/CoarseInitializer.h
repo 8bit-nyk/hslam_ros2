@@ -59,6 +59,7 @@ public:
 
 	float iR;
 	float iRSumNum;
+	float iR_seed = 0.0f;	// Pre-WP4 D2 (WP2a-R3b): the fixed ML seed; 0 = not seeded
 
 	float lastHessian;
 	float lastHessian_new;
@@ -95,6 +96,14 @@ public:
 	void seedPointsWithMLDepth();  // Seed initializer points with ML inverse depth
 	float computeMetricScaleFactor();
 	bool mlSeededInit = false;    // True if points were seeded with ML depth
+
+	// Pre-WP4 V9: where computeMetricScaleFactor()'s value came from (no silent fallbacks).
+	enum ScaleSource { SCALE_SRC_NONE = 0, SCALE_SRC_MEDIAN = 1, SCALE_SRC_MEAN_NOMAP = 2, SCALE_SRC_MEAN_FEWPTS = 3 };
+	int lastScaleSource = SCALE_SRC_NONE;
+	// Pre-WP4 D2 [INIT_CONSISTENCY]: the initialiser's gauge on the frame it snapped (level 0, good points).
+	int snapFrame = -1;
+	float snapMeanIR = -1.0f;
+	float snapTNorm = -1.0f;
 
 	int frameID;
 	bool fixAffine;

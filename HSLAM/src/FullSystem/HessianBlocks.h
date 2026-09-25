@@ -554,6 +554,10 @@ struct PointHessian
 	float ml_idepth_reference;   // NEW: ML depth reference value
 	float ml_uncertainty;        // NEW: ML depth uncertainty
 	float ml_weight;             // NEW: Computed adaptive ML weight
+	// Pre-WP4 D2 (WP2a-R3b): FOUNDING points (created by initializeFromInitializer) and their inverse depth
+	// at creation. Used by --init-founding-fix=relin and the [INIT_CONSISTENCY] diagnostic only.
+	bool isFounding = false;
+	float idepth_founding = 0.0f;
 
 	float my_type;
 

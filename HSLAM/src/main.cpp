@@ -148,7 +148,7 @@ int main(int argc, char **argv)
 		("ml-inference-mode", "ML inference cadence: 0=every Nth KF (legacy), 1=init_only (lean), 2=disabled. Default 0.", cxxopts::value<int>()->default_value("0"))
 		("ml-inference-every-n", "ML inference cadence N (mode 0): run ML every Nth keyframe. 1=every keyframe (densest normals, ~2x ML cost), 2=default (Paper Table V).", cxxopts::value<int>()->default_value("2"))
 		("ml-indirect-filter", "Indirect.Step2 ML depth-ratio filter in feature matchers. true=enabled (legacy), false=disabled. Default true.", cxxopts::value<bool>()->default_value("true"))
-		("indirect-ml-semantic-fix", "Indirect.H0 s_ml semantic fix in LoopCloser: compute s_ml from current-KF ML depth images at matched pixels (true) vs legacy source-frame MapPoint ML idepth ratios (false). Default true. SML_COMPARE diagnostic prints both regardless.", cxxopts::value<bool>()->default_value("true"))
+		("indirect-ml-semantic-fix", "DEPRECATED NO-OP, kept so older CLI lines still parse (pre-WP4 D8). It never had a consumer: the H2 gate always uses the per-pixel s_ml when it has >= 5 samples, else the MapPoint one.", cxxopts::value<bool>()->default_value("true"))
 		("p2-gate", "Indirect.H2 P2 rejection gate: reject loop-closure Sim3 candidates whose ML-derived scale disagrees with RANSAC-fit scale by more than --p2-gate-thresh. Uses new s_ml if available, falls back to old. Default true (shipped May 8, 2026 after C2 verdict).", cxxopts::value<bool>()->default_value("true"))
 		("p2-gate-thresh", "Indirect.H2 disagreement threshold for the P2 gate. Reject if |s_RANSAC - s_ML| / max(s_RANSAC, s_ML) > thresh. Default 0.5 (50%).", cxxopts::value<float>()->default_value("0.5"))
 		("h3-abs", "Indirect.H3-abs unary EdgeSim3ScalePrior in OptimizeEssentialGraph (anchors per-KF Sim3 scale to bias-corrected ML estimate). Default false. Requires --h3-bias.", cxxopts::value<bool>()->default_value("false"))
@@ -176,6 +176,8 @@ int main(int argc, char **argv)
 		("ml-idepth-prior", "Sprint 13: ML inverse-depth prior parameterisation. 'box' (default, shipped: rho +/- absolute u_eff), 'none' (leave DSO's (0,NaN) -- the TRUE Direct.P1 ablation, which --p1 has never performed), 'relative' (log-symmetric D in [D*e^-q, D*e^+q], idepth_min strictly positive). idepth_GT is kept in all three, so only the WIDTH channel changes.", cxxopts::value<std::string>()->default_value("box"))
 		("p1-blend-grad-fix", "WP3e-2: in the Direct.P1 disjoint-bracket blend, use gradH.trace() for the gradient gate instead of the never-assigned gradH_ev (uninitialised memory in the shipped build). Default false = shipped.", cxxopts::value<bool>()->default_value("false"))
 		("ml-init-scale", "WP3e-1: Phase-0 metric factor. 'legacy' (default, shipped): ml_mean_depth / photometricScale; 'median': ml_mean_depth alone (median(D_ML*iR), the factor that puts the founding points at the prior's depth).", cxxopts::value<std::string>()->default_value("legacy"))
+		("init-fail-thresholds", "Pre-WP4 D6: initialisation-failure (reset) RMSE thresholds. 'auto' (default, shipped): tolerant when ML depth is live or GT depth is the source, else strict. 'tolerant': 42/30/22/18/15 over up to 6 keyframes. 'strict': 20/13/9 over up to 4 (stock DSO's monocular bar).", cxxopts::value<std::string>()->default_value("auto"))
+		("init-founding-fix", "Pre-WP4 D2 (WP2a-R3b): founding-segment fix. 'off' (default, shipped). 'relin': founding points are exempt from the ML linearisation freeze (--ml-fej-freeze), since their idepth_zero is the initialiser's depth, not an ML prior. 'anchor': after the snap the initialiser keeps its depth anchor (weight --ml-alpha-w) to the fixed ML seed; ML-seeded inits only.", cxxopts::value<std::string>()->default_value("off"))
 		("ml-prior-source", "WP3d: which depth map seeds a keyframe's new immature points. 'stale' (default, shipped): the previous ML keyframe's map, as currentMLDepthImage is filled on the tracking path before this keyframe's inference; 'fresh': this keyframe's own map when inference ran on it, else stale; 'fresh_only': own map or no prior.", cxxopts::value<std::string>()->default_value("stale"))
 		("ml-fej-freeze", "WP3c: keep each ML-seeded point's BA linearisation depth (idepth_zero) frozen at the ML prior for its whole life (FullSystemOptPoint.cpp:233, FullSystemOptimize.cpp:304/330/440). true = shipped/paper behaviour; false = stock DSO (idepth_zero follows idepth every step). Default true.", cxxopts::value<bool>()->default_value("true"))
 		("ml-prior-weight", "WP2c: multiplier on the explicit Direct.P2 prior weight (needs --p2=true). 1.0 = the shipped formula untouched; any other value selects the v2 formula (confidence clamped to [0.1,1], runtime weight calibration off). Default 1.0.", cxxopts::value<float>()->default_value("1.0"))
@@ -254,7 +256,8 @@ int main(int argc, char **argv)
 	setting_mlInferenceMode = result["ml-inference-mode"].as<int>();
 	setting_mlInferenceEveryN = std::max(1, result["ml-inference-every-n"].as<int>());
 	setting_indirectMatcherUseML = result["ml-indirect-filter"].as<bool>();
-	setting_indirectMlSemanticFix = result["indirect-ml-semantic-fix"].as<bool>();
+	if (result.count("indirect-ml-semantic-fix"))
+		printf("[PHASE_CONFIG] note: --indirect-ml-semantic-fix is a deprecated no-op (it never had a consumer).\n");
 	setting_indirectP2RejectGate = result["p2-gate"].as<bool>();
 	setting_indirectP2RejectThresh = result["p2-gate-thresh"].as<float>();
 	setting_indirectH3AbsScalePrior = result["h3-abs"].as<bool>();
@@ -363,6 +366,20 @@ int main(int argc, char **argv)
 	}
 	setting_mlFreezeIdepthZero = result["ml-fej-freeze"].as<bool>();
 	printf("[PHASE_CONFIG] ml-fej-freeze=%s\n", setting_mlFreezeIdepthZero ? "on" : "off");
+	{
+		const std::string it = result["init-fail-thresholds"].as<std::string>();
+		if (it == "auto") setting_initFailThresholds = INIT_THRESH_AUTO;
+		else if (it == "tolerant") setting_initFailThresholds = INIT_THRESH_TOLERANT;
+		else if (it == "strict") setting_initFailThresholds = INIT_THRESH_STRICT;
+		else { printf("ERROR: --init-fail-thresholds must be auto|tolerant|strict (got '%s').\n", it.c_str()); return 0; }
+		printf("[PHASE_CONFIG] init-fail-thresholds=%s\n", it.c_str());
+		const std::string ff = result["init-founding-fix"].as<std::string>();
+		if (ff == "off") setting_initFoundingFix = INIT_FOUNDING_FIX_OFF;
+		else if (ff == "relin") setting_initFoundingFix = INIT_FOUNDING_FIX_RELIN;
+		else if (ff == "anchor") setting_initFoundingFix = INIT_FOUNDING_FIX_ANCHOR;
+		else { printf("ERROR: --init-founding-fix must be off|relin|anchor (got '%s').\n", ff.c_str()); return 0; }
+		printf("[PHASE_CONFIG] init-founding-fix=%s\n", ff.c_str());
+	}
 	// WP2c
 	setting_mlPriorWeightMult = result["ml-prior-weight"].as<float>();
 	setting_mlPriorGateK = result["ml-prior-gate-k"].as<float>();
@@ -834,6 +851,10 @@ int main(int argc, char **argv)
         double sInitializerOffset=0;
         int processedFrames = 0;  // Declare at function scope
         std::vector<int> idsToPlay;  // Declare at function scope for statistics
+        // Pre-WP4 cost DV: frames fed from the frame on which the (last) initialisation started, i.e. the
+        // same span tv_start measures. pipelineFrames below counts the whole requested range although
+        // pre-init frames are never timed, which flatters arms that initialise late (audit §6.2).
+        int postInitFrames = 0;
 
         // Initialize FPSLogger for performance monitoring
         std::string dataset_name = "unknown";
@@ -867,7 +888,11 @@ int main(int argc, char **argv)
             FileReader reader_assoc(associations);
             
             int frameCount = 0;
-            
+            // Pre-WP4 D7: the timestamps this path actually feeds. The folder reader printed a
+            // [TIMESTAMPS] line at construction for a directory it never reads on this path (SYNTHETIC,
+            // plausible=NO), which failed every associations row in eval_run.py.
+            std::vector<double> assocTimestampsUsed;
+
             for (auto it = reader_assoc.begin(); it != reader_assoc.end(); ++it, ++frameCount) {
                 if (frameCount < startIndex) continue;
                 if (frameCount >= endIndex) break;
@@ -880,6 +905,7 @@ int main(int argc, char **argv)
                     gettimeofday(&tv_start, NULL);
                     started = clock();
                     sInitializerOffset = 0;
+                    postInitFrames = 0;
                 }
                 
                 // Parse association entry
@@ -960,8 +986,10 @@ int main(int argc, char **argv)
                 
                 // Call TrackRGBD with RGB color for ML and grayscale for SLAM
                 fullSystem->TrackRGBD(rgb_for_ml, rgb_img, depth_img, timestamp);
-                
+                assocTimestampsUsed.push_back(timestamp);
+
                 processedFrames++;
+                postInitFrames++;
                 
                 if(viewer!=0 && viewer->isDead) break;
                 
@@ -1025,6 +1053,20 @@ int main(int argc, char **argv)
                     break;
                 }
             }
+            // Pre-WP4 D7: same format and bounds as DatasetReader.h's line; eval_run.py reads the LAST
+            // [TIMESTAMPS] source= line, so this one describes the run.
+            if (!assocTimestampsUsed.empty()) {
+                bool monotonic = true;
+                for (size_t k = 1; k < assocTimestampsUsed.size(); ++k)
+                    if (assocTimestampsUsed[k] < assocTimestampsUsed[k-1]) { monotonic = false; break; }
+                const double span = assocTimestampsUsed.back() - assocTimestampsUsed.front();
+                const double dt = assocTimestampsUsed.size() > 1 ? span / (double)(assocTimestampsUsed.size() - 1) : 0.0;
+                const bool plausible = (dt >= 1e-4 && dt <= 10.0);
+                printf("[TIMESTAMPS] note: the folder reader's line above is unused on the associations path.\n");
+                printf("[TIMESTAMPS] source=associations n=%zu span=%.3fs mean_dt=%.4fs (%.2f Hz) monotonic=%s plausible=%s\n",
+                       assocTimestampsUsed.size(), span, dt, dt > 0 ? 1.0/dt : 0.0,
+                       monotonic ? "yes" : "NO", plausible ? "yes" : "NO");
+            }
         } else {
             // Fallback to original monocular pipeline
             printf("Using monocular pipeline (no associations file provided)\n");
@@ -1075,6 +1117,7 @@ int main(int argc, char **argv)
                     gettimeofday(&tv_start, NULL);
                     started = clock();
                     sInitializerOffset = std::isfinite(timesToPlayAt[ii]) ? timesToPlayAt[ii] : 0.0;
+                    postInitFrames = 0;
                 }
 
                 int i = idsToPlay[ii];
@@ -1120,6 +1163,7 @@ int main(int argc, char **argv)
                         // Use standard monocular tracking
                         fullSystem->addActiveFrame(img, i);
                     }
+                    postInitFrames++;
                 }
 
                 delete img;
@@ -1207,7 +1251,10 @@ int main(int argc, char **argv)
         // Deliberately excludes sInitializerOffset, which is a playback-schedule offset, not work.
         double pipelineWallMs = (tv_end.tv_sec  - tv_start.tv_sec) * 1000.0
                               + (tv_end.tv_usec - tv_start.tv_usec) / 1000.0;
-        int pipelineFrames = abs(idsToPlay[0] - idsToPlay.back()) + 1;
+        // Pre-WP4 D7: the associations path never fills idsToPlay, so indexing it was a null read that
+        // killed every --associations run (ICL, --depth-source=gt) before printResult (audit V4).
+        int pipelineFrames = idsToPlay.empty() ? processedFrames
+                                               : abs(idsToPlay[0] - idsToPlay.back()) + 1;
 
         fullSystem->printResult("result.txt");
 		if (outputPC) fullSystem->printPC("PC.PCD");
@@ -1227,7 +1274,7 @@ int main(int argc, char **argv)
         {
             double avg_ml_ms = (ml_depth_enabled && fullSystem->ml_depth_enabled_)
                              ? fullSystem->ml_metrics_.avg_ml_inference_time_ms : -1.0;
-            fullSystem->printPerfSummary(avg_ml_ms, pipelineWallMs, pipelineFrames);
+            fullSystem->printPerfSummary(avg_ml_ms, pipelineWallMs, pipelineFrames, postInitFrames);
         }
 
         double MilliSecondsTakenSingle = 1000.0f*(ended-started)/(float)(CLOCKS_PER_SEC);

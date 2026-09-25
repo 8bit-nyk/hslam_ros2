@@ -47,6 +47,17 @@
 namespace HSLAM
 {
 
+// Whether a point's BA linearisation depth (idepth_zero) stays where it is instead of following idepth.
+// Shipped rule: indirect-prior points (hasDepthPrior) and, under --ml-fej-freeze, ML points (WP3c).
+// Pre-WP4 D2 (WP2a-R3b) --init-founding-fix=relin exempts FOUNDING points from the ML freeze only: their
+// idepth_zero is the initialiser's depth, not an ML prior, so the freeze holds the first window at the
+// initialiser's solution. hasDepthPrior is untouched, so the monocular arm is unaffected.
+static inline bool keepIdepthZero(const PointHessian* ph)
+{
+	if (ph->hasDepthPrior) return true;
+	if (!(ph->hasMLDepth && setting_mlFreezeIdepthZero)) return false;
+	return !(setting_initFoundingFix == INIT_FOUNDING_FIX_RELIN && ph->isFounding);
+}
 
 
 
@@ -303,7 +314,7 @@ bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,f
 
                 // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors
                 // This preserves both ML reference depth and indirect MapPoint priors
-                if(!ph->hasDepthPrior && !(ph->hasMLDepth && setting_mlFreezeIdepthZero)) {   // WP3c gate
+                if(!keepIdepthZero(ph)) {   // WP3c gate; pre-WP4 D2 relin
                     ph->setIdepthZero(ph->idepth_backup + step_ph);
                 }
 			}
@@ -329,7 +340,7 @@ bool FullSystem::doStepFromBackup(float stepfacC,float stepfacT,float stepfacR,f
 
                 // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors
                 // This preserves both ML reference depth and indirect MapPoint priors  
-                if(!ph->hasDepthPrior && !(ph->hasMLDepth && setting_mlFreezeIdepthZero)) {   // WP3c gate
+                if(!keepIdepthZero(ph)) {   // WP3c gate; pre-WP4 D2 relin
                     ph->setIdepthZero(ph->idepth_backup + stepfacD*ph->step);
                 }
 			}
@@ -439,7 +450,7 @@ void FullSystem::loadSateBackup()
 
             // CRITICAL FIX: Don't overwrite idepth_zero for points with depth priors during backup restoration
             // This preserves both ML reference depth and indirect MapPoint priors during backtracking
-            if(!ph->hasDepthPrior && !(ph->hasMLDepth && setting_mlFreezeIdepthZero)) {   // WP3c gate
+            if(!keepIdepthZero(ph)) {   // WP3c gate; pre-WP4 D2 relin
                 ph->setIdepthZero(ph->idepth_backup);
             }
 		}

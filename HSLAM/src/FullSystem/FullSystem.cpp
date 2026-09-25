@@ -1103,10 +1103,12 @@ void FullSystem::activatePointsMT()
 		}
 		else if(newpoint == (PointHessian*)((long)(-1)) || ph->lastTraceStatus==IPS_OOB)
 		{
-			delete ph;
+			// Pre-WP4 D8: the delete used to come first, so ph->Mp and ph->host were read from freed
+			// memory (the host read is inherited from stock DSO, the Mp read is ours; audit V7).
 			if(!ph->Mp.expired())
 				ph->Mp.lock()->setDirStatus(MapPoint::removed);
 			ph->host->immaturePoints[ph->idxInImmaturePoints] = nullptr;
+			delete ph;
 		}
 		else
 		{
@@ -1340,7 +1342,12 @@ void FullSystem::TrackRGBD(const cv::Mat& rgb_color, const cv::Mat& rgb_image, c
     // Create ImageAndExposure from RGB for compatibility with existing pipeline
     ImageAndExposure* img = new ImageAndExposure(rgb_image.cols, rgb_image.rows, timestamp);
     memcpy(img->image, rgb_image.data, rgb_image.cols * rgb_image.rows * sizeof(float));
-    
+    // Pre-WP4 D7: the ORB front end reads PhoUncalibImage (addActiveFrame -> Frame), which this path never
+    // filled, so every associations run detected features on uninitialised memory (audit V4/B9). The
+    // folder reader fills it with the geometrically undistorted, photometrically uncalibrated intensity;
+    // this path applies neither correction, so that is the same grey image.
+    memcpy(img->PhoUncalibImage, rgb_image.data, rgb_image.cols * rgb_image.rows * sizeof(float));
+
     
     static int frame_id = 0;
     addActiveFrame(img, frame_id++);
@@ -2464,9 +2471,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	// =========================== Figure Out if INITIALIZATION FAILED =========================
 	// ML-aware initialization failure detection.
 	// Phase B: GT mode also gets the tolerant threshold (GT provides depth signal equivalent to ML).
-	bool use_ml_tolerant_thresholds =
-	    (setting_depthSource == DEPTH_SOURCE_ML && ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady())
-	    || setting_depthSource == DEPTH_SOURCE_GT;
+	// Pre-WP4 D6: --init-fail-thresholds decouples the bar from the depth source; auto = the rule above.
+	bool use_ml_tolerant_thresholds = useTolerantInitThresholds();
 	int max_keyframes = use_ml_tolerant_thresholds ? 6 : 4; // Allow more keyframes with ML/GT depth
 	
 	// DEBUG_INIT: Show failure detection parameters
@@ -2518,9 +2524,10 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		//	   rmse, threshold, should_reset ? "EXCEEDED - RESET" : "OK");
 		
 		if (should_reset) {
-			printf("I THINK INITIALIZATINO FAILED! Resetting. (ML-tolerant mode: %s, RMSE: %.2f, keyframes: %zu)\n", 
+			printf("I THINK INITIALIZATINO FAILED! Resetting. (ML-tolerant mode: %s, RMSE: %.2f, keyframes: %zu)\n",
 			       use_ml_tolerant_thresholds ? "YES" : "NO", rmse, allKeyFramesHistory.size());
 			initFailed=true;
+			++stat_initResets;   // pre-WP4 D6: survives the FullSystem rebuild that follows
 		} else {
 			// CRITICAL FIX: Apply metric conversion AFTER RMSE validation passes
 			// This ensures conversion happens only when initialization is stable
@@ -2547,7 +2554,23 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 		}
 	}
 
-
+	// Pre-WP4 D2 (WP2a-R3b) [INIT_CONSISTENCY], stage=kf: after each of the first 15 keyframe BAs, how far
+	// the BA has moved the founding map from where the initialiser put it (median idepth/idepth_founding
+	// over founding points still active in the first frame). A value far from 1 is the founding segment
+	// being rescaled after the fact. Every arm, diagnostic only.
+	if (allKeyFramesHistory.size() <= 16 && !frameHessians.empty() && frameHessians[0]->shell->KfId == 0) {
+		std::vector<float> rs;
+		for (PointHessian* ph : frameHessians[0]->pointHessians)
+			if (ph && ph->isFounding && ph->idepth_founding > 0 && std::isfinite(ph->idepth))
+				rs.push_back(ph->idepth / ph->idepth_founding);
+		float rs_med = NAN;
+		if (!rs.empty()) {
+			std::nth_element(rs.begin(), rs.begin() + rs.size() / 2, rs.end());
+			rs_med = rs[rs.size() / 2];
+		}
+		printf("[INIT_CONSISTENCY] stage=kf kf=%zu founding_active=%zu founding_idepth_ratio_med=%.4f rmse=%.3f\n",
+		       allKeyFramesHistory.size() - 1, rs.size(), rs_med, rmse);
+	}
 
     if(isLost) return;
 
@@ -2812,6 +2835,14 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		printf("Using photometric scale: %.3f\n", rescaleFactor);
 	}
 	
+	// Pre-WP4 V9: record which Phase-0 path ran, so a silent fallback can never be unlabelled (audit B6).
+	if (usingMetricScale)
+		init_mode_label_ = (setting_depthSource == DEPTH_SOURCE_GT) ? "gt_aggregate"
+		                 : (coarseInitializer->lastScaleSource == CoarseInitializer::SCALE_SRC_MEDIAN) ? "metric"
+		                 : "metric_meanfb";
+	else
+		init_mode_label_ = setting_useMLForInitialization ? "photometric_fallback" : "photometric";
+
 	// Store initialization method and scale factor for logging
 	if (usingMetricScale) {
 		using_metric_scale_ = true;
@@ -2970,6 +3001,8 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		ph->setIdepthScaled(final_idepth);
 		ph->setIdepthZero(ph->idepth);
 		ph->setPointStatus(PointHessian::ACTIVE);
+		ph->isFounding = true;               // pre-WP4 D2: marks the founding set
+		ph->idepth_founding = ph->idepth;
 
 		// WP2a [INIT_FOUNDING_DIAG] accumulation (see above)
 		if (usingMetricScale && coarseInitializer->hasMLDepth && final_idepth > 0) {
@@ -3068,6 +3101,34 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		} else {
 			printf("[INIT_FOUNDING_DIAG] n=%zu (too few founding points with a prior)\n", founding_lr.size());
 		}
+	}
+
+	// Pre-WP4 D2 (WP2a-R3b) [INIT_CONSISTENCY], stage=init. Every arm, diagnostic only. The initialiser's
+	// gauge at the snap vs at hand-over (mean_iR; t in initialiser units), the lag between its optimised and
+	// smoothed depths (median idepth/iR over good level-0 points; founding points take iR), and the founding
+	// translation in map units. Paired with stage=kf lines from makeKeyFrame for the first keyframes.
+	{
+		std::vector<float> lag;
+		lag.reserve(coarseInitializer->numPoints[0]);
+		for (int i = 0; i < coarseInitializer->numPoints[0]; i++) {
+			const Pnt& p = coarseInitializer->points[0][i];
+			if (p.isGood && p.iR > 0 && std::isfinite(p.idepth) && std::isfinite(p.iR))
+				lag.push_back(p.idepth / p.iR);
+		}
+		float lag_med = NAN;
+		if (!lag.empty()) {
+			std::nth_element(lag.begin(), lag.begin() + lag.size() / 2, lag.end());
+			lag_med = lag[lag.size() / 2];
+		}
+		printf("[INIT_CONSISTENCY] stage=init snap_frame=%d init_frame=%d mean_iR_snap=%.4f mean_iR_init=%.4f "
+		       "t_snap=%.5f t_init=%.5f idepth_over_iR_med=%.4f t_map=%.5f metric=%s fix=%s\n",
+		       coarseInitializer->snapFrame, coarseInitializer->frameID,
+		       coarseInitializer->snapMeanIR, 1.0f / photometricScale,
+		       coarseInitializer->snapTNorm, (float)coarseInitializer->thisToNext.translation().norm(),
+		       lag_med, (float)firstToNew.translation().norm(),
+		       usingMetricScale ? "yes" : "no",
+		       setting_initFoundingFix == INIT_FOUNDING_FIX_RELIN ? "relin"
+		       : setting_initFoundingFix == INIT_FOUNDING_FIX_ANCHOR ? "anchor" : "off");
 	}
 
 
@@ -5148,8 +5209,17 @@ int FullSystem::getMLReferenceFrameId() const {
 	return ml_reference_frame_id_;
 }
 
+bool FullSystem::useTolerantInitThresholds() const
+{
+	if (setting_initFailThresholds == INIT_THRESH_TOLERANT) return true;
+	if (setting_initFailThresholds == INIT_THRESH_STRICT) return false;
+	return (setting_depthSource == DEPTH_SOURCE_ML && ml_depth_enabled_ && ml_processor_ && ml_processor_->isReady())
+	    || setting_depthSource == DEPTH_SOURCE_GT;
+}
+
 void FullSystem::printPerfSummary(double avg_ml_inference_ms,
-                                  double pipeline_wall_ms, int pipeline_frames)
+                                  double pipeline_wall_ms, int pipeline_frames,
+                                  int post_init_frames)
 {
 	// track_fps: TRACKING THREAD ONLY (inter-frame wall clock in addActiveFrame). Answers "can the
 	// front-end keep up with the camera" — mapping/BA/loop-closure run concurrently and are excluded.
@@ -5173,6 +5243,11 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 		       pipeline_wall_ms / pipeline_frames);
 	if (avg_ml_inference_ms > 0)
 		printf(" ml_ms=%.1f", avg_ml_inference_ms);
+	// Pre-WP4 cost DV: frames and wall time over the same span (from the frame the last initialisation
+	// started on). pipeline_fps above divides the whole requested range by that shorter wall time.
+	if (pipeline_wall_ms > 0 && post_init_frames > 0)
+		printf(" postinit_frames=%d postinit_fps=%.2f", post_init_frames,
+		       post_init_frames * 1000.0 / pipeline_wall_ms);
 	printf("\n");
 
 	// [RUN_SUMMARY] — authoritative, machine-readable run descriptor. Replaces the run-scripts'
@@ -5203,6 +5278,8 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	printf("[LC_SCALE_GATE] enabled=%s thresh=%.2f evals=%d fires=%d bypass_coverage_low=%d\n",
 	       setting_indirectP2RejectGate ? "on" : "off", setting_indirectP2RejectThresh,
 	       stat_lcScaleGateEvals, stat_lcScaleGateRejects, stat_lcScaleGateBypass);
+	// Pre-WP4 D4: the prior-independent degenerate-Sim(3) guard (LoopCloser.cpp), all arms.
+	printf("[LC_SIM3_GUARD] rejects=%d\n", stat_lcSim3GuardRejects);
 
 	const char* status  = (setting_depthSource == DEPTH_SOURCE_ML && !ml_ran) ? "NO_ML" : "OK";
 	printf("[RUN_SUMMARY] arm=%s depth_src=%s normals=%s nchan=%s geom=%s canon=%s iso=%s "
@@ -5210,6 +5287,7 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       "p0=%s p1_clamps=%s p2=%s p3=%s idepth_prior=%s fej_freeze=%s prior_src=%s init_scale=%s blend_fix=%s "
 	       "p2w=%g p2k=%g align_gate=%g ml_seed=%s p2param=%s p2slog=%g loop=%s lc_scale_gate=%s "
 	       "ml_gpu=%s fp16=%s model=%s "
+	       "init_thresh=%s init_thresh_mode=%s init_mode=%s init_resets=%d founding_fix=%s lc_sim3_guard=%d "
 	       "ml_inferences=%zu kfs=%d frames=%d status=%s\n",
 	       arm, dsrc, norm_any ? "on" : "off",
 	       nc_off ? "off" : "on",
@@ -5246,6 +5324,15 @@ void FullSystem::printPerfSummary(double avg_ml_inference_ms,
 	       setting_mlGpuRequested         ? "on" : "off",
 	       setting_mlFp16Requested        ? "on" : "off",
 	       setting_mlModelPathResolved.empty() ? "-" : setting_mlModelPathResolved.c_str(),
+	       // Pre-WP4 D6 / V9 / D2 / D4 provenance. init_thresh is the bar this FullSystem applies; with
+	       // auto it follows whether ML depth is live, so a failed warmup reads strict, as it behaved.
+	       useTolerantInitThresholds() ? "tolerant" : "strict",
+	       setting_initFailThresholds == INIT_THRESH_TOLERANT ? "tolerant"
+	       : setting_initFailThresholds == INIT_THRESH_STRICT ? "strict" : "auto",
+	       init_mode_label_, stat_initResets,
+	       setting_initFoundingFix == INIT_FOUNDING_FIX_RELIN ? "relin"
+	       : setting_initFoundingFix == INIT_FOUNDING_FIX_ANCHOR ? "anchor" : "off",
+	       stat_lcSim3GuardRejects,
 	       ml_inference_counter_, kf_count, perf_tracking_frame_count_, status);
 }
 
