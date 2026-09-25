@@ -69,6 +69,7 @@ COLUMNS = [
     "postinit_frames", "postinit_fps",              # cost DV: frames and wall time over the same span
     "init_thresh", "init_thresh_mode", "init_mode", "init_resets",   # D6, V9
     "founding_fix", "lc_sim3_guard",                # D2, D4
+    "init_fail_verdicts", "init_rejected_accepted",  # D6 correction, see parse_log
 ]
 
 
@@ -217,9 +218,22 @@ def parse_log(text: str) -> dict:
                 d[key] = mm.group(1)
         for key, pat in (("frames", r"\bframes=(\d+)"), ("keyframes", r"kfs=(\d+)"),
                          ("ml_inferences", r"ml_inferences=(\d+)"),
-                         ("init_resets", r"init_resets=(\d+)"), ("lc_sim3_guard", r"lc_sim3_guard=(\d+)")):
+                         ("lc_sim3_guard", r"lc_sim3_guard=(\d+)")):
             if (mm := re.search(pat, line)):
                 d[key] = int(mm.group(1))
+
+    # Initialisation failures, counted from the log -- not from [RUN_SUMMARY] init_resets=, which at
+    # epoch 0155a0d2ab6932b4 counts failure *verdicts* (FullSystem::makeKeyFrame), not rebuilds.
+    # main.cpp rebuilds FullSystem on a verdict only while the frame index is < 250; a later verdict
+    # is printed and the run continues on the initialisation it rejected (WP6: 26/105 A0 runs,
+    # 0/155 full runs). Log-derived, so rows from a pre-change binary (R0 b') get the same columns.
+    #   init_resets            = rebuilds ("RESETTING!")
+    #   init_fail_verdicts     = verdicts ("I THINK INITIALIZATINO FAILED!", sic)
+    #   init_rejected_accepted = 1 if the last verdict was never followed by a rebuild
+    events = re.findall(r"^(RESETTING!|I THINK INITIALIZATINO FAILED)", text, flags=re.M)
+    d["init_resets"] = events.count("RESETTING!")
+    d["init_fail_verdicts"] = len(events) - d["init_resets"]
+    d["init_rejected_accepted"] = int(bool(events) and events[-1] != "RESETTING!")
 
     # Timestamp provenance (DatasetReader.h). This is a row-level column, not a diagnostic to
     # grep by hand, because the two worst defects this project has found were both a silently
