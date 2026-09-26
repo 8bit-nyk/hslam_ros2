@@ -15,6 +15,11 @@ Bars:
 Mechanical choices the text leaves open, fixed here before any R3b row exists:
   * a sequence where `full` has < 2 usable reps is also left out of S and K (there is no reference);
   * a sequence where m has no usable rep fails F, S and K there (the burden is on the candidate).
+Fixed after the first scoring (25 Sep 20:05; both verdicts unchanged, DECISIONS.md "R3b screen OUTCOME"):
+  * S no longer requires a defined fo -- it read |ln s| but was gated on fo as well, so an undefined
+    founding offset failed S;
+  * where fo_full is undefined (the windowed estimator skipped window 0) the sequence leaves F / K for the
+    same reason as the < 2 usable reps case: there is no reference. Printed, never silent.
 Outcomes: relin passing F, S, K and T enters PAPER_CONFIG before stage 2; anchor passing is only
 NOMINATED (stop and report; the user decides). ATE and [INIT_CONSISTENCY] are descriptive, never decisional.
 
@@ -104,10 +109,18 @@ def screen(root, mode):
                 print(f"  {grp:3s} {ds + ' ' + sq:32s} {f['u']}/{m['u']:<4d} full has < 2 usable reps: out of "
                       f"{'F, ' if grp == 'D' else 'K, '}S   T {'ok' if t_hit else 'FAIL'}")
                 continue
-            has_m = m["u"] > 0 and m["fo"] == m["fo"] and m["lns"] == m["lns"]
-            s_hit = has_m and m["lns"] <= f["lns"] + TOL
+            has_s = m["u"] > 0 and m["lns"] == m["lns"]
+            has_m = m["u"] > 0 and m["fo"] == m["fo"]
+            s_hit = has_s and m["lns"] <= f["lns"] + TOL
             s_ok &= s_hit
-            if grp == "D":
+            if f["fo"] != f["fo"]:
+                hit, bar = True, float("nan")
+                if grp == "D":
+                    excluded_d += 1
+                print(f"  {grp:3s} {ds + ' ' + sq:32s} fo_full undefined (window 0 skipped): out of "
+                      f"{'F' if grp == 'D' else 'K'}; S {'ok' if s_hit else 'NO'} "
+                      f"({f['lns']:.3f} vs {m['lns']:.3f}); fo_m {m['fo']:+.3f}")
+            elif grp == "D":
                 bar = max(FO_FLOOR, 0.5 * abs(f["fo"]))
                 hit = has_m and abs(m["fo"]) <= bar
                 f_den += 1
@@ -116,13 +129,15 @@ def screen(root, mode):
                 bar = max(FO_FLOOR, abs(f["fo"]) + TOL)
                 hit = has_m and abs(m["fo"]) <= bar
                 k_ok &= hit
+            if f["fo"] != f["fo"]:
+                continue
             yn = lambda b: "ok" if b else "NO"
             print(f"  {grp:3s} {ds + ' ' + sq:32s} {f['u']}/{m['u']:<4d} {f['fo']:+8.3f} {m['fo']:+8.3f} {bar:8.3f} "
                   f"{f['lns']:7.3f} {m['lns']:7.3f} {yn(s_hit):>2s} {yn(hit):>3s} {yn(t_hit):>2s}   "
                   f"{f['ate']:.3f} / {m['ate']:.3f}   "
                   f"{f['ic'][0]:.2f}>{f['ic'][1]:.2f},{f['ic'][2]:.2f} | {m['ic'][0]:.2f}>{m['ic'][1]:.2f},{m['ic'][2]:.2f}"
                   f"{'   rejected-init runs full/m ' + str(f['rej']) + '/' + str(m['rej']) if f['rej'] or m['rej'] else ''}")
-            if (m["lns_of_med"] <= f["lns_of_med"] + TOL) != s_hit and has_m:
+            if (m["lns_of_med"] <= f["lns_of_med"] + TOL) != s_hit and has_s:
                 print(f"      note: S differs under |ln median s| ({f['lns_of_med']:.3f} vs {m['lns_of_med']:.3f})")
     if excluded_d >= 2:
         print(f"  {mode}: NOT DECIDED -- {excluded_d} D sequences where full has < 2 usable reps")
