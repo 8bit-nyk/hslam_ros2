@@ -13,6 +13,7 @@ Parts (run one, or `all`):
   d3     A0 vs A0_tol reliability contrast: C(M) = {sequences `full` tracks reliably (>= 80 % usable) and M
          fails (< 50 % usable)}; outcomes O1/O2/O3 with O3 taking precedence where they overlap.
   k0809  (d4') KITTI 08/09 reported as measured, every arm.
+  tables RESULTS_LOG markdown for every arm x sequence (descriptive; not part of `all`).
 
 Usable = status OK and track_success 1 (the CSV stamp, P5a floor included at this epoch; the floor is
 re-applied here as make_tables does, idempotently). Runs continuing on a rejected initialisation count as
@@ -109,6 +110,8 @@ def cell(rows):
         verdicts=[intv(r.get("init_fail_verdicts")) for r in rows],
         rejacc=sum(intv(r.get("init_rejected_accepted")) for r in rows),
         fo=st.median(v) if (v := [x for x in (num(r.get("founding_offset_log")) for r in u) if x == x])
+        else float("nan"),
+        fps=st.median(v) if (v := [x for x in (num(r.get("postinit_fps")) for r in u) if x == x])
         else float("nan"))
 
 
@@ -305,11 +308,47 @@ def part_k0809(root):
                   f"status {sorted({r['status'] for r in g})}")
 
 
+# --------------------------------------------------------------------------------------- tables (descriptive)
+ARMS = ["full", "full_K13", "full_R3b_anchor", "A0", "A0_tol"]
+
+
+def part_tables(root):
+    """RESULTS_LOG markdown: every arm x sequence. Descriptive only -- no verdict is computed here."""
+    g = {a: load(str(Path(root) / a)) for a in ARMS}
+    print("\n#### provenance")
+    for a in ARMS:
+        rows = [r for v in g[a].values() for r in v]
+        if not rows:
+            print(f"- `{a}`: no rows")
+            continue
+        clis = sorted({" ".join(t for t in r["cli"].split() if "/" not in t and not t.startswith("--files")
+                                and not t.startswith("--calib") and not t.startswith("--gamma")
+                                and not t.startswith("--vignette"))
+                       for r in rows})
+        print(f"- `{a}`: {len(rows)} rows; commit {sorted({r['commit'] for r in rows})}; binary "
+              f"{sorted({r.get('binary') for r in rows})}; dirty {sorted({r['dirty'] for r in rows})}; "
+              f"status {dict(sorted(((st_, sum(r['status'] == st_ for r in rows)) for st_ in {r['status'] for r in rows})))}")
+        for c in clis[:4]:
+            print(f"  - CLI (paths stripped; {len(clis)} distinct): `{c}`")
+    hdr = "| sequence | " + " | ".join(ARMS) + " |"
+    sep = "|---|" + "---|" * len(ARMS)
+    for title, fn in (
+            ("Sim(3) ATE [m], median (IQR) · usable k/n", lambda c: f"{f(c['ate'])} ({f(c['ate_iqr'])}) · {c['u']}/{c['n']}"),
+            ("SE(3) ATE [m], median · scale s, median", lambda c: f"{f(c['se3'])} · {f(c['s'])}"),
+            ("founding offset (log), median · post-init fps, median", lambda c: f"{f(c['fo'])} · {f(c['fps'], 1)}"),
+            ("P5a frame coverage · init rebuilds/verdicts · rejected-init runs · lc_sim3_guard",
+             lambda c: f"{f(c['cov'], 2)} · {sum(c['resets'])}/{sum(c['verdicts'])} · {c['rejacc']} · {c['guard']}")):
+        print(f"\n#### {title}\n\n{hdr}\n{sep}")
+        for k in SEQS:
+            cells = [fn(cell(g[a][k])) if g[a].get(k) else "not run" for a in ARMS]
+            print(f"| {k[0]} {k[1]} | " + " | ".join(cells) + " |")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", required=True)
     ap.add_argument("--ref", default="runs/wp2ii_eval-server/full")
-    ap.add_argument("--part", default="all", choices=["all", "d1", "adopt", "d3", "k0809"])
+    ap.add_argument("--part", default="all", choices=["all", "d1", "adopt", "d3", "k0809", "tables"])
     ap.add_argument("--shipped", default="full", help="d3: the arm the paper ships, if a feature was adopted")
     a = ap.parse_args()
     rc = 0
@@ -321,6 +360,8 @@ def main():
         part_d3(a.root, a.shipped)
     if a.part in ("all", "k0809"):
         part_k0809(a.root)
+    if a.part == "tables":
+        part_tables(a.root)
     return rc
 
 
