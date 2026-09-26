@@ -85,12 +85,35 @@ _DELTAS: dict[str, list[str]] = {
     "full_K13": ["--ml-prior-source=fresh"],             # D3: own-view prior on the re-frozen config
     "full_R3b_relin": ["--init-founding-fix=relin"],     # D2 / WP2a-R3b screen arms
     "full_R3b_anchor": ["--init-founding-fix=anchor"],
+    # --- WP4 (DECISIONS.md "WP4 -- PRE-REGISTERED 2026-09-26"; wp/WP4_component_ablation.md §4) ---------------
+    # New names on purpose: "A1" and "K10" below already carry WP3b EuRoC rows under their old definitions.
+    # A1_near: the nearest runnable init-only arm (audit V1). Inference once (mode 1); fresh_only gives every
+    #   keyframe after KfId 1 no prior; no Step-2 filter, no H2. Residue: KfId 1's own-view prior, the founding
+    #   points' frozen linearisation, the ML arms' init bar.
+    "A1_near": ["--ml-inference-mode", "1", "--ml-prior-source=fresh_only",
+                "--ml-indirect-filter=false", "--p2-gate=false"],
+    # A1_strict: A1_near with every prior channel on later points off -- "no prior on later points". Residue
+    #   against A0_tol: Phase 0 itself and one extra inference.
+    "A1_strict": ["--ml-inference-mode", "1", "--ml-prior-source=fresh_only",
+                  "--ml-indirect-filter=false", "--p2-gate=false",
+                  "--ml-idepth-prior=none", "--ml-seed=midpoint", "--p1-clamps=false",
+                  "--ml-fej-freeze=false", "--indirect-mp-ml-storage=false"],
+    "K0": ["--ml-init=false"],                           # - P0: photometric founding pair, metric priors after it
+    "K1c": ["--p1-clamps=false"],                        # - trace-time bracket intersection + activation clamp
+    "K14_off": ["--ml-init-scale=legacy"],               # - K14 (re-freeze bug fix): the double division back
+    "K15_off": ["--p1-blend-grad-fix=false"],            # - K15 (re-freeze bug fix): the UB blend back
+    "K10_q037": ["--ml-idepth-prior=relative", "--ml-idepth-rel-q", "0.37"],   # calibration-derived q (audit §5)
+    "H2_t03": ["--p2-gate-thresh", "0.3"],               # H2 threshold sensitivity (stricter)
+    "H2_t07": ["--p2-gate-thresh", "0.7"],               # H2 threshold sensitivity (looser)
+    # ---------------------------------------------------------------------------------------------------------
+    # A1 is NOT init-only (audit V1: the first keyframe's map is re-injected into every later point). Kept only so
+    # the WP3b rows reproduce; never a WP4 arm, never cited as "init only".
     "A1": ["--ml-inference-mode", "1", "--ml-idepth-prior=none",
            "--ml-indirect-filter=false", "--p2-gate=false"],
     "A2": ["--ml-indirect-filter=false", "--p2-gate=false"],
     "A3": ["--p2-gate=false"],
     "A4": [],                                            # == full until WP2 ships A5
-    "K1": ["--ml-idepth-prior=none"],                    # - P1 bound (the TRUE P1 ablation)
+    "K1": ["--ml-idepth-prior=none"],                    # - the INITIAL BOX only (audit V2; seed, freeze, clamps stay)
     "K2": ["--ml-indirect-filter=false"],                # - Step-2 matcher filter
     "K3": ["--p2-gate=false"],                           # - loop-closure scale gate (H2)
     "K5": ["--p2=true"],                                 # + Direct.P2 BA term
@@ -99,7 +122,7 @@ _DELTAS: dict[str, list[str]] = {
     "K8": ["--ml-normal-channel=on"],                    # + normal channel (foreshortening+AngMF)
     "K9_n3": ["--ml-inference-every-n", "3"],
     "K9_n5": ["--ml-inference-every-n", "5"],
-    "K10": ["--ml-idepth-prior=relative", "--ml-idepth-rel-q", "0.30"],
+    "K10": ["--ml-idepth-prior=relative", "--ml-idepth-rel-q", "0.30"],   # WP3b rows only; WP4 uses K10_q037
     "K11": ["--indirect-mp-ml-storage=false"],           # - Indirect.P0 MapPoint ML storage
     "S1_alphaw_lo": ["--ml-alpha-w", "2500"],
     "S1_alphaw_hi": ["--ml-alpha-w", "40000"],

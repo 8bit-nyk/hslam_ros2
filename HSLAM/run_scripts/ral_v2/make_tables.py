@@ -272,6 +272,9 @@ def main() -> int:
     ap.add_argument("--min-reps", type=int, default=MIN_REPS,
                     help="usable reps both cells need before a sequence is paired in T3")
     ap.add_argument("--allow-mixed-commits", action="store_true")
+    ap.add_argument("--require-binary", metavar="HASH16",
+                    help="refuse any row whose `binary` column differs (WP4: pooling across commits is "
+                         "licensed by one binary hash, so the hash is checked, not asserted)")
     ap.add_argument("--allow-dirty", action="store_true")
     a = ap.parse_args()
 
@@ -288,6 +291,14 @@ def main() -> int:
         return 3
     if not a.allow_dirty:
         rows = [r for r in rows if r.get("dirty") != "1"]
+
+    if a.require_binary:
+        other = [r for r in rows if r.get("binary") != a.require_binary]
+        if other:
+            print(f"ERROR: {len(other)} row(s) were not produced by binary {a.require_binary}, e.g.\n"
+                  f"       {other[0]['_src']} (binary {other[0].get('binary') or 'none'}). They are not\n"
+                  f"       poolable with the rest.", file=sys.stderr)
+            return 3
 
     commits = sorted({r.get("commit", "?") for r in rows})
     if len(commits) > 1 and not a.allow_mixed_commits:
