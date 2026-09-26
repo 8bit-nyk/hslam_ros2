@@ -16,6 +16,8 @@ Every number in the v2 paper is produced here, from one frozen commit and one CL
 | `campaign_lib.sh` | Runner template: epoch (binary-hash) check, clean-tree and required-flag checks, and a resume guard that tops up only the missing reps. Source it from every campaign script. |
 | `prewp4_stage1.sh`, `prewp4_r0_check.py`, `prewp4_r3b_screen.py` | Pre-WP4 stage 1 (done 25 Sep): R0 with the old-binary (b′) control, then the R3b founding-segment screen, each with its pre-registered scorer. |
 | `prewp4_stage2.sh` | Pre-WP4 stage 2, the re-freeze campaign: 690 runs, 5 arms, hazard-first, with the C2 breakage early stop for the candidate arms. `DRY=1` prints the plan. |
+| `prewp4_stage2_score.py` | Stage 2's pre-registered scorers: (d1) re-freeze no-regression against the R0-licensed rows, (d2)/(d4) `adoption_rule.py` verdicts with P5a parity beside them, (d3) the A0 vs A0_tol reliability contrast, and KITTI 08/09 as measured. `--part` selects one. |
+| `prewp4_matched_span.py` | (d5) matched-span ATE for the P5a coverage mismatches (reviewer R10.6): common associated interval over every usable rep of both arms, re-scored with `traj_eval.evaluate(t_range=…)`. Supplementary table only. |
 
 ## Use
 

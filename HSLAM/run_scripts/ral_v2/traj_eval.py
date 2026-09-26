@@ -202,9 +202,26 @@ def _windowed_drift(ref: PosePath3D, est: PosePath3D) -> dict:
     return out
 
 
+def associated_span(est_path: Path, gt_path: Path, gt_format: str,
+                    extrinsics: Optional[Path] = None, max_diff: float = 0.02) -> dict:
+    """First/last estimate timestamps that associate with GT (as evaluate() associates them), and
+    the GT file's own duration. For the matched-span analysis (DECISIONS.md "PRE-WP4 STAGE 0" (d5)).
+    NaN where nothing associates."""
+    ref = load_gt(Path(gt_path), gt_format, Path(extrinsics) if extrinsics else None)
+    out = {"first": float("nan"), "last": float("nan"), "matched": 0,
+           "gt_duration": float(ref.timestamps[-1] - ref.timestamps[0])}
+    est = _read_tum_lenient(Path(est_path))
+    _, est_s = sync.associate_trajectories(ref, est, max_diff=max_diff)
+    if est_s.num_poses:
+        out.update(first=float(est_s.timestamps[0]), last=float(est_s.timestamps[-1]),
+                   matched=est_s.num_poses)
+    return out
+
+
 def evaluate(est_path: Path, gt_path: Path, gt_format: str,
              extrinsics: Optional[Path] = None, max_diff: float = 0.02,
-             rpe_delta_m: Optional[float] = None) -> dict:
+             rpe_delta_m: Optional[float] = None,
+             t_range: Optional[tuple] = None) -> dict:
     """Return the trajectory half of a summary.csv row.
 
     On any failure this returns a dict whose metrics are NaN and whose `traj_error` says
@@ -213,6 +230,10 @@ def evaluate(est_path: Path, gt_path: Path, gt_format: str,
 
     rpe_delta_m: pair distance for the per-distance RPE columns (pre-WP4). The per-keyframe
     rpe_trans/rpe_rot scale with each arm's keyframe rate and are kept for provenance only.
+
+    t_range: (t0, t1) -- crop the ASSOCIATED pair to that interval before any alignment, so every
+    metric is recomputed on it (matched-span analysis, (d5)). None, the default and every
+    summary.csv row, leaves the computation unchanged.
     """
     out = {k: float("nan") for k in (
         "ate_sim3_rmse", "ate_se3_rmse", "scale_s", "scale_drift_pct_per_100m",
@@ -228,6 +249,10 @@ def evaluate(est_path: Path, gt_path: Path, gt_format: str,
         out["poses"] = est.num_poses
 
         ref_s, est_s = sync.associate_trajectories(ref, est, max_diff=max_diff)
+        if t_range is not None:
+            keep = np.where((est_s.timestamps >= t_range[0]) & (est_s.timestamps <= t_range[1]))[0]
+            ref_s.reduce_to_ids(keep)
+            est_s.reduce_to_ids(keep)
         out["matched_poses"] = est_s.num_poses
         if est_s.num_poses < 10:
             out["traj_error"] = f"only {est_s.num_poses} poses matched GT within {max_diff}s"
