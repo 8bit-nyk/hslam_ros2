@@ -35,6 +35,10 @@ TIER="${TIER:-}"
 ROOT="${OUT:-runs/wp4_$HOST}"
 [ "$SMOKE" = 1 ] && ROOT="${OUT:-runs/wp4_smoke_$HOST}"
 REF="${REF_ROOT:-runs/prewp4_s2_$HOST}"
+# The reused root is read-only for WP4: WP7 reads its as-run HSLAM rows there (WP7 session, 26 Sep).
+case "$(realpath -m "$ROOT")/" in
+  "$(realpath -m "$REF")"/*) echo "ERROR: output root $ROOT is inside the reused root $REF -- WP4 never writes there"; exit 9 ;;
+esac
 
 # Hazard-first (card §6.2): the prior's worst frame-0 sequence, the truck hazard / no-loop control, then cheap to costly.
 ABL10=("tum freiburg2_large_no_loop" "kitti 07" "tum freiburg1_room" "kitti 06" "tum freiburg1_desk"
