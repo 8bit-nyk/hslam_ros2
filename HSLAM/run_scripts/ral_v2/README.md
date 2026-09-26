@@ -10,6 +10,12 @@ Every number in the v2 paper is produced here, from one frozen commit and one CL
 | `traj_eval.py` | Sim(3) **and** SE(3) ATE, Umeyama scale `s`, scale drift, RPE — via evo as a library, because the CLI does not return the alignment scale. |
 | `eval_run.py` | Runs HSLAM, samples GPU/host memory, parses the diagnostic tags, appends one `summary.csv` row per rep. |
 | `make_tables.py` | `summary.csv` → LaTeX tables + `numbers.json` (the prose ledger). |
+| `coverage.py` | Per-run coverage and time to first pose, for every system (WP7 pre-registration §1): image timeline count- and rate-asserted, time maps, span with tail credit, own-pose fraction. |
+| `wp7_reliability.py` | WP7 as-run table from a manifest of runs: run success, the ATE cell, reliability metrics R1–R4, sensitivity analyses S1–S5. `--validate` must pass before first use (`wp7_b6_manifest.csv`). |
+| `adoption_rule.py` | The dataset-level adoption rule v2 — the **only** implementation (conditions A/B/C, C2 breakage band). Import it, never re-derive it. |
+| `campaign_lib.sh` | Runner template: epoch (binary-hash) check, clean-tree and required-flag checks, and a resume guard that tops up only the missing reps. Source it from every campaign script. |
+| `prewp4_stage1.sh`, `prewp4_r0_check.py`, `prewp4_r3b_screen.py` | Pre-WP4 stage 1 (done 25 Sep): R0 with the old-binary (b′) control, then the R3b founding-segment screen, each with its pre-registered scorer. |
+| `prewp4_stage2.sh` | Pre-WP4 stage 2, the re-freeze campaign: 690 runs, 5 arms, hazard-first, with the C2 breakage early stop for the candidate arms. `DRY=1` prints the plan. |
 
 ## Use
 

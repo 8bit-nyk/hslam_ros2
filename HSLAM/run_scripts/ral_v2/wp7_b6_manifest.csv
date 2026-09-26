@@ -1,0 +1,59 @@
+# WP7 B6 smoke on ws (25 Sep 2026): every run, for wp7_reliability.py --validate and as a worked example.
+# Paths are relative to --root (default $WP7_BASELINES or ~/Dev/baselines). HSLAM rows used binary 692adec6.
+# Time maps: DPVO on KITTI writes frame indices; MASt3R-SLAM's image-folder reader writes index/30.
+# frames_given is after each system's stride: DROID stride 2 on TUM (307) and 3 on KITTI (367); DPVO
+# family stride 2 on KITTI (551); DropD is given the 573 rgb-depth associations on TUM.
+# DPVO TUM: one invocation only. A fresh process is deterministic (S2 card 1b), so a second invocation is not
+# an independent rep.
+# DropD TUM t4 died 4.7 s in with SIGABRT, a characterised harness failure (S5 card B6.2), replaced by t6.
+# HSLAM mono fr1_desk: every rep ended on a rejected initialisation (2 late verdicts, no rebuild).
+system,dataset,sequence,rep,traj,output,time_map,frames_given,outcome,rejected_init_accepted
+HSLAM2,tum,freiburg1_desk,1,_ws/hslam2_b6/tum_freiburg1_desk/tum_freiburg1_desk_rep1/result.txt,keyframe,native,,ran,0
+HSLAM2,kitti,07,1,_ws/hslam2_b6/kitti_07/kitti_07_rep1/result.txt,keyframe,native,,ran,0
+HSLAM mono (A0),tum,freiburg1_desk,1,_ws/hslam_mono_b6/tum_freiburg1_desk/tum_freiburg1_desk_rep1/result.txt,keyframe,native,,ran,1
+HSLAM mono (A0),tum,freiburg1_desk,2,_ws/hslam_mono_b6/tum_freiburg1_desk/tum_freiburg1_desk_rep2/result.txt,keyframe,native,,ran,1
+HSLAM mono (A0),tum,freiburg1_desk,3,_ws/hslam_mono_b6/tum_freiburg1_desk/tum_freiburg1_desk_rep3/result.txt,keyframe,native,,ran,1
+HSLAM mono (A0),kitti,07,1,_ws/hslam_mono_b6/kitti_07/kitti_07_rep1/result.txt,keyframe,native,,ran,0
+HSLAM mono (A0),kitti,07,2,_ws/hslam_mono_b6/kitti_07/kitti_07_rep2/result.txt,keyframe,native,,ran,0
+HSLAM mono (A0),kitti,07,3,_ws/hslam_mono_b6/kitti_07/kitti_07_rep3/result.txt,keyframe,native,,ran,0
+ORB-SLAM3,tum,freiburg1_desk,1,ORB_SLAM3/wp7/b6/runs/fr1_desk_r1/est_full_tum.txt,every_frame,native,613,ran,
+ORB-SLAM3,tum,freiburg1_desk,2,ORB_SLAM3/wp7/b6/runs/fr1_desk_r2/est_full_tum.txt,every_frame,native,613,ran,
+ORB-SLAM3,tum,freiburg1_desk,3,ORB_SLAM3/wp7/b6/runs/fr1_desk_r3/est_full_tum.txt,every_frame,native,613,ran,
+ORB-SLAM3,kitti,07,1,ORB_SLAM3/wp7/b6/runs/kitti07_r1/est_full_tum.txt,every_frame,native,1101,ran,
+ORB-SLAM3,kitti,07,2,ORB_SLAM3/wp7/b6/runs/kitti07_r2/est_full_tum.txt,every_frame,native,1101,ran,
+ORB-SLAM3,kitti,07,3,ORB_SLAM3/wp7/b6/runs/kitti07_r3/est_full_tum.txt,every_frame,native,1101,ran,
+ORB-SLAM3 (KF),tum,freiburg1_desk,1,ORB_SLAM3/wp7/b6/runs/fr1_desk_r1/est_kf_tum.txt,keyframe,native,,ran,
+ORB-SLAM3 (KF),tum,freiburg1_desk,2,ORB_SLAM3/wp7/b6/runs/fr1_desk_r2/est_kf_tum.txt,keyframe,native,,ran,
+ORB-SLAM3 (KF),tum,freiburg1_desk,3,ORB_SLAM3/wp7/b6/runs/fr1_desk_r3/est_kf_tum.txt,keyframe,native,,ran,
+ORB-SLAM3 (KF),kitti,07,1,ORB_SLAM3/wp7/b6/runs/kitti07_r1/est_kf_tum.txt,keyframe,native,,ran,
+ORB-SLAM3 (KF),kitti,07,2,ORB_SLAM3/wp7/b6/runs/kitti07_r2/est_kf_tum.txt,keyframe,native,,ran,
+ORB-SLAM3 (KF),kitti,07,3,ORB_SLAM3/wp7/b6/runs/kitti07_r3/est_kf_tum.txt,keyframe,native,,ran,
+DPVO,tum,freiburg1_desk,1,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvo_fresh2/tum_rgbd_dataset_freiburg1_desk_trial01.txt,every_frame,native,613,ran,
+DPVO,kitti,07,1,DPVO/wp7/b6/results/kitti_07/kitti_07_trial01.txt,every_frame,index,551,ran,
+DPV-SLAM,tum,freiburg1_desk,1,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslam/tum_rgbd_dataset_freiburg1_desk_trial01.txt,every_frame,native,613,ran,
+DPV-SLAM,tum,freiburg1_desk,2,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslam/tum_rgbd_dataset_freiburg1_desk_trial02.txt,every_frame,native,613,ran,
+DPV-SLAM,tum,freiburg1_desk,3,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslam/tum_rgbd_dataset_freiburg1_desk_trial03.txt,every_frame,native,613,ran,
+DPV-SLAM,tum,freiburg1_desk,4,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslam/tum_rgbd_dataset_freiburg1_desk_trial04.txt,every_frame,native,613,ran,
+DPV-SLAM,tum,freiburg1_desk,5,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslam/tum_rgbd_dataset_freiburg1_desk_trial05.txt,every_frame,native,613,ran,
+DPV-SLAM,kitti,07,1,DPVO/wp7/b6/results/kitti_07_dpvslam/kitti_07_trial01.txt,every_frame,index,551,ran,
+DPV-SLAM++,tum,freiburg1_desk,1,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslampp/tum_rgbd_dataset_freiburg1_desk_trial01.txt,every_frame,native,613,ran,
+DPV-SLAM++,tum,freiburg1_desk,2,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslampp/tum_rgbd_dataset_freiburg1_desk_trial02.txt,every_frame,native,613,ran,
+DPV-SLAM++,tum,freiburg1_desk,3,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslampp/tum_rgbd_dataset_freiburg1_desk_trial03.txt,every_frame,native,613,ran,
+DPV-SLAM++,tum,freiburg1_desk,4,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslampp/tum_rgbd_dataset_freiburg1_desk_trial04.txt,every_frame,native,613,ran,
+DPV-SLAM++,tum,freiburg1_desk,5,DPVO/wp7/b6/results/tum_rgbd_dataset_freiburg1_desk_dpvslampp/tum_rgbd_dataset_freiburg1_desk_trial05.txt,every_frame,native,613,ran,
+DPV-SLAM++,kitti,07,1,DPVO/wp7/b6/results/kitti_07_dpvslampp/kitti_07_trial01.txt,every_frame,index,551,ran,
+DROID-SLAM,tum,freiburg1_desk,1,DROID_SLAM/wp7/b6/results/tum_fr1_desk/tum_rgbd_dataset_freiburg1_desk_head_trial01.txt,every_frame,native,307,ran,
+DROID-SLAM,kitti,07,1,DROID_SLAM/wp7/b6/results/kitti_07/kitti_07_demo-defaults_stride3.txt,every_frame,native,367,ran,
+MASt3R-SLAM,tum,freiburg1_desk,1,MASt3R-SLAM/wp7/b6/runs/tum_fr1_desk_sm89/rgbd_dataset_freiburg1_desk.txt,keyframe,native,,ran,
+MASt3R-SLAM,kitti,07,1,MASt3R-SLAM/wp7/b6/runs/kitti_07_sm89/image_2.txt,keyframe,index/30,,ran,
+MASt3R-SLAM,kitti,07,2,MASt3R-SLAM/wp7/b6/runs/kitti_07_sm89_r2/image_2.txt,keyframe,index/30,,ran,
+MASt3R-SLAM (base.yaml),kitti,07,1,MASt3R-SLAM/wp7/b6/runs/kitti_07_sm89_readme_base/image_2.txt,keyframe,index/30,,ran,
+DropD-SLAM,tum,freiburg1_desk,1,DropD_SLAM/wp7/b6/results/rgbd_dataset_freiburg1_desk__b6_tum_t1/OurCameraTrajectory.txt,every_frame,native,573,ran,
+DropD-SLAM,tum,freiburg1_desk,2,DropD_SLAM/wp7/b6/results/rgbd_dataset_freiburg1_desk__b6_tum_t2/OurCameraTrajectory.txt,every_frame,native,573,ran,
+DropD-SLAM,tum,freiburg1_desk,3,DropD_SLAM/wp7/b6/results/rgbd_dataset_freiburg1_desk__b6_tum_t3/OurCameraTrajectory.txt,every_frame,native,573,ran,
+DropD-SLAM,tum,freiburg1_desk,4,DropD_SLAM/wp7/b6/results/rgbd_dataset_freiburg1_desk__b6_tum_t4/OurCameraTrajectory.txt,every_frame,native,573,harness_failure,
+DropD-SLAM,tum,freiburg1_desk,5,DropD_SLAM/wp7/b6/results/rgbd_dataset_freiburg1_desk__b6_tum_t5/OurCameraTrajectory.txt,every_frame,native,573,ran,
+DropD-SLAM,tum,freiburg1_desk,6,DropD_SLAM/wp7/b6/results/rgbd_dataset_freiburg1_desk__b6_tum_t6/OurCameraTrajectory.txt,every_frame,native,573,ran,
+DropD-SLAM,kitti,07,1,DropD_SLAM/wp7/b6/results/kitti_07__b6_kitti_t1/OurCameraTrajectory.txt,every_frame,native,1101,ran,
+DropD-SLAM,kitti,07,2,DropD_SLAM/wp7/b6/results/kitti_07__b6_kitti_t2/OurCameraTrajectory.txt,every_frame,native,1101,ran,
+DropD-SLAM,kitti,07,3,DropD_SLAM/wp7/b6/results/kitti_07__b6_kitti_t3/OurCameraTrajectory.txt,every_frame,native,1101,ran,
