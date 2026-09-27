@@ -85,6 +85,10 @@ _DELTAS: dict[str, list[str]] = {
     "full_K13": ["--ml-prior-source=fresh"],             # D3: own-view prior on the re-frozen config
     "full_R3b_relin": ["--init-founding-fix=relin"],     # D2 / WP2a-R3b screen arms
     "full_R3b_anchor": ["--init-founding-fix=anchor"],
+    # stage 2b (DECISIONS 'PRE-WP4 STAGE 2b'): anchor at a softer pin; the weight is --ml-alpha-w
+    "full_R3b_anchor_aw2500": ["--init-founding-fix=anchor", "--ml-alpha-w", "2500"],
+    "full_R3b_anchor_aw1000": ["--init-founding-fix=anchor", "--ml-alpha-w", "1000"],
+    "S1_alphaw_1000": ["--ml-alpha-w", "1000"],
     # --- WP4 (DECISIONS.md "WP4 -- PRE-REGISTERED 2026-09-26"; wp/WP4_component_ablation.md §4) ---------------
     # New names on purpose: "A1" and "K10" below already carry WP3b EuRoC rows under their old definitions.
     # A1_near: the nearest runnable init-only arm (audit V1). Inference once (mode 1); fresh_only gives every

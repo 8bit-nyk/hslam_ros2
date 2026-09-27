@@ -24,9 +24,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import shlex
+import statistics
 import subprocess
 import sys
 import threading
@@ -58,6 +60,7 @@ COLUMNS = [
     "lc_gate_enabled", "lc_gate_evals", "lc_gate_fires", "lc_gate_bypass",
     "agreement_gate_fire_rate",
     "prior_align_n", "prior_align_s_med", "prior_align_s_iqr",
+    "pa_kf_n", "pa_slope", "pa_range", "pa_snap", "pa_collapse_n",   # DV7 (WP4), see prior_align_dv7
     "geom", "canon", "iso", "idepth_prior", "ml_gpu", "fp16", "model",
     "ts_source", "ts_hz", "ts_plausible",
     "traj_error", "cli",
@@ -183,6 +186,57 @@ def _f(m, i=1, default=float("nan")):
         return default
 
 
+# [PRIOR_ALIGN] kf=<int> s=<float> n=<int> iqr=<float>, one per ML keyframe (FullSystem::priorAlignmentGate).
+# kf, n and iqr are optional so a log printed before they existed still yields its s values; s=nan (n < 5)
+# does not match, exactly as before. Shared with wp4_prior_align_cols.py, which re-derives DV7 from old logs.
+PRIOR_ALIGN_RE = re.compile(r"\[PRIOR_ALIGN\](?:[^\n]*?\bkf=(-?\d+))?[^\n]*?\bs=(-?[\d.]+)"
+                            r"(?:[^\n]*?\bn=(\d+))?(?:[^\n]*?\biqr=(-?[\d.]+))?")
+
+
+def parse_prior_align(text: str) -> list[tuple]:
+    """Every [PRIOR_ALIGN] entry as (kf, s, n, iqr), in log order; a field the line lacks is nan."""
+    nan = float("nan")
+    return [(int(kf) if kf else nan, float(s), int(n) if n else nan, float(iqr) if iqr else nan)
+            for kf, s, n, iqr in PRIOR_ALIGN_RE.findall(text)]
+
+
+def prior_align_dv7(series, kf_min=15, win=5, collapse_frac=0.3, collapse_iqr=0.7, run_med=20) -> dict:
+    """DV7 (WP4), prior-relative drift: how the map's depth scale moves against the ML prior's over a run.
+
+    series = [(kf, s, n, iqr), ...] in log order, every s > 0; ln s is one keyframe's map/prior log depth
+    ratio. Over the entries with kf > kf_min (past the founding window):
+      pa_kf_n        how many there are
+      pa_slope       least-squares slope of ln s on kf, x 100 (ln units per 100 keyframes); nan if < 3
+      pa_range       p90 - p10 of ln s (linear interpolation, numpy's default); nan if < 3
+      pa_snap        the largest max - min of ln s inside any `win` consecutive entries; nan if < win
+    and over every entry (no kf_min):
+      pa_collapse_n  entries with n < collapse_frac x the median n of the previous `run_med` entries (at
+                     least 5 of them with a finite n) AND iqr > collapse_iqr; a nan n or iqr never counts
+    """
+    nan = float("nan")
+    out = dict(pa_kf_n=0, pa_slope=nan, pa_range=nan, pa_snap=nan, pa_collapse_n=0)
+    late = [(kf, math.log(s)) for kf, s, _, _ in series if kf > kf_min]
+    ys = [y for _, y in late]
+    out["pa_kf_n"] = len(late)
+    if len(late) >= 3:
+        xs = [x for x, _ in late]
+        mx, my = statistics.fmean(xs), statistics.fmean(ys)
+        sxx = sum((x - mx) ** 2 for x in xs)
+        if sxx > 0:
+            out["pa_slope"] = 100.0 * sum((x - mx) * (y - my) for x, y in late) / sxx
+        q = statistics.quantiles(ys, n=10, method="inclusive")
+        out["pa_range"] = q[-1] - q[0]
+    if len(ys) >= win:
+        out["pa_snap"] = max(max(ys[i:i + win]) - min(ys[i:i + win]) for i in range(len(ys) - win + 1))
+    ns = [e[2] for e in series]
+    for i, (_, _, n, iqr) in enumerate(series):
+        prev = [v for v in ns[max(0, i - run_med):i] if v == v]
+        if len(prev) >= 5 and n == n and iqr == iqr \
+                and n < collapse_frac * statistics.median(prev) and iqr > collapse_iqr:
+            out["pa_collapse_n"] += 1
+    return out
+
+
 def parse_log(text: str) -> dict:
     d = {k: float("nan") for k in ("pipeline_fps", "track_fps", "ml_ms", "postinit_fps")}
     d.update(status="", frames=0, keyframes=0, ml_inferences=0,
@@ -191,6 +245,8 @@ def parse_log(text: str) -> dict:
              lc_gate_enabled="", lc_gate_evals=0, lc_gate_fires=0, lc_gate_bypass=0,
              agreement_gate_fire_rate=float("nan"),
              prior_align_n=0, prior_align_s_med=float("nan"), prior_align_s_iqr=float("nan"),
+             pa_kf_n=0, pa_slope=float("nan"), pa_range=float("nan"), pa_snap=float("nan"),
+             pa_collapse_n=0,
              postinit_frames=0, init_thresh="", init_thresh_mode="", init_mode="",
              init_resets=0, founding_fix="", lc_sim3_guard=0)
 
@@ -263,7 +319,8 @@ def parse_log(text: str) -> dict:
     # WP2c: one [PRIOR_ALIGN] line per ML keyframe (s_k = median map/prior depth ratio). G2-d judges the
     # spread of s_k over a run on healthy data: IQR < 0.3 (PLAN.md G2). Kept as columns so the gate
     # threshold can be set from summary.csv without re-reading logs.
-    pa = [float(v) for v in re.findall(r"\[PRIOR_ALIGN\][^\n]*?\bs=(-?[\d.]+)", text)]
+    entries = parse_prior_align(text)
+    pa = [s for _, s, _, _ in entries]
     pa = [v for v in pa if v == v]
     if pa:
         from statistics import median
@@ -271,6 +328,7 @@ def parse_log(text: str) -> dict:
         d["prior_align_n"] = len(pa)
         d["prior_align_s_med"] = median(pa)
         d["prior_align_s_iqr"] = srt[(3 * len(srt)) // 4] - srt[len(srt) // 4]
+    d.update(prior_align_dv7([e for e in entries if e[1] > 0]))
     return d
 
 
