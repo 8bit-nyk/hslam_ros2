@@ -287,3 +287,26 @@ def build(arm: str, spec) -> list[str]:
     if spec.dataset in _NON_SQUARE_PIXEL_DATASETS and "--ml-input-geometry=legacy" not in args:
         args = _apply(args, ["--ml-isotropic-input=true"])
     return args
+
+
+def _main() -> None:
+    """`python3 arms.py --print-cli <dataset> [--arm full]` -> the resolved HSLAM flags, shell-quoted.
+
+    Lets the plain run scripts (hslam_run_*_ml_depth.sh, via hslam_paper_config.sh) use the SAME flag
+    source as the eval pipeline instead of a hand-copied list that drifts. Prints only the arm's
+    flags: --files/--calib/--vocab/--colour/--nogui/--loopclosure stay the caller's business.
+    """
+    import argparse
+    import shlex
+    from types import SimpleNamespace
+
+    ap = argparse.ArgumentParser(description=_main.__doc__)
+    ap.add_argument("--print-cli", metavar="DATASET", required=True,
+                    help="dataset key as in datasets.py: tum, kitti, euroc, iclnuim, tummonovo")
+    ap.add_argument("--arm", default="full", help="default: full = the frozen paper config")
+    a = ap.parse_args()
+    print(shlex.join(build(a.arm, SimpleNamespace(dataset=a.print_cli))))
+
+
+if __name__ == "__main__":
+    _main()

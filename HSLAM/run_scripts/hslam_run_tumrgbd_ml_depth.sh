@@ -9,9 +9,15 @@ HSLAM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Generates trajectory WITH ML depth integration
 ########################
 
-# Configuration
-build_directory_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/build/bin/"
-results_directory="$HOME/Dev/hslam_ros2_ws/src/HSLAM/results"
+# Metric-scale paper configuration (flags from ral_v2/arms.py) + post-run scale check.
+# Without it the ML flags below would run at the wrong scale -- see hslam_paper_config.sh.
+source "$HSLAM_SCRIPT_DIR/hslam_paper_config.sh"
+
+# Configuration. Everything is relative to this checkout (no hardcoded home dir); override the dataset root
+# with HSLAM_DATASETS (default ~/datasets), the same variable the eval pipeline uses.
+HSLAM_ROOT="$(cd "$HSLAM_SCRIPT_DIR/.." && pwd)"
+build_directory_path="${HSLAM_BUILD_DIR:-$HSLAM_ROOT/build}/bin/"   # HSLAM_BUILD_DIR overrides the build tree
+results_directory="$HSLAM_ROOT/results"
 repetitions=1
 
 # Default dataset (can be overridden via command line)
@@ -19,14 +25,14 @@ DEFAULT_DATASET="freiburg1_room"
 DATASET_NAME="${1:-$DEFAULT_DATASET}"
 
 # Dataset paths
-DATASET_BASE="$HOME/datasets/TUM_RGBD"
+DATASET_BASE="${HSLAM_DATASETS:-$HOME/datasets}/TUM_RGBD"
 dataset_path="$DATASET_BASE/rgbd_dataset_$DATASET_NAME"
-calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/run_scripts/camera_freiburg1.txt"
-vocab_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/orbvoc.dbow3"
+calib_path=""  # set in main() from the sequence name: camera_freiburg{1,2,3}.txt, as ral_v2/datasets.py does
+vocab_path="$HSLAM_ROOT/misc/orbvoc.dbow3"
 
 # ML model configuration
-ml_model_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/models/metric3d-vit-small/onnx/model.onnx"
-ml_strategy="keyframe_only"
+ml_model_path="${HSLAM_ML_MODEL:-$HSLAM_ROOT/models/metric3d-vit-small/onnx/model.onnx}"
+# ML flags (cadence, scale, prior) come from hslam_paper_flags in main(); HSLAM_LEGACY_FLAGS=1 = old bare set, NOT metric scale.
 ml_benchmark=""  # Set to non-empty to enable benchmarking
 
 # GPU configuration
@@ -89,7 +95,7 @@ show_help() {
     echo ""
     echo "ML Configuration:"
     echo "  Model: $ml_model_path"
-    echo "  Strategy: $ml_strategy"
+    echo "  Config: paper config from ral_v2/arms.py (metric scale); HSLAM_LEGACY_FLAGS=1 = old flags, NOT metric scale"
     echo "  Input Size: 518x518"
     if [ -n "$ml_gpu_enabled" ]; then
         echo "  Device: GPU (CUDA) - 44ms inference"
@@ -141,7 +147,13 @@ main() {
     print_info "HSLAM ML Depth Mode (WITH Metric3D Integration)"
     print_info "Dataset: $DATASET_NAME"
     print_ml_info "Model: $(basename $ml_model_path)"
-    print_ml_info "Strategy: $ml_strategy"
+    # Resolve the paper-config flags up front so a failure stops before anything runs.
+    hslam_paper_flags tum "$ml_model_path" || exit 1
+    print_ml_info "Config: $HSLAM_CONFIG_NAME"
+    fr=$(echo "$DATASET_NAME" | grep -oE "^freiburg[0-9]")
+    if [ -z "$fr" ]; then print_error "TUM sequence '$DATASET_NAME' must start with freiburgN"; exit 1; fi
+    calib_path="$HSLAM_SCRIPT_DIR/camera_$fr.txt"
+    dataset_path="$DATASET_BASE/rgbd_dataset_$DATASET_NAME"
     print_info "==============================================="
     
     # Check prerequisites
@@ -231,13 +243,10 @@ main() {
         --calib $calib_path \
         --vocab $vocab_path \
         --colour \
-        --ml-depth \
-        --ml-model $ml_model_path \
-        --ml-strategy $ml_strategy"
+        $HSLAM_ARM_FLAGS"
     
     # Add GPU flags if enabled
     if [ -n "$ml_gpu_enabled" ]; then
-        cmd="$cmd --ml-gpu"
         [ -n "$ml_fp16_enabled" ] && cmd="$cmd --ml-fp16"
         [ -n "$ml_gpu_device" ] && cmd="$cmd --ml-gpu-device $ml_gpu_device"
         [ -n "$ml_gpu_memory" ] && cmd="$cmd --ml-gpu-memory $ml_gpu_memory"
@@ -250,9 +259,8 @@ main() {
     [ -n "$end_index" ] && cmd="$cmd --endindex $end_index"
     
     # Add ML init flag based on configuration
-    if [ "$ml_init_enabled" = "true" ]; then
-        cmd="$cmd --ml-init=true"
-    else
+    if [ "$ml_init_enabled" != "true" ]; then
+        print_warning "--no-ml-init: ablation, NOT the metric-scale configuration"
         cmd="$cmd --ml-init=false"
     fi
     
@@ -292,7 +300,7 @@ main() {
         fi
         
         # Check for ML depth utilization
-        if grep -q "ML depth available" "$output_log"; then
+        if grep -qE "ml_inferences=[1-9]" "$output_log"; then
             print_success "✓ ML depth integration: ACTIVE"
         else
             print_warning "⚠ ML depth integration: NOT DETECTED"
@@ -365,6 +373,11 @@ main() {
         fi
     fi
     
+    # Scale check: was this the paper config, and is the Sim(3) scale ~1? (log layer needs nothing extra;
+    # the trajectory layer needs numpy + evo -- it says so and skips if they are missing.)
+    hslam_scale_check tum "$DATASET_NAME" "$destination_directory/trajectory_ml_depth_0.txt" \
+        "$destination_directory/run_log_ml_depth_0.txt"
+
     # Create symlink to latest results
     latest_link="$results_directory/latest-tum-ml-depth"
     ln -sfn "$destination_directory" "$latest_link"

@@ -10,9 +10,15 @@ HSLAM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Based on proven EuRoC ML depth integration script
 ########################
 
-# Configuration
-build_directory_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/build/bin/"
-results_directory="$HOME/Dev/hslam_ros2_ws/src/HSLAM/results"
+# Metric-scale paper configuration (flags from ral_v2/arms.py) + post-run scale check.
+# Without it the ML flags below would run at the wrong scale -- see hslam_paper_config.sh.
+source "$HSLAM_SCRIPT_DIR/hslam_paper_config.sh"
+
+# Configuration. Everything is relative to this checkout (no hardcoded home dir); override the dataset root
+# with HSLAM_DATASETS (default ~/datasets), the same variable the eval pipeline uses.
+HSLAM_ROOT="$(cd "$HSLAM_SCRIPT_DIR/.." && pwd)"
+build_directory_path="${HSLAM_BUILD_DIR:-$HSLAM_ROOT/build}/bin/"   # HSLAM_BUILD_DIR overrides the build tree
+results_directory="$HSLAM_ROOT/results"
 repetitions=1
 
 # Default dataset (can be overridden via command line)
@@ -20,23 +26,23 @@ DEFAULT_DATASET="00"
 DATASET_NUM="${1:-$DEFAULT_DATASET}"
 
 # Dataset paths
-DATASET_BASE="$HOME/datasets/KITTI"
+DATASET_BASE="${HSLAM_DATASETS:-$HOME/datasets}/KITTI"
 dataset_path="$DATASET_BASE/$DATASET_NUM"
-image_path="$dataset_path/image_1"  # RGB images from KITTI
+image_path="$dataset_path/image_2"  # left colour camera (same as the eval pipeline, ral_v2/datasets.py)
 # Select calibration file based on sequence number
 case "$DATASET_NUM" in
-    00|01|02) calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti00-02.txt" ;;
-    03)       calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti03.txt" ;;
-    *)        calib_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/Kitti/Kitti04-12.txt" ;;
+    00|01|02) calib_path="$HSLAM_ROOT/misc/Kitti/Kitti00-02.txt" ;;
+    03)       calib_path="$HSLAM_ROOT/misc/Kitti/Kitti03.txt" ;;
+    *)        calib_path="$HSLAM_ROOT/misc/Kitti/Kitti04-12.txt" ;;
 esac
-vocab_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/misc/orbvoc.dbow3"
+vocab_path="$HSLAM_ROOT/misc/orbvoc.dbow3"
 
 # ML model configuration (same as EuRoC/TUM)
-ml_model_path="$HOME/Dev/hslam_ros2_ws/src/HSLAM/models/metric3d-vit-small/onnx/model.onnx"
+ml_model_path="${HSLAM_ML_MODEL:-$HSLAM_ROOT/models/metric3d-vit-small/onnx/model.onnx}"
 
-# ML Ablation Study Configuration
-ml_strategy="${ML_STRATEGY:-keyframe_only}"  # "keyframe_only" or "snapshot_mode"
-ml_snapshot_rate="${ML_SNAPSHOT_RATE:-5}"    # ML inference every N keyframes (for snapshot_mode)
+# Inference cadence, ML model flags and every scale-critical option come from the paper config
+# (hslam_paper_flags below); the old ML_STRATEGY / ML_SNAPSHOT_RATE ablation knobs are gone. For an
+# ablation use HSLAM_LEGACY_FLAGS=1 (NOT metric scale) or ral_v2/eval_run.py arms.
 ml_benchmark=""  # Set to non-empty to enable benchmarking
 
 # GPU configuration (same as production EuRoC/TUM)
@@ -93,12 +99,12 @@ show_help() {
     echo "  $0 07 --endindex 100         # Process first 100 frames only"
     echo "  $0 07 --benchmark            # Enable ML performance benchmarking"
     echo ""
-    echo "Ablation Study Examples:"
-    echo "  ML_STRATEGY=snapshot_mode ML_SNAPSHOT_RATE=5 $0 07   # ML every 5 keyframes"
-    echo "  ML_STRATEGY=snapshot_mode ML_SNAPSHOT_RATE=10 $0 07  # ML every 10 keyframes"
-    echo "  ML_STRATEGY=keyframe_only $0 07                      # ML at every keyframe (baseline)"
+    echo "This script runs the metric-scale PAPER CONFIG (ral_v2/arms.py) and checks the scale afterwards."
+    echo "  HSLAM_LEGACY_FLAGS=1   old bare flag set, NOT metric scale (ablation use only)"
+    echo "  HSLAM_DATASETS=<dir>   dataset root (default ~/datasets)"
+    echo "  HSLAM_ML_MODEL=<onnx>  override the Metric3D model path"
     echo ""
-    echo "This script generates trajectory WITH ML depth integration (Metric3D)"
+    echo "Trajectory WITH ML depth integration (Metric3D)"
     echo "Results saved in: $results_directory/hslam-kitti-ml-depth-{dataset}-{timestamp}/"
     echo ""
     echo "KITTI Dataset Structure:"
@@ -109,10 +115,6 @@ show_help() {
     echo ""
     echo "ML Configuration:"
     echo "  Model: $ml_model_path"
-    echo "  Strategy: $ml_strategy"
-    if [ "$ml_strategy" = "snapshot_mode" ]; then
-        echo "  Snapshot Rate: Every $ml_snapshot_rate keyframes ($(echo "scale=1; 100.0 / $ml_snapshot_rate" | bc)% coverage)"
-    fi
     echo "  Input Size: 616x1064 (ViT model with aspect ratio preservation)"
     if [ -n "$ml_gpu_enabled" ]; then
         echo "  Device: GPU (CUDA) - 37ms inference"
@@ -174,7 +176,9 @@ main() {
     print_info "HSLAM KITTI ML Depth Mode (WITH Metric3D Integration)"
     print_info "Dataset: KITTI $DATASET_NUM"
     print_ml_info "Model: $(basename $ml_model_path)"
-    print_ml_info "Strategy: $ml_strategy"
+    # Resolve the paper-config flags up front so a failure stops before anything runs.
+    hslam_paper_flags kitti "$ml_model_path" || exit 1
+    print_ml_info "Config: $HSLAM_CONFIG_NAME"
     print_info "==============================================="
     
     # Check prerequisites
@@ -288,14 +292,10 @@ main() {
         --calib $calib_path \
         --vocab $vocab_path \
         --colour \
-        --ml-depth \
-        --ml-model $ml_model_path \
-        --ml-strategy $ml_strategy \
-        --ml-snapshot-interval $ml_snapshot_rate"
+        $HSLAM_ARM_FLAGS"
     
-    # Add GPU flags if enabled
+    # Optional GPU tuning (--ml-gpu itself is part of the paper flags)
     if [ -n "$ml_gpu_enabled" ]; then
-        cmd="$cmd --ml-gpu"
         [ -n "$ml_fp16_enabled" ] && cmd="$cmd --ml-fp16"
         [ -n "$ml_gpu_device" ] && cmd="$cmd --ml-gpu-device $ml_gpu_device"
         [ -n "$ml_gpu_memory" ] && cmd="$cmd --ml-gpu-memory $ml_gpu_memory"
@@ -337,7 +337,7 @@ main() {
         fi
         
         # Check for ML depth utilization
-        if grep -q "ML depth available" "$output_log"; then
+        if grep -qE "ml_inferences=[1-9]" "$output_log"; then
             print_success "✓ ML depth integration: ACTIVE"
         else
             print_warning "⚠ ML depth integration: NOT DETECTED"
@@ -391,6 +391,11 @@ main() {
         fi
     fi
     
+    # Scale check: was this the paper config, and is the Sim(3) scale ~1? (log layer needs nothing extra;
+    # the trajectory layer needs numpy + evo -- it says so and skips if they are missing.)
+    hslam_scale_check kitti "$DATASET_NUM" "$destination_directory/trajectory_ml_depth_0.txt" \
+        "$destination_directory/run_log_ml_depth_0.txt"
+
     # Create symlink to latest results
     latest_link="$results_directory/latest-kitti-ml-depth"
     ln -sfn "$destination_directory" "$latest_link"
